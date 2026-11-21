@@ -12,7 +12,8 @@ Read these files before changing code:
 5. `product/BUILD-PLAN.md`
 6. `product/TEAM.md`
 7. `product/ACCEPTANCE-TESTS.md`
-8. Your role-specific handoff in `handoffs/`
+8. `product/BUILD-WEEK-DAY1.md`
+9. Your role-specific handoff in `handoffs/`
 
 ## Product in one sentence
 
@@ -89,3 +90,8 @@ Before doing work:
 - link the issue in the PR,
 - include how-to-test evidence,
 - do not expand P0.
+
+
+## Build Week continuation
+
+When implementation begins on November 25, always follow `product/BUILD-WEEK-DAY1.md` before starting work. It contains the sponsor creation step, first issue order, cloud resources already prepared, and strict continuation rules for replacement agents.
