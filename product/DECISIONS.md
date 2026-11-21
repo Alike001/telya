@@ -49,4 +49,10 @@ Initial target:
 Move to dedicated workers/services only if the implementation actually requires them.
 
 ## D-014 — Build Week timing
-Substantive implementation begins November 25 unless official organizer guidance explicitly allows earlier building. Preparation before then is allowed.
+Team Bravo voluntarily begins substantive Telya implementation on **November 25, 2026**. Before then, only preparation/setup work is planned.
+
+## D-015 — Target-user interviews are optional pre-build
+Five target-user interviews are not required before Build Week. User feedback may be collected later if practical, but it is not a blocker for implementation.
+
+## D-016 — Smart wallet terminology
+Use the exact term **Stellar Smart Account Kit** for Telya's passkey smart-wallet architecture. Do not conflate it with separate Stellar agent tooling.
