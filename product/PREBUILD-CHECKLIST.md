@@ -2,16 +2,17 @@
 
 Use this checklist before substantive implementation begins.
 
-## 1. Rules and organizer confirmation
+## 1. Build Week boundary and submission readiness
 
-- [ ] Confirm whether substantive feature implementation is allowed before November 25.
-- [ ] Confirm final submission deadline and required submission format.
+Team Bravo has voluntarily chosen **November 25, 2026** as the start of substantive Telya feature implementation.
+
+Before then:
+- [ ] Confirm final submission deadline and required submission format when organizers publish/clarify it.
 - [ ] Confirm judging criteria if a detailed rubric exists.
-- [ ] Confirm whether every teammate must separately submit the main Buildathon form or only the team representative.
-- [ ] Confirm any restrictions on pre-existing code, libraries, templates, or prior prototypes.
-- [ ] Confirm whether public repositories are required by submission time.
+- [ ] Confirm any mandatory public-repository, video, demo, or showcase requirements.
+- [ ] Record confirmed organizer answers in `product/DECISIONS.md`.
 
-Record organizer answers in `product/DECISIONS.md`.
+No feature coding is required before November 25.
 
 ## 2. Team access
 
@@ -24,35 +25,25 @@ Record organizer answers in `product/DECISIONS.md`.
 
 ## 3. Problem validation
 
-Before Build Week, talk to at least 5 target users:
-- freelancer / remote worker,
-- small business owner,
-- stablecoin user,
-- crypto-native user who has bridged before,
-- non-crypto user who receives international payments.
+Formal target-user interviews are **optional, not a Build Week blocker**.
 
-Ask:
-1. How do you currently receive/send digital dollars?
-2. What is the most confusing part?
-3. Have you ever sent to the wrong network/address?
-4. Do gas tokens/bridges stop or delay you?
-5. Would you prefer saying what you want and reviewing a route before execution?
-6. Would visible payment progress make you trust a cross-chain transfer more?
-7. Would you allow an AI agent to spend if you could set a hard limit and revoke it instantly?
-8. What would stop you from using this product?
+Telya will proceed from:
+- the submitted Buildathon problem statement,
+- current Stellar ecosystem capabilities,
+- the validated Agent Pass spike,
+- the consumer-first product thesis already documented in the PRD.
 
-Do not pitch first. Listen for repeated pain.
+If user feedback becomes easy to obtain later, record it as supporting evidence. Do not delay Build Week implementation for it.
 
 ## 4. Competitive differentiation
 
-Document how Telya differs from:
-- ordinary wallets,
-- bridge UIs,
-- payment-handle products,
-- remittance apps,
-- autonomous agent wallets.
+Telya must not present itself as merely:
+- another wallet,
+- another bridge UI,
+- another payment handle,
+- another chatbot.
 
-Telya's current differentiation hypothesis:
+The P0 thesis is:
 - one conversational interface,
 - deterministic routing across Stellar and Base,
 - visible finality and route reasoning,
@@ -60,8 +51,6 @@ Telya's current differentiation hypothesis:
 - Stellar passkey smart account,
 - limited/revocable Agent Pass,
 - fiat-ramp path.
-
-Validate this rather than assuming it is enough.
 
 ## 5. Provider readiness
 
@@ -76,7 +65,7 @@ Prepare accounts/access without shipping product features:
 - [ ] Base Sepolia test ETH available.
 - [ ] Base Sepolia USDC source identified.
 - [ ] Stellar Testnet accounts/funding ready.
-- [ ] Stellar Testnet USDC contract/asset configuration verified.
+- [ ] Stellar Testnet USDC configuration verified.
 - [ ] MoneyGram sandbox access requested/confirmed.
 - [ ] No production/mainnet secrets are required for Build Week.
 
@@ -93,7 +82,7 @@ Each teammate:
 
 ## 7. Demo readiness before coding
 
-Agree on one primary 30-second story:
+Primary 30-second story:
 
 1. User asks to send USDC.
 2. Telya resolves source/destination.
