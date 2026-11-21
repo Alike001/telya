@@ -3,11 +3,18 @@
 This repository is the source of truth for Telya.
 
 Before making changes, read:
-1. `product/PRD.md`
-2. `product/ARCHITECTURE.md`
-3. `product/BUILD-PLAN.md`
-4. `product/TEAM.md`
-5. The handoff for your assigned area.
+1. `product/STATUS.md`
+2. `handoffs/AGENT-HANDOFF.md`
+3. `product/PRD.md`
+4. `product/ARCHITECTURE.md`
+5. `product/DECISIONS.md`
+6. `product/BUILD-PLAN.md`
+7. `product/TEAM.md`
+8. `product/ACCEPTANCE-TESTS.md`
+9. `product/BUILD-WEEK-DAY1.md` when Build Week implementation begins
+10. The handoff for your assigned area.
+
+If these files conflict with an agent's assumptions, the repository files win.
 
 ## Non-negotiable rules
 
@@ -51,3 +58,16 @@ The deterministic payment system must:
 - persist state.
 
 The AI must never bypass those steps.
+
+
+## New-agent safety rule
+
+A replacement AI agent must not invent a new task, restart planning, or broaden scope simply because prior chat context is unavailable.
+
+If the next action is unclear:
+1. read `product/STATUS.md`;
+2. read `product/BUILD-WEEK-DAY1.md`;
+3. inspect open assigned GitHub issues;
+4. continue the highest-priority assigned P0 issue.
+
+Architecture changes require a documented blocker or explicit team decision.
