@@ -5,39 +5,33 @@
 Telya's direction is aligned with current Stellar capabilities and ecosystem activity.
 
 ### Stellar is actively focused on payments and stablecoins
-Stellar's developer platform currently emphasizes tokens, payments, fee sponsorship, ramps, smart accounts, passkeys, delegated authorization, and spending limits.
+Stellar's developer platform emphasizes tokens, payments, fee sponsorship, ramps, smart accounts, passkeys, delegated authorization, and spending limits.
 
 ### Cross-chain USDC is a current Stellar capability
-Circle CCTP recently went live on Stellar, enabling native USDC movement between Stellar and CCTP-enabled networks including Base.
+Circle CCTP is available on Stellar, enabling native USDC movement between Stellar and CCTP-enabled networks including Base.
 
 ### Smart-account UX is a current Stellar direction
-Stellar highlights passkeys, smart wallets, delegated authorization, and spending-limit policies as first-class developer primitives.
+Stellar Smart Account Kit supports passkey-based smart wallets and policy-controlled authorization patterns that align with Telya's Agent Pass thesis.
 
 ### Ramps are a core Stellar product surface
-Stellar's developer materials explicitly position open-access ramps such as MoneyGram as a way to connect applications to local cash and payment methods.
+Stellar's developer ecosystem includes fiat-ramp infrastructure designed to connect applications to real-world cash/payment methods.
 
-### Existing funded/recognized products validate the market
-Recent Stellar ecosystem examples include:
-- products using human-readable payment handles,
-- cross-chain CCTP products,
-- African stablecoin payout/payment products,
-- neobank-style products,
-- passkey consumer wallets.
+### Existing ecosystem products validate the market
+There are already products around payment handles, stablecoin payouts, neobank-like experiences, cross-chain money movement, and passkey wallets.
 
-This is validation that the market is real, but it also means Telya cannot win merely by saying "we send stablecoins."
+This validates the market but also means Telya cannot win merely by saying "we send stablecoins."
 
-## What remains a hypothesis
+## Telya's differentiation hypothesis
 
-We still need direct user evidence for:
-
-1. Users want conversational payment initiation.
-2. Users value route abstraction enough to switch from an existing wallet.
-3. Visible money movement/finality materially increases trust.
-4. Bidirectional Base <-> Stellar routing solves a frequent enough problem.
-5. Users understand and value constrained Agent Pass permissions.
-6. The combined experience is simpler than using a wallet + bridge + ramp separately.
-
-These must be tested with target users before or during Build Week.
+Telya combines:
+- conversational payment intent,
+- deterministic source/destination routing,
+- visible finality,
+- route explanation,
+- exact recipient verification,
+- Stellar passkey smart accounts,
+- bounded/revocable Agent Pass permissions,
+- fiat-ramp paths.
 
 ## The problem Telya should own
 
@@ -66,7 +60,7 @@ Stellar provides:
 - fiat-ramp ecosystem,
 - CCTP interoperability.
 
-The user-facing abstraction should be powered by these primitives.
+The user-facing abstraction is powered by these primitives.
 
 ## Competitive risk
 
@@ -84,13 +78,8 @@ Buildathon P0 must prove one coherent thesis:
 
 **A user can tell Telya what payment outcome they want, safely review the route, execute it across Stellar/Base when needed, watch real finality, and optionally delegate bounded Stellar spending to an agent.**
 
-## Validation success criteria
+## Direct user validation
 
-Before Build Week ends, we want evidence that:
-- at least 5 target users understand the problem without explanation,
-- at least 3 say current chain/bridge/gas flows are frustrating or confusing,
-- at least 3 prefer the proposed review + visible-progress interaction,
-- at least 2 find bounded Agent Pass meaningfully safer than unrestricted wallet access,
-- no repeated feedback reveals a fatal misunderstanding in the core flow.
+Direct target-user interviews are useful but not required before Build Week.
 
-Record interview notes without personal/sensitive data.
+If easy opportunities arise later, record anonymized feedback. Do not delay the frozen Buildathon implementation plan waiting for interviews.
