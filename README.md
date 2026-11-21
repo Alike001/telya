@@ -62,16 +62,23 @@ Completion requires destination finality plus recipient and amount verification.
 
 ## Documentation
 
-Start here:
+If you are a developer or AI agent joining the project, start here:
+
+- [Current project status](product/STATUS.md)
+- [Universal agent handoff](handoffs/AGENT-HANDOFF.md)
 - [Product requirements](product/PRD.md)
 - [Architecture](product/ARCHITECTURE.md)
 - [Build plan](product/BUILD-PLAN.md)
 - [Acceptance tests](product/ACCEPTANCE-TESTS.md)
 - [Team responsibilities](product/TEAM.md)
+- [Decision log](product/DECISIONS.md)
+- [Roadmap](product/ROADMAP.md)
 - [Agent operating rules](AGENTS.md)
 
 ## Development status
 
-Foundation planning is being converted into the repository before Build Week so all three contributors and their coding agents work from the same source of truth.
+Foundation planning is complete and stored in the repository so all three contributors and their coding agents work from the same source of truth.
+
+Build Week begins November 25, 2026. Until then, keep work to preparation, accounts, documentation, deployment plumbing, and Testnet setup unless organizers explicitly permit earlier substantive feature implementation.
 
 Feature implementation begins from the shared contracts and acceptance criteria defined in this repository.
