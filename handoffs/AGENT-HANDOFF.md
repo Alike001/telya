@@ -12,8 +12,9 @@ Read these files before changing code:
 5. `product/BUILD-PLAN.md`
 6. `product/TEAM.md`
 7. `product/ACCEPTANCE-TESTS.md`
-8. `product/BUILD-WEEK-DAY1.md`
-9. Your role-specific handoff in `handoffs/`
+8. `product/SETLORA-LESSONS.md`
+9. `product/BUILD-WEEK-DAY1.md`
+10. Your role-specific handoff in `handoffs/`
 
 ## Product in one sentence
 
@@ -95,3 +96,8 @@ Before doing work:
 ## Build Week continuation
 
 When implementation begins on November 25, always follow `product/BUILD-WEEK-DAY1.md` before starting work. It contains the sponsor creation step, first issue order, cloud resources already prepared, and strict continuation rules for replacement agents.
+
+
+## Setlora feedback continuity
+
+Before judging/demo work, read `product/SETLORA-LESSONS.md`. The key lesson is to prove one complete user outcome with real evidence, failure/recovery handling, and a clear judge story rather than presenting Telya as a list of integrations. The frozen MVP remains unchanged.
