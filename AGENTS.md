@@ -11,8 +11,9 @@ Before making changes, read:
 6. `product/BUILD-PLAN.md`
 7. `product/TEAM.md`
 8. `product/ACCEPTANCE-TESTS.md`
-9. `product/BUILD-WEEK-DAY1.md` when Build Week implementation begins
-10. The handoff for your assigned area.
+9. `product/SETLORA-LESSONS.md`
+10. `product/BUILD-WEEK-DAY1.md` when Build Week implementation begins
+11. The handoff for your assigned area.
 
 If these files conflict with an agent's assumptions, the repository files win.
 
@@ -71,3 +72,8 @@ If the next action is unclear:
 4. continue the highest-priority assigned P0 issue.
 
 Architecture changes require a documented blocker or explicit team decision.
+
+
+## Hackathon execution lesson
+
+Read `product/SETLORA-LESSONS.md` before Build Week execution. It preserves judging lessons from a previous hackathon and changes prioritization/evidence strategy only. It does **not** remove or alter the frozen Telya P0 scope.
