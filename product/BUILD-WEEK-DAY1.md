@@ -4,7 +4,7 @@
 
 **Build Week implementation start:** November 25, 2026.
 
-Do not improvise a new product direction. Do not restart architecture. Do not replace previously selected rails without an explicit, documented blocker.
+Do not improvise a new product direction. Do not restart architecture. Do not replace previously selected rails without an explicit, documented blocker. Apply `product/SETLORA-LESSONS.md` as execution/judging guidance only; the frozen P0 remains intact.
 
 ## Step 0 — Read before touching code
 
@@ -19,8 +19,9 @@ Read in this exact order:
 7. `product/BUILD-PLAN.md`
 8. `product/TEAM.md`
 9. `product/ACCEPTANCE-TESTS.md`
-10. the role-specific handoff in `handoffs/`
-11. this file
+10. `product/SETLORA-LESSONS.md`
+11. the role-specific handoff in `handoffs/`
+12. this file
 
 Then inspect open GitHub issues and work only from the assigned P0 issue list.
 
