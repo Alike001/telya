@@ -5,7 +5,7 @@ import {
   type CreateWalletResult,
   type TransactionResult,
 } from "smart-account-kit";
-import { StrKey } from "@stellar/stellar-sdk";
+import { Networks, StrKey } from "@stellar/stellar-sdk";
 
 const TelyaSmartAccount = {
   appName: "Telya",
@@ -29,6 +29,7 @@ export interface SmartAccountPublicConfig {
 export interface ConnectedSmartAccount {
   readonly contractId: string;
   readonly credentialId: string;
+  readonly deploymentTransactionHash?: string;
 }
 
 export interface SmartAccountLifecycleKit {
@@ -82,6 +83,28 @@ function requirePublicValue(value: string, label: string): string {
 export function validateSmartAccountPublicConfig(
   config: SmartAccountPublicConfig,
 ): SmartAccountPublicConfig {
+  if (config.networkPassphrase !== Networks.TESTNET) {
+    throw new SmartAccountLifecycleError(
+      "INVALID_PUBLIC_CONFIG",
+      "Telya wallet onboarding is restricted to Stellar Testnet",
+    );
+  }
+
+  let rpcUrl: URL;
+  try {
+    rpcUrl = new URL(requirePublicValue(config.rpcUrl, "rpcUrl"));
+  } catch {
+    throw new SmartAccountLifecycleError(
+      "INVALID_PUBLIC_CONFIG",
+      "rpcUrl must be a valid URL",
+    );
+  }
+  if (rpcUrl.protocol !== "https:" || rpcUrl.username || rpcUrl.password) {
+    throw new SmartAccountLifecycleError(
+      "INVALID_PUBLIC_CONFIG",
+      "rpcUrl must be a credential-free HTTPS URL",
+    );
+  }
   const accountWasmHash = requirePublicValue(
     config.accountWasmHash,
     "accountWasmHash",
@@ -111,7 +134,7 @@ export function validateSmartAccountPublicConfig(
   );
 
   return {
-    rpcUrl: requirePublicValue(config.rpcUrl, "rpcUrl"),
+    rpcUrl: rpcUrl.toString().replace(/\/$/, ""),
     networkPassphrase: requirePublicValue(
       config.networkPassphrase,
       "networkPassphrase",
@@ -207,7 +230,12 @@ export async function createSmartAccount(
     );
   }
 
-  return accountFromResult(result);
+  return {
+    ...accountFromResult(result),
+    ...(result.submitResult.hash
+      ? { deploymentTransactionHash: result.submitResult.hash }
+      : {}),
+  };
 }
 
 export async function disconnectSmartAccount(

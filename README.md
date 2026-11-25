@@ -14,7 +14,7 @@ route preview, but never displays a fake completed transaction.
 
 Local development:
 
-Node.js 20.9 or newer and pnpm 11 are required.
+Node.js 22 or newer and pnpm 11 are required.
 
 ```bash
 pnpm install
@@ -24,6 +24,26 @@ pnpm dev
 Open `http://localhost:3000`. The readiness endpoint is available at
 `http://localhost:3000/api/health`; it returns HTTP `200` only when the app can
 reach Neon and HTTP `503` with a sanitized `degraded` response otherwise.
+
+Stellar passkey account flow:
+
+1. Configure the public Stellar Testnet values from `.env.example` and keep
+   `STELLAR_FEE_SPONSOR_SECRET` server-only. Never use a `NEXT_PUBLIC_*` name for
+   the sponsor secret.
+2. Apply the database migrations with the direct Neon connection so relayer
+   reservations and rate limits fail closed: `pnpm db:migrate`.
+3. Open the passkey account panel on `http://localhost:3000` (localhost is a
+   valid WebAuthn secure context), enter a passkey label, and create the account.
+4. Verify that the resulting contract and deployment transaction links open on
+   Stellar Expert Testnet.
+5. Refresh the page and verify the same contract restores silently.
+6. Sign out on this browser, choose **Reconnect existing account**, complete the
+   passkey prompt, and verify the same contract reconnects.
+
+The UI reports deployment as connected only after the relayer returns a real
+transaction hash and Smart Account Kit verifies the confirmed deployment. A
+relayer, network, or on-chain failure remains visible as a failure and is never
+presented as account creation success.
 
 Runtime behavior:
 
