@@ -19,6 +19,13 @@ async function migrate(): Promise<void> {
   await sql.transaction((tx) => [
     tx`SELECT pg_advisory_xact_lock(74656, 109)`,
     tx.query(`
+      CREATE TABLE IF NOT EXISTS schema_migrations (
+        name text PRIMARY KEY,
+        checksum text NOT NULL,
+        applied_at timestamptz NOT NULL DEFAULT now()
+      )
+    `),
+    tx.query(`
       CREATE TABLE IF NOT EXISTS stellar_relayer_requests (
         request_hash text PRIMARY KEY CHECK (request_hash ~ '^[0-9a-f]{64}$'),
         client_key_hash text NOT NULL CHECK (client_key_hash ~ '^[0-9a-f]{64}$'),
