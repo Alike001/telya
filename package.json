@@ -8,7 +8,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "build": "next build",
+    "build": "tsc --project tsconfig.server.json && node dist/scripts/reconcile-migration-ledger-http.js && next build",
     "dev": "next dev",
     "start": "next start",
     "test": "vitest run",
