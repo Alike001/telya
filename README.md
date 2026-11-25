@@ -87,6 +87,33 @@ owner-passkey-authorized `CallContract` rule for the configured USDC contract,
 one configured Ed25519 verifier signer, one configured spending-limit policy,
 and owner-authorized removal of a recorded Agent Pass rule are sponsored.
 
+Stellar CCTP integration checks:
+
+1. Apply migrations `0006_stellar_cctp.sql` and
+   `0007_stellar_cctp_recovery.sql`, then confirm
+   `GET /api/stellar/cctp/config` returns the configured Stellar Testnet CCTP
+   domains and public contract addresses without any secret.
+2. For Stellar → Base, use the trusted fee quote to pass the source burn amount
+   (recipient amount plus Circle fee) and maximum fee to
+   `submitStellarCctpBurn`. Verify the passkey signs an exact Standard-finality
+   `deposit_for_burn` and `reconcileStellarCctpSource` records only
+   `source_confirmed`.
+3. Let the Issue #16 coordinator fetch the Circle message and attestation from
+   that source hash, mint on Base, then verify the final Base recipient and
+   amount before completion.
+4. For Base → Stellar, pass the confirmed Base source hash and Circle's message
+   and attestation to `settleBaseToStellarCctp`. Verify the durable timeline
+   reaches `destination_submitted`, `destination_confirmed`,
+   `recipient_verified`, then `completed`.
+5. Repeat the same destination call and verify it reuses/reconciles the stored
+   signed envelope and transaction hash rather than creating another mint.
+   Let a submission lease expire before and after envelope persistence to prove
+   crash recovery. Change the message, attestation, recipient, or amount and
+   verify the operation fails closed.
+
+Do not check off the cross-chain acceptance tests until both directions have
+real Base Sepolia, Circle sandbox, and Stellar Testnet transaction evidence.
+
 Runtime behavior:
 
 - local and preview environments use Testnet configuration;

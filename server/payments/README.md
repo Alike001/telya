@@ -27,6 +27,30 @@ Payment creation requires an existing user message ID from the owned conversatio
 
 The created payment stays in `awaiting_confirmation`; confirmation records user consent and an event but does not submit or sign a transaction. The later execution integration must recheck current balance, fee quote, wallet state, and idempotency before submission. Chain execution and finality verification are outside this handler and must use the existing payment completion invariant.
 
+## Stellar / Circle CCTP integration seam
+
+Issue #12 exposes the Stellar half without replacing Issue #16's Base/Circle
+coordinator:
+
+- `submitStellarCctpBurn` creates the owner-authorized Stellar `deposit_for_burn`
+  call for Base domain `6` with Standard finality `2000`. The relayer allowlists
+  the exact token messenger, Stellar USDC contract, recipient, amount, and fee.
+- `reconcileStellarCctpSource` verifies the finalized transaction envelope and
+  persists only `source_confirmed`. It never completes the payment.
+- Issue #16 obtains the Circle message/attestation from that source transaction
+  and passes attested bytes to `settleBaseToStellarCctp` for the reverse route.
+- `settleBaseToStellarCctp` reserves the Circle message idempotently, prepares
+  and durably stores the signed `mint_and_forward` envelope and hash before
+  broadcast, verifies Stellar finality plus the exact USDC transfer event, and
+  only then writes `destination_confirmed`, `recipient_verified`, and
+  `completed` PaymentEvents.
+
+`stellar_cctp_operations` is the durable reconciliation record. Reusing a
+payment with different source/message/attestation evidence fails closed, and a
+second worker does not create a different destination operation. A stale worker
+lease can replay only the exact persisted transaction hash; a legacy hashless
+reservation is failed for manual reconciliation instead of being resubmitted.
+
 ## Example request
 
 ```http

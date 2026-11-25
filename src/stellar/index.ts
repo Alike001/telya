@@ -24,6 +24,30 @@ export {
 } from "./usdc";
 
 export {
+  CCTP_BASE_DOMAIN,
+  CCTP_STANDARD_FINALITY_THRESHOLD,
+  CCTP_STELLAR_DOMAIN,
+  StellarCctpError,
+  buildMintAndForwardOperation,
+  buildMintAndForwardTransaction,
+  bytes32ToEvmAddress,
+  evmAddressToBytes32,
+  prepareStellarCctpBurn,
+  stellarCctpConfigFromEnvironment,
+  submitStellarCctpBurn,
+  validateStellarCctpConfig,
+  verifyBaseToStellarDestination,
+  verifyStellarCctpBurn,
+} from "./cctp";
+
+export type {
+  PreparedStellarCctpBurn,
+  StellarCctpBurnIntent,
+  StellarCctpConfig,
+  StellarCctpSourceKit,
+} from "./cctp";
+
+export {
   AGENT_PASS_DURATION_LEDGERS,
   OWNER_CONTEXT_RULE_ID,
   AgentPassError,
