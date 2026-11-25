@@ -155,6 +155,7 @@ Completion requires destination finality plus recipient and amount verification.
 If you are a developer or AI agent joining the project, start here:
 
 - [Current project status](product/STATUS.md)
+- [Judging and grant readiness baseline](product/JUDGING-AND-GRANT-READINESS.md)
 - [Universal agent handoff](handoffs/AGENT-HANDOFF.md)
 - [Product requirements](product/PRD.md)
 - [Architecture](product/ARCHITECTURE.md)
