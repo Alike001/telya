@@ -8,7 +8,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "build": "pnpm db:migrate && next build",
+    "build": "next build",
     "dev": "next dev",
     "start": "next start",
     "test": "vitest run",
