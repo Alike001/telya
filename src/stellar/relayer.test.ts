@@ -14,14 +14,52 @@ import {
   StellarRelayerError,
   parseStellarRelayerRequest,
   validateStellarDeploymentSubmission,
+  validateStellarAgentPassSubmission,
   validateStellarUsdcTransferSubmission,
 } from "./relayer";
 
 const accountWasmHash = Buffer.alloc(32, 3).toString("hex");
 const webauthnVerifierAddress = StrKey.encodeContract(Buffer.alloc(32, 1));
+const ed25519VerifierAddress = StrKey.encodeContract(Buffer.alloc(32, 2));
+const spendingLimitPolicyAddress = StrKey.encodeContract(Buffer.alloc(32, 3));
 const usdcContract = StrKey.encodeContract(Buffer.alloc(32, 5));
 const smartAccount = StrKey.encodeContract(Buffer.alloc(32, 6));
 const recipient = Keypair.random().publicKey();
+
+function externalSigner(verifier: string, keyData: Buffer): xdr.ScVal {
+  return xdr.ScVal.scvVec([
+    xdr.ScVal.scvSymbol("External"),
+    xdr.ScVal.scvAddress(Address.fromString(verifier).toScAddress()),
+    xdr.ScVal.scvBytes(keyData),
+  ]);
+}
+
+function authPayload(input: {
+  readonly verifier?: string;
+  readonly keyData?: Buffer;
+  readonly contextRuleId?: number;
+} = {}): xdr.ScVal {
+  return xdr.ScVal.scvMap([
+    new xdr.ScMapEntry({
+      key: xdr.ScVal.scvSymbol("context_rule_ids"),
+      val: xdr.ScVal.scvVec([
+        xdr.ScVal.scvU32(input.contextRuleId ?? 0),
+      ]),
+    }),
+    new xdr.ScMapEntry({
+      key: xdr.ScVal.scvSymbol("signers"),
+      val: xdr.ScVal.scvMap([
+        new xdr.ScMapEntry({
+          key: externalSigner(
+            input.verifier ?? webauthnVerifierAddress,
+            input.keyData ?? Buffer.concat([Buffer.from([0x04]), Buffer.alloc(80, 7)]),
+          ),
+          val: xdr.ScVal.scvBytes(Buffer.alloc(64, 8)),
+        }),
+      ]),
+    }),
+  ]);
+}
 
 function deploymentSubmission(overrides: { wasmByte?: number; verifier?: string } = {}) {
   const deployer = Keypair.fromRawEd25519Seed(
@@ -97,7 +135,7 @@ function transferSubmission(overrides: {
       nonce: xdr.Int64.fromString("1"),
       signatureExpirationLedger: 500,
       signature:
-        overrides.signature ?? xdr.ScVal.scvVec([xdr.ScVal.scvBytes(Buffer.alloc(64, 8))]),
+        overrides.signature ?? authPayload(),
     }),
   );
   const auth = new xdr.SorobanAuthorizationEntry({
@@ -158,6 +196,8 @@ describe("Stellar USDC relayer boundary", () => {
     expect(
       validateStellarUsdcTransferSubmission(transferSubmission(), {
         usdcContract,
+        webauthnVerifierAddress,
+        ed25519VerifierAddress,
       }),
     ).toMatchObject({
       kind: "usdc_transfer",
@@ -174,7 +214,7 @@ describe("Stellar USDC relayer boundary", () => {
         transferSubmission({
           tokenContract: StrKey.encodeContract(Buffer.alloc(32, 9)),
         }),
-        { usdcContract },
+        { usdcContract, webauthnVerifierAddress, ed25519VerifierAddress },
       ),
     ).toThrow("not the allowlisted Testnet USDC contract");
   });
@@ -185,7 +225,7 @@ describe("Stellar USDC relayer boundary", () => {
         transferSubmission({
           authorizedSender: StrKey.encodeContract(Buffer.alloc(32, 7)),
         }),
-        { usdcContract },
+        { usdcContract, webauthnVerifierAddress, ed25519VerifierAddress },
       ),
     ).toThrow("authorization does not exactly match");
   });
@@ -194,17 +234,154 @@ describe("Stellar USDC relayer boundary", () => {
     expect(() =>
       validateStellarUsdcTransferSubmission(
         transferSubmission({ signature: xdr.ScVal.scvVoid() }),
-        { usdcContract },
+        { usdcContract, webauthnVerifierAddress, ed25519VerifierAddress },
       ),
-    ).toThrow("authorization does not exactly match");
+    ).toThrow("authorization payload is invalid");
   });
 
   it("rejects arbitrary contract methods", () => {
     expect(() =>
       validateStellarUsdcTransferSubmission(
         transferSubmission({ functionName: "approve" }),
-        { usdcContract },
+        { usdcContract, webauthnVerifierAddress, ed25519VerifierAddress },
       ),
     ).toThrow("Only the USDC transfer function is accepted");
+  });
+
+  it("accepts an Ed25519 Agent Pass signer on a non-owner context rule", () => {
+    expect(
+      validateStellarUsdcTransferSubmission(
+        transferSubmission({
+          signature: authPayload({
+            verifier: ed25519VerifierAddress,
+            keyData: Buffer.alloc(32, 6),
+            contextRuleId: 2,
+          }),
+        }),
+        { usdcContract, webauthnVerifierAddress, ed25519VerifierAddress },
+      ),
+    ).toMatchObject({
+      authorizationKind: "agent",
+      contextRuleId: 2,
+      signerAddress: StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 6)),
+    });
+  });
+});
+
+function agentPassSubmission(functionName: "add_context_rule" | "remove_context_rule") {
+  const agentKey = Buffer.alloc(32, 6);
+  const args = functionName === "remove_context_rule"
+    ? [xdr.ScVal.scvU32(2)]
+    : [
+        xdr.ScVal.scvVec([
+          xdr.ScVal.scvSymbol("CallContract"),
+          xdr.ScVal.scvAddress(Address.fromString(usdcContract).toScAddress()),
+        ]),
+        xdr.ScVal.scvString("Telya Agent Pass"),
+        xdr.ScVal.scvU32(10_000),
+        xdr.ScVal.scvVec([externalSigner(ed25519VerifierAddress, agentKey)]),
+        xdr.ScVal.scvMap([
+          new xdr.ScMapEntry({
+            key: xdr.ScVal.scvAddress(
+              Address.fromString(spendingLimitPolicyAddress).toScAddress(),
+            ),
+            val: xdr.ScVal.scvMap([
+              new xdr.ScMapEntry({
+                key: xdr.ScVal.scvSymbol("period_ledgers"),
+                val: xdr.ScVal.scvU32(720),
+              }),
+              new xdr.ScMapEntry({
+                key: xdr.ScVal.scvSymbol("spending_limit"),
+                val: nativeToScVal(50_000_000n, { type: "i128" }),
+              }),
+            ]),
+          }),
+        ]),
+      ];
+  const invoke = new xdr.InvokeContractArgs({
+    contractAddress: Address.fromString(smartAccount).toScAddress(),
+    functionName,
+    args,
+  });
+  const credentials = xdr.SorobanCredentials.sorobanCredentialsAddress(
+    new xdr.SorobanAddressCredentials({
+      address: Address.fromString(smartAccount).toScAddress(),
+      nonce: xdr.Int64.fromString("2"),
+      signatureExpirationLedger: 500,
+      signature: authPayload(),
+    }),
+  );
+  const auth = new xdr.SorobanAuthorizationEntry({
+    credentials,
+    rootInvocation: new xdr.SorobanAuthorizedInvocation({
+      function: xdr.SorobanAuthorizedFunction.sorobanAuthorizedFunctionTypeContractFn(invoke),
+      subInvocations: [],
+    }),
+  });
+  return {
+    func: xdr.HostFunction.hostFunctionTypeInvokeContract(invoke).toXDR("base64"),
+    auth: [auth.toXDR("base64")],
+  };
+}
+
+describe("Stellar Agent Pass relayer boundary", () => {
+  const options = {
+    usdcContract,
+    webauthnVerifierAddress,
+    ed25519VerifierAddress,
+    spendingLimitPolicyAddress,
+  };
+
+  it("accepts only an owner-authorized USDC rule with the spending policy", () => {
+    expect(
+      validateStellarAgentPassSubmission(
+        agentPassSubmission("add_context_rule"),
+        options,
+      ),
+    ).toMatchObject({
+      kind: "agent_pass_create",
+      smartAccount,
+      agentAddress: StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 6)),
+      spendingLimitRaw: 50_000_000n,
+      periodLedgers: 720,
+      validUntilLedger: 10_000,
+    });
+  });
+
+  it("accepts owner revocation only for a non-owner rule", () => {
+    expect(
+      validateStellarAgentPassSubmission(
+        agentPassSubmission("remove_context_rule"),
+        options,
+      ),
+    ).toMatchObject({
+      kind: "agent_pass_revoke",
+      smartAccount,
+      contextRuleId: 2,
+    });
+  });
+
+  it("rejects an Agent Pass scoped to any other token contract", () => {
+    expect(() =>
+      validateStellarAgentPassSubmission(
+        agentPassSubmission("add_context_rule"),
+        {
+          ...options,
+          usdcContract: StrKey.encodeContract(Buffer.alloc(32, 20)),
+        },
+      ),
+    ).toThrow("must be scoped to the configured Testnet USDC contract");
+  });
+
+  it("rejects an Agent Pass using a non-allowlisted signer verifier", () => {
+    expect(() =>
+      validateStellarAgentPassSubmission(
+        agentPassSubmission("add_context_rule"),
+        {
+          ...options,
+          ed25519VerifierAddress: StrKey.encodeContract(Buffer.alloc(32, 21)),
+        },
+      ),
+    ).toThrow("allowlisted Ed25519 signer");
   });
 });

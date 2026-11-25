@@ -1,6 +1,7 @@
 import "server-only";
 
 import {
+  agentPassRuleIdFromReturnValue,
   parseStellarRelayerRequest,
   StellarRelayerError,
   submitStellarRelayerTransaction,
@@ -11,10 +12,15 @@ import {
   verifyStellarUsdcTransfer,
 } from "../../../../stellar/usdc";
 import {
+  assertActiveAgentPassForTransfer,
+  completeStellarAgentPassCreation,
+  completeStellarAgentPassRevocation,
   completeStellarUsdcTransferRequest,
   completeStellarRelayerRequest,
+  recordStellarAgentPassAuthorization,
   recordStellarUsdcTransferAuthorization,
   recordStellarUsdcTransferSubmission,
+  recordVerifiedAgentPassSpend,
   reserveStellarRelayerRequest,
   stellarRelayerRequestIdentity,
 } from "../../../../server/stellar-relayer-requests";
@@ -55,6 +61,9 @@ export async function POST(request: Request): Promise<Response> {
   let submittedTransfer:
     | { readonly transactionHash: string; readonly ledger: number }
     | undefined;
+  let submittedOperation:
+    | { readonly transactionHash: string; readonly ledger: number }
+    | undefined;
   try {
     const contentLength = Number(request.headers.get("content-length") ?? 0);
     if (!Number.isSafeInteger(contentLength) || contentLength > 48_000) {
@@ -76,6 +85,9 @@ export async function POST(request: Request): Promise<Response> {
     const validated = validateStellarRelayerSubmission(submission, {
       accountWasmHash: process.env.STELLAR_ACCOUNT_WASM_HASH?.toLowerCase() ?? "",
       webauthnVerifierAddress: process.env.STELLAR_WEBAUTHN_VERIFIER ?? "",
+      ed25519VerifierAddress: process.env.STELLAR_ED25519_VERIFIER ?? "",
+      spendingLimitPolicyAddress:
+        process.env.STELLAR_SPENDING_LIMIT_POLICY ?? "",
       usdcContract: process.env.STELLAR_USDC_SAC ?? "",
     });
     const forwardedFor = request.headers
@@ -115,9 +127,20 @@ export async function POST(request: Request): Promise<Response> {
     }
     reservedRequestHash = identity.requestHash;
     if (validated.kind === "usdc_transfer") {
+      await assertActiveAgentPassForTransfer(validated);
       await recordStellarUsdcTransferAuthorization(identity.requestHash, validated);
     }
+    if (
+      validated.kind === "agent_pass_create" ||
+      validated.kind === "agent_pass_revoke"
+    ) {
+      await recordStellarAgentPassAuthorization(identity.requestHash, validated);
+    }
     const result = await submitStellarRelayerTransaction(validated);
+    submittedOperation = {
+      transactionHash: result.hash,
+      ledger: result.ledger,
+    };
     if (validated.kind === "usdc_transfer") {
       submittedTransfer = {
         transactionHash: result.hash,
@@ -148,6 +171,18 @@ export async function POST(request: Request): Promise<Response> {
         recipient: verification.recipient,
         amountRaw: validated.amountRaw,
       });
+      await recordVerifiedAgentPassSpend(validated, result.hash);
+    } else if (validated.kind === "agent_pass_create") {
+      await completeStellarAgentPassCreation(identity.requestHash, validated, {
+        transactionHash: result.hash,
+        ruleId: agentPassRuleIdFromReturnValue(result.returnValue),
+      });
+    } else if (validated.kind === "agent_pass_revoke") {
+      await completeStellarAgentPassRevocation(
+        identity.requestHash,
+        validated,
+        result.hash,
+      );
     } else {
       await completeStellarRelayerRequest(identity.requestHash, {
         status: "succeeded",
@@ -159,7 +194,7 @@ export async function POST(request: Request): Promise<Response> {
       { headers: { "cache-control": "no-store" } },
     );
   } catch (error) {
-    if (reservedRequestHash) {
+    if (reservedRequestHash && !submittedOperation) {
       const failureCode =
         error instanceof StellarRelayerError ? error.code : "RELAYER_UNAVAILABLE";
       try {
@@ -172,14 +207,14 @@ export async function POST(request: Request): Promise<Response> {
         // fails closed and can be reconciled by an operator.
       }
     }
-    if (submittedTransfer) {
+    if (submittedOperation) {
       // The on-chain operation already finalized. Return its hash so the SDK
       // and UI can reconcile chain state, while the durable receipt remains
       // failed instead of claiming unverified completion.
       return Response.json(
         {
           success: true,
-          hash: submittedTransfer.transactionHash,
+          hash: submittedOperation.transactionHash,
           status: "SUCCESS",
         },
         { headers: { "cache-control": "no-store" } },

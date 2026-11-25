@@ -56,11 +56,44 @@ export interface ValidatedStellarUsdcTransfer {
   readonly sender: string;
   readonly recipient: string;
   readonly amountRaw: bigint;
+  readonly authorizationKind: "owner" | "agent";
+  readonly contextRuleId: number;
+  readonly signerAddress: string;
+}
+
+export interface ValidatedStellarAgentPassCreate {
+  readonly kind: "agent_pass_create";
+  readonly func: xdr.HostFunction;
+  readonly auth: readonly xdr.SorobanAuthorizationEntry[];
+  readonly smartAccount: string;
+  readonly agentAddress: string;
+  readonly agentPublicKey: string;
+  readonly tokenContract: string;
+  readonly spendingLimitPolicy: string;
+  readonly spendingLimitRaw: bigint;
+  readonly periodLedgers: number;
+  readonly validUntilLedger: number;
+}
+
+export interface ValidatedStellarAgentPassRevoke {
+  readonly kind: "agent_pass_revoke";
+  readonly func: xdr.HostFunction;
+  readonly auth: readonly xdr.SorobanAuthorizationEntry[];
+  readonly smartAccount: string;
+  readonly contextRuleId: number;
 }
 
 export type ValidatedStellarRelayerSubmission =
   | ValidatedStellarDeployment
-  | ValidatedStellarUsdcTransfer;
+  | ValidatedStellarUsdcTransfer
+  | ValidatedStellarAgentPassCreate
+  | ValidatedStellarAgentPassRevoke;
+
+interface SmartAccountAuthorization {
+  readonly contextRuleId: number;
+  readonly verifierAddress: string;
+  readonly keyData: Buffer;
+}
 
 function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
   return left.length === right.length && left.every((byte, index) => byte === right[index]);
@@ -267,6 +300,324 @@ function requireTransferAddress(value: xdr.ScVal, label: string): string {
   return addressOf(value.address(), `${label} must be a Stellar address`);
 }
 
+function requireSmartAccountAuthorization(
+  entry: xdr.SorobanAuthorizationEntry,
+  invoke: xdr.InvokeContractArgs,
+  expectedAccount: string,
+): SmartAccountAuthorization {
+  if (entry.credentials().switch().name !== "sorobanCredentialsAddress") {
+    throw new StellarRelayerError(
+      "FORBIDDEN_DEPLOYMENT",
+      "Operation requires smart-account address credentials",
+      403,
+    );
+  }
+  const credentials = entry.credentials().address();
+  const credentialAddress = addressOf(
+    credentials.address(),
+    "Operation credential address is invalid",
+  );
+  const root = entry.rootInvocation();
+  const rootFunction = root.function();
+  if (
+    credentialAddress !== expectedAccount ||
+    credentials.signatureExpirationLedger() <= 0 ||
+    root.subInvocations().length !== 0 ||
+    rootFunction.switch().name !== "sorobanAuthorizedFunctionTypeContractFn" ||
+    !bytesEqual(rootFunction.contractFn().toXDR(), invoke.toXDR())
+  ) {
+    throw new StellarRelayerError(
+      "FORBIDDEN_DEPLOYMENT",
+      "Operation authorization does not exactly match the invocation",
+      403,
+    );
+  }
+
+  const signature = credentials.signature();
+  if (signature.switch().name !== "scvMap") {
+    throw new StellarRelayerError(
+      "FORBIDDEN_DEPLOYMENT",
+      "Operation authorization payload is invalid",
+      403,
+    );
+  }
+  let contextRuleIds: readonly xdr.ScVal[] | undefined;
+  let signers: readonly xdr.ScMapEntry[] | undefined;
+  for (const item of signature.map() ?? []) {
+    if (item.key().switch().name !== "scvSymbol") continue;
+    const field = item.key().sym().toString();
+    if (field === "context_rule_ids" && item.val().switch().name === "scvVec") {
+      contextRuleIds = item.val().vec() ?? [];
+    }
+    if (field === "signers" && item.val().switch().name === "scvMap") {
+      signers = item.val().map() ?? [];
+    }
+  }
+  if (
+    contextRuleIds?.length !== 1 ||
+    contextRuleIds[0]?.switch().name !== "scvU32" ||
+    signers?.length !== 1
+  ) {
+    throw new StellarRelayerError(
+      "FORBIDDEN_DEPLOYMENT",
+      "Operation must use exactly one context rule and signer",
+      403,
+    );
+  }
+  const signer = signers[0]!;
+  const encodedSigner = signer.key();
+  const signerParts =
+    encodedSigner.switch().name === "scvVec" ? encodedSigner.vec() ?? [] : [];
+  if (
+    signerParts.length !== 3 ||
+    signerParts[0]?.switch().name !== "scvSymbol" ||
+    signerParts[0].sym().toString() !== "External" ||
+    signerParts[1]?.switch().name !== "scvAddress" ||
+    signerParts[2]?.switch().name !== "scvBytes" ||
+    signer.val().switch().name !== "scvBytes" ||
+    signer.val().bytes().length === 0
+  ) {
+    throw new StellarRelayerError(
+      "FORBIDDEN_DEPLOYMENT",
+      "Operation signer payload is invalid",
+      403,
+    );
+  }
+  return {
+    contextRuleId: contextRuleIds[0].u32(),
+    verifierAddress: contractIdOf(
+      signerParts[1].address(),
+      "Operation signer verifier must be a contract",
+    ),
+    keyData: Buffer.from(signerParts[2].bytes()),
+  };
+}
+
+function requireOwnerAuthorization(
+  entry: xdr.SorobanAuthorizationEntry,
+  invoke: xdr.InvokeContractArgs,
+  smartAccount: string,
+  webauthnVerifierAddress: string,
+): void {
+  const authorization = requireSmartAccountAuthorization(
+    entry,
+    invoke,
+    smartAccount,
+  );
+  if (
+    authorization.contextRuleId !== 0 ||
+    authorization.verifierAddress !== webauthnVerifierAddress ||
+    authorization.keyData.length <= 65 ||
+    authorization.keyData[0] !== 0x04
+  ) {
+    throw new StellarRelayerError(
+      "FORBIDDEN_DEPLOYMENT",
+      "Agent Pass administration requires the passkey owner",
+      403,
+    );
+  }
+}
+
+function requireMapField(
+  value: xdr.ScVal,
+  field: string,
+): xdr.ScVal {
+  if (value.switch().name !== "scvMap") {
+    throw new StellarRelayerError(
+      "FORBIDDEN_DEPLOYMENT",
+      "Agent Pass policy parameters are invalid",
+      403,
+    );
+  }
+  const entry = (value.map() ?? []).find(
+    (item) =>
+      item.key().switch().name === "scvSymbol" &&
+      item.key().sym().toString() === field,
+  );
+  if (!entry) {
+    throw new StellarRelayerError(
+      "FORBIDDEN_DEPLOYMENT",
+      `Agent Pass policy is missing ${field}`,
+      403,
+    );
+  }
+  return entry.val();
+}
+
+export function validateStellarAgentPassSubmission(
+  submission: StellarDeploymentSubmission,
+  options: {
+    usdcContract: string;
+    webauthnVerifierAddress: string;
+    ed25519VerifierAddress: string;
+    spendingLimitPolicyAddress: string;
+  },
+): ValidatedStellarAgentPassCreate | ValidatedStellarAgentPassRevoke {
+  let func: xdr.HostFunction;
+  let auth: xdr.SorobanAuthorizationEntry[];
+  try {
+    func = xdr.HostFunction.fromXDR(submission.func, "base64");
+    auth = submission.auth.map((entry) =>
+      xdr.SorobanAuthorizationEntry.fromXDR(entry, "base64"),
+    );
+  } catch {
+    throw new StellarRelayerError(
+      "INVALID_REQUEST",
+      "func/auth contains invalid XDR",
+      400,
+    );
+  }
+  if (func.switch().name !== "hostFunctionTypeInvokeContract" || auth.length !== 1) {
+    throw new StellarRelayerError(
+      "FORBIDDEN_DEPLOYMENT",
+      "Only one owner-authorized Agent Pass operation is accepted",
+      403,
+    );
+  }
+  const invoke = func.invokeContract();
+  const smartAccount = contractIdOf(
+    invoke.contractAddress(),
+    "Agent Pass target must be a smart-account contract",
+  );
+  const functionName = invoke.functionName().toString();
+  const args = invoke.args();
+  requireOwnerAuthorization(
+    auth[0]!,
+    invoke,
+    smartAccount,
+    options.webauthnVerifierAddress,
+  );
+
+  if (functionName === "remove_context_rule") {
+    if (
+      args.length !== 1 ||
+      args[0]?.switch().name !== "scvU32" ||
+      args[0].u32() === 0
+    ) {
+      throw new StellarRelayerError(
+        "FORBIDDEN_DEPLOYMENT",
+        "Agent Pass revocation requires a non-owner context rule",
+        403,
+      );
+    }
+    return {
+      kind: "agent_pass_revoke",
+      func,
+      auth,
+      smartAccount,
+      contextRuleId: args[0].u32(),
+    };
+  }
+
+  if (functionName !== "add_context_rule" || args.length !== 5) {
+    throw new StellarRelayerError(
+      "FORBIDDEN_DEPLOYMENT",
+      "Only Agent Pass creation or revocation is accepted",
+      403,
+    );
+  }
+
+  const context = args[0];
+  const contextParts =
+    context?.switch().name === "scvVec" ? context.vec() ?? [] : [];
+  if (
+    contextParts.length !== 2 ||
+    contextParts[0]?.switch().name !== "scvSymbol" ||
+    contextParts[0].sym().toString() !== "CallContract" ||
+    contextParts[1]?.switch().name !== "scvAddress" ||
+    contractIdOf(
+      contextParts[1].address(),
+      "Agent Pass context must be a contract",
+    ) !== options.usdcContract
+  ) {
+    throw new StellarRelayerError(
+      "FORBIDDEN_DEPLOYMENT",
+      "Agent Pass must be scoped to the configured Testnet USDC contract",
+      403,
+    );
+  }
+  if (
+    args[1]?.switch().name !== "scvString" ||
+    args[1].str().toString() !== "Telya Agent Pass" ||
+    args[2]?.switch().name !== "scvU32" ||
+    args[2].u32() === 0
+  ) {
+    throw new StellarRelayerError(
+      "FORBIDDEN_DEPLOYMENT",
+      "Agent Pass name or expiration is invalid",
+      403,
+    );
+  }
+  const signers = args[3]?.switch().name === "scvVec" ? args[3].vec() ?? [] : [];
+  const signerParts =
+    signers.length === 1 && signers[0]?.switch().name === "scvVec"
+      ? signers[0].vec() ?? []
+      : [];
+  if (
+    signerParts.length !== 3 ||
+    signerParts[0]?.switch().name !== "scvSymbol" ||
+    signerParts[0].sym().toString() !== "External" ||
+    signerParts[1]?.switch().name !== "scvAddress" ||
+    contractIdOf(
+      signerParts[1].address(),
+      "Agent signer verifier must be a contract",
+    ) !== options.ed25519VerifierAddress ||
+    signerParts[2]?.switch().name !== "scvBytes" ||
+    signerParts[2].bytes().length !== 32
+  ) {
+    throw new StellarRelayerError(
+      "FORBIDDEN_DEPLOYMENT",
+      "Agent Pass requires exactly one allowlisted Ed25519 signer",
+      403,
+    );
+  }
+
+  const policies = args[4]?.switch().name === "scvMap" ? args[4].map() ?? [] : [];
+  if (
+    policies.length !== 1 ||
+    policies[0]?.key().switch().name !== "scvAddress" ||
+    contractIdOf(
+      policies[0].key().address(),
+      "Agent Pass policy key must be a contract",
+    ) !== options.spendingLimitPolicyAddress
+  ) {
+    throw new StellarRelayerError(
+      "FORBIDDEN_DEPLOYMENT",
+      "Agent Pass requires only the allowlisted spending-limit policy",
+      403,
+    );
+  }
+  const periodValue = requireMapField(policies[0].val(), "period_ledgers");
+  const limitValue = requireMapField(policies[0].val(), "spending_limit");
+  const spendingLimitRaw = scValToNative(limitValue) as unknown;
+  if (
+    periodValue.switch().name !== "scvU32" ||
+    periodValue.u32() < 1 ||
+    typeof spendingLimitRaw !== "bigint" ||
+    spendingLimitRaw <= 0n
+  ) {
+    throw new StellarRelayerError(
+      "FORBIDDEN_DEPLOYMENT",
+      "Agent Pass spending limit is invalid",
+      403,
+    );
+  }
+  const publicKey = Buffer.from(signerParts[2].bytes());
+  return {
+    kind: "agent_pass_create",
+    func,
+    auth,
+    smartAccount,
+    agentAddress: StrKey.encodeEd25519PublicKey(publicKey),
+    agentPublicKey: publicKey.toString("hex"),
+    tokenContract: options.usdcContract,
+    spendingLimitPolicy: options.spendingLimitPolicyAddress,
+    spendingLimitRaw,
+    periodLedgers: periodValue.u32(),
+    validUntilLedger: args[2].u32(),
+  };
+}
+
 /**
  * Allow only the exact passkey-authorized USDC transfer shape emitted by
  * Smart Account Kit. The browser signs this invocation; the server pays only
@@ -274,7 +625,11 @@ function requireTransferAddress(value: xdr.ScVal, label: string): string {
  */
 export function validateStellarUsdcTransferSubmission(
   submission: StellarDeploymentSubmission,
-  options: { usdcContract: string },
+  options: {
+    usdcContract: string;
+    webauthnVerifierAddress: string;
+    ed25519VerifierAddress: string;
+  },
 ): ValidatedStellarUsdcTransfer {
   let func: xdr.HostFunction;
   let auth: xdr.SorobanAuthorizationEntry[];
@@ -338,32 +693,20 @@ export function validateStellarUsdcTransferSubmission(
     );
   }
 
-  const entry = auth[0]!;
-  if (entry.credentials().switch().name !== "sorobanCredentialsAddress") {
+  const authorization = requireSmartAccountAuthorization(auth[0]!, invoke, sender);
+  const isOwner =
+    authorization.contextRuleId === 0 &&
+    authorization.verifierAddress === options.webauthnVerifierAddress &&
+    authorization.keyData.length > 65 &&
+    authorization.keyData[0] === 0x04;
+  const isAgent =
+    authorization.contextRuleId > 0 &&
+    authorization.verifierAddress === options.ed25519VerifierAddress &&
+    authorization.keyData.length === 32;
+  if (!isOwner && !isAgent) {
     throw new StellarRelayerError(
       "FORBIDDEN_DEPLOYMENT",
-      "Transfer requires smart-account address credentials",
-      403,
-    );
-  }
-  const credentials = entry.credentials().address();
-  const credentialAddress = addressOf(
-    credentials.address(),
-    "Transfer credential address is invalid",
-  );
-  const root = entry.rootInvocation();
-  const rootFunction = root.function();
-  if (
-    credentialAddress !== sender ||
-    credentials.signature().switch().name === "scvVoid" ||
-    credentials.signatureExpirationLedger() <= 0 ||
-    root.subInvocations().length !== 0 ||
-    rootFunction.switch().name !== "sorobanAuthorizedFunctionTypeContractFn" ||
-    !bytesEqual(rootFunction.contractFn().toXDR(), invoke.toXDR())
-  ) {
-    throw new StellarRelayerError(
-      "FORBIDDEN_DEPLOYMENT",
-      "Transfer authorization does not exactly match the USDC transfer",
+      "Transfer signer is not an allowlisted owner or Agent Pass signer",
       403,
     );
   }
@@ -376,6 +719,11 @@ export function validateStellarUsdcTransferSubmission(
     sender,
     recipient,
     amountRaw: amount,
+    authorizationKind: isOwner ? "owner" : "agent",
+    contextRuleId: authorization.contextRuleId,
+    signerAddress: isOwner
+      ? options.webauthnVerifierAddress
+      : StrKey.encodeEd25519PublicKey(authorization.keyData),
   };
 }
 
@@ -384,6 +732,8 @@ export function validateStellarRelayerSubmission(
   options: {
     accountWasmHash: string;
     webauthnVerifierAddress: string;
+    ed25519VerifierAddress: string;
+    spendingLimitPolicyAddress: string;
     usdcContract: string;
   },
 ): ValidatedStellarRelayerSubmission {
@@ -397,9 +747,44 @@ export function validateStellarRelayerSubmission(
       400,
     );
   }
-  return func.switch().name === "hostFunctionTypeCreateContractV2"
-    ? validateStellarDeploymentSubmission(submission, options)
+  if (func.switch().name === "hostFunctionTypeCreateContractV2") {
+    return validateStellarDeploymentSubmission(submission, options);
+  }
+  if (func.switch().name !== "hostFunctionTypeInvokeContract") {
+    throw new StellarRelayerError(
+      "FORBIDDEN_DEPLOYMENT",
+      "Unsupported Stellar relayer operation",
+      403,
+    );
+  }
+  const invoke = func.invokeContract();
+  const functionName = invoke.functionName().toString();
+  return functionName === "add_context_rule" || functionName === "remove_context_rule"
+    ? validateStellarAgentPassSubmission(submission, options)
     : validateStellarUsdcTransferSubmission(submission, options);
+}
+
+export function agentPassRuleIdFromReturnValue(value: xdr.ScVal | undefined): number {
+  if (!value || value.switch().name !== "scvMap") {
+    throw new StellarRelayerError(
+      "SUBMISSION_FAILED",
+      "Stellar did not return the created Agent Pass rule",
+      502,
+    );
+  }
+  const id = (value.map() ?? []).find(
+    (entry) =>
+      entry.key().switch().name === "scvSymbol" &&
+      entry.key().sym().toString() === "id",
+  )?.val();
+  if (!id || id.switch().name !== "scvU32" || id.u32() === 0) {
+    throw new StellarRelayerError(
+      "SUBMISSION_FAILED",
+      "Stellar returned an invalid Agent Pass rule ID",
+      502,
+    );
+  }
+  return id.u32();
 }
 
 function requiredEnvironmentValue(
@@ -435,7 +820,7 @@ function maxResourceFee(environment: NodeJS.ProcessEnv): bigint {
 export async function submitStellarRelayerTransaction(
   validated: ValidatedStellarRelayerSubmission,
   environment: NodeJS.ProcessEnv = process.env,
-): Promise<{ hash: string; ledger: number }> {
+): Promise<{ hash: string; ledger: number; returnValue?: xdr.ScVal }> {
   const rpcUrl = requiredEnvironmentValue(environment, "STELLAR_RPC_URL");
   const accountWasmHash = requiredEnvironmentValue(
     environment,
@@ -444,6 +829,14 @@ export async function submitStellarRelayerTransaction(
   const webauthnVerifierAddress = requiredEnvironmentValue(
     environment,
     "STELLAR_WEBAUTHN_VERIFIER",
+  );
+  const ed25519VerifierAddress = requiredEnvironmentValue(
+    environment,
+    "STELLAR_ED25519_VERIFIER",
+  );
+  const spendingLimitPolicyAddress = requiredEnvironmentValue(
+    environment,
+    "STELLAR_SPENDING_LIMIT_POLICY",
   );
   const usdcContract = requiredEnvironmentValue(environment, "STELLAR_USDC_SAC");
   const sponsorSecret = requiredEnvironmentValue(
@@ -466,6 +859,8 @@ export async function submitStellarRelayerTransaction(
   const checked = validateStellarRelayerSubmission(submission, {
     accountWasmHash,
     webauthnVerifierAddress,
+    ed25519VerifierAddress,
+    spendingLimitPolicyAddress,
     usdcContract,
   });
   if (checked.kind !== validated.kind) {
@@ -551,7 +946,11 @@ export async function submitStellarRelayerTransaction(
       502,
     );
   }
-  return { hash: sent.hash, ledger: result.ledger };
+  return {
+    hash: sent.hash,
+    ledger: result.ledger,
+    ...(result.returnValue ? { returnValue: result.returnValue } : {}),
+  };
 }
 
 export async function submitStellarDeployment(

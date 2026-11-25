@@ -37,6 +37,8 @@ export async function GET(
           : stellarUsdcAmountFromRawUnits(verifiedAtomic),
       verifiedAt: receipt.verifiedAt,
       failureCode: receipt.failureCode,
+      authorizationKind: receipt.authorizationKind,
+      contextRuleId: receipt.contextRuleId,
       events: receipt.events,
       explorerUrl: `https://stellar.expert/explorer/testnet/tx/${receipt.transactionHash}`,
     },
