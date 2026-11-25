@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { SiteHeader } from "./components/site-header";
 import { MobileBottomDock } from "./components/mobile-bottom-dock";
+import { ConversationalHome } from "./components/conversational-home";
 import { StellarWalletPanel } from "./stellar-wallet-panel";
 
 const routes = [
@@ -30,53 +31,15 @@ export default function HomePage() {
               <span>Get started with Passkey</span>
               <ArrowRight className="inline-arrow" aria-hidden="true" />
             </Link>
-            <a className="secondary-action" href="#route-preview">
-              <span>See the route preview</span>
+            <a className="secondary-action" href="#composer">
+              <span>Try conversational payment</span>
             </a>
           </div>
         </div>
 
-        <div className="route-stage" id="route-preview" aria-label="Route preview">
-          <div className="dot-field" aria-hidden="true" />
-          <article className="route-card">
-            <div className="route-card-header">
-              <div>
-                <span className="card-kicker">Route preview</span>
-                <strong>Send @alice 5 USDC</strong>
-              </div>
-              <span className="preview-badge">Not submitted</span>
-            </div>
-
-            <div className="route-path" aria-label="Base to Stellar through Circle CCTP">
-              <div className="route-node">
-                <span>From</span>
-                <strong>Base</strong>
-              </div>
-              <div className="route-rail">
-                <span className="rail-line" aria-hidden="true" />
-                <small>Circle CCTP</small>
-              </div>
-              <div className="route-node destination">
-                <span>To</span>
-                <strong>Stellar</strong>
-              </div>
-            </div>
-
-            <dl className="route-details">
-              <div>
-                <dt>Recipient gets</dt>
-                <dd>5 USDC</dd>
-              </div>
-              <div>
-                <dt>Recipient</dt>
-                <dd>@alice</dd>
-              </div>
-              <div>
-                <dt>Completion</dt>
-                <dd>Recipient + amount verified</dd>
-              </div>
-            </dl>
-          </article>
+        {/* Conversational Home & Payment Review Surface */}
+        <div className="route-stage" id="composer" aria-label="Conversational payment surface">
+          <ConversationalHome />
         </div>
       </section>
 
