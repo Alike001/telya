@@ -33,8 +33,12 @@ Runtime behavior:
 - `DATABASE_URL` and all sponsor/provider secrets remain server-only;
 - the health endpoint never returns connection strings or provider errors.
 
-The exact public Testnet URL and judge walkthrough will be added after the first
-successful production deployment is verified.
+Public Testnet deployment: [telya.vercel.app](https://telya.vercel.app)
+
+Production readiness is available at
+[telya.vercel.app/api/health](https://telya.vercel.app/api/health). The exact
+judge walkthrough will be added after the end-to-end Testnet payment flow is
+verified.
 
 Planned test environment:
 - Stellar Testnet
