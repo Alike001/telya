@@ -45,6 +45,29 @@ Stellar passkey account flow:
    `completed` only after Stellar finality and exact recipient/amount matching.
 9. Refresh the page and verify the last receipt and its event timeline restore.
 
+Agent Pass flow (direct Stellar USDC only):
+
+1. Keep the passkey account connected and funded with Testnet USDC.
+2. Enter a cumulative allowance and choose **Create Agent Pass**. Approve the
+   owner prompt and verify the creation transaction on Stellar Expert.
+3. Enter a recipient and an amount below the allowance, then choose **Send as
+   agent**. Verify the receipt is completed under the displayed context rule
+   and the on-chain cumulative spend increases.
+4. Attempt another agent payment whose cumulative total exceeds the allowance.
+   Verify Smart Account Kit reports the genuine on-chain spending-limit
+   rejection and no successful transfer is claimed.
+5. Choose **Revoke with passkey**, approve the owner prompt, and verify the
+   revocation transaction.
+6. Choose **Prove agent is blocked** and verify the revoked agent is rejected.
+7. Use the owner **Authorize and send** control above to verify the passkey
+   owner can still pay after agent revocation.
+
+The demo agent key is generated in the browser and retained only in memory for
+the current page. It is never sent to the AI, database, relayer, or browser
+storage. The database stores public rule metadata, cumulative verified spend,
+and transaction references; the Stellar context rule and spending-limit policy
+remain the authorization source of truth.
+
 The UI reports deployment as connected only after the relayer returns a real
 transaction hash and Smart Account Kit verifies the confirmed deployment. A
 relayer, network, or on-chain failure remains visible as a failure and is never
@@ -58,6 +81,11 @@ authorization, submission, destination finality, recipient verification, and
 completion. `GET /api/stellar/transfers/<transaction-hash>` returns the
 consumer-safe receipt used for refresh recovery. It never returns passkey data,
 the sponsor key, database credentials, or internal diagnostics.
+
+Agent Pass administration is also narrowly allowlisted by the relayer: only an
+owner-passkey-authorized `CallContract` rule for the configured USDC contract,
+one configured Ed25519 verifier signer, one configured spending-limit policy,
+and owner-authorized removal of a recorded Agent Pass rule are sponsored.
 
 Runtime behavior:
 

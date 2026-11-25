@@ -21,6 +21,8 @@ export interface SmartAccountPublicConfig {
   readonly networkPassphrase: string;
   readonly accountWasmHash: string;
   readonly webauthnVerifierAddress: string;
+  readonly ed25519VerifierAddress: string;
+  readonly spendingLimitPolicyAddress: string;
   readonly usdcContract: string;
   readonly relayerUrl: string;
   readonly rpId?: string;
@@ -130,6 +132,28 @@ export function validateSmartAccountPublicConfig(
     );
   }
 
+  const ed25519VerifierAddress = requirePublicValue(
+    config.ed25519VerifierAddress,
+    "ed25519VerifierAddress",
+  );
+  if (!StrKey.isValidContract(ed25519VerifierAddress)) {
+    throw new SmartAccountLifecycleError(
+      "INVALID_PUBLIC_CONFIG",
+      "ed25519VerifierAddress must be a valid Stellar contract address",
+    );
+  }
+
+  const spendingLimitPolicyAddress = requirePublicValue(
+    config.spendingLimitPolicyAddress,
+    "spendingLimitPolicyAddress",
+  );
+  if (!StrKey.isValidContract(spendingLimitPolicyAddress)) {
+    throw new SmartAccountLifecycleError(
+      "INVALID_PUBLIC_CONFIG",
+      "spendingLimitPolicyAddress must be a valid Stellar contract address",
+    );
+  }
+
   const usdcContract = requirePublicValue(config.usdcContract, "usdcContract");
   if (!StrKey.isValidContract(usdcContract)) {
     throw new SmartAccountLifecycleError(
@@ -150,6 +174,8 @@ export function validateSmartAccountPublicConfig(
     ),
     accountWasmHash,
     webauthnVerifierAddress,
+    ed25519VerifierAddress,
+    spendingLimitPolicyAddress,
     usdcContract,
     relayerUrl: requirePublicValue(config.relayerUrl, "relayerUrl"),
     ...(config.rpId
@@ -163,8 +189,14 @@ export function createBrowserSmartAccountKit(
   rawConfig: SmartAccountPublicConfig,
 ): SmartAccountKit {
   const config = validateSmartAccountPublicConfig(rawConfig);
-  const { allowedOrigins, usdcContract: _usdcContract, ...baseConfig } = config;
+  const {
+    allowedOrigins,
+    usdcContract: _usdcContract,
+    spendingLimitPolicyAddress: _spendingLimitPolicyAddress,
+    ...baseConfig
+  } = config;
   void _usdcContract;
+  void _spendingLimitPolicyAddress;
 
   return new SmartAccountKit({
     ...baseConfig,

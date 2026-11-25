@@ -23,6 +23,18 @@ export {
   verifyStellarUsdcTransfer,
 } from "./usdc";
 
+export {
+  AGENT_PASS_DURATION_LEDGERS,
+  OWNER_CONTEXT_RULE_ID,
+  AgentPassError,
+  createStellarAgentPass,
+  getAgentPassSpending,
+  revokeStellarAgentPass,
+  submitAgentPassTransfer,
+} from "./agent-pass";
+
+export type { ActiveAgentPass, AgentPassSpending } from "./agent-pass";
+
 export type {
   StellarRpcServer,
   StellarTransactionRpc,

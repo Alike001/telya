@@ -19,7 +19,9 @@ const publicConfig: SmartAccountPublicConfig = {
   accountWasmHash:
     "c514d35ea67eaea9bfc1fb3327854c0c06111bc1ddebd4fe217c504c1004b9e1",
   webauthnVerifierAddress: StrKey.encodeContract(Buffer.alloc(32, 1)),
-  usdcContract: StrKey.encodeContract(Buffer.alloc(32, 2)),
+  ed25519VerifierAddress: StrKey.encodeContract(Buffer.alloc(32, 2)),
+  spendingLimitPolicyAddress: StrKey.encodeContract(Buffer.alloc(32, 3)),
+  usdcContract: StrKey.encodeContract(Buffer.alloc(32, 4)),
   relayerUrl: "/api/stellar/relayer",
 };
 
