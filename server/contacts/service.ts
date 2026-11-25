@@ -251,7 +251,7 @@ export async function removeContact(
       RETURNING id
     `,
   ]);
-  return rows.length > 0;
+  return (rows?.length ?? 0) > 0;
 }
 
 async function resolveContactRecipient(
