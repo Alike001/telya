@@ -56,3 +56,8 @@ Five target-user interviews are not required before Build Week. User feedback ma
 
 ## D-016 — Smart wallet terminology
 Use the exact term **Stellar Smart Account Kit** for Telya's passkey smart-wallet architecture. Do not conflate it with separate Stellar agent tooling.
+
+## D-017 — Final submission date
+Hammed confirmed the final submission date as **November 30, 2026**.
+
+The exact cutoff time and timezone still need to be recorded from organizer guidance before Issue #22 is closed. Required artifacts, judging criteria, public-link requirements, and any mandatory demo/video format remain governed by the confirmed organizer instructions and must not be guessed.
