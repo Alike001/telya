@@ -8,9 +8,33 @@ Telya lets people speak or type what they want to do with USDC, then safely rout
 
 ## How to Test
 
-Telya is currently in pre-Build-Week foundation setup.
+Telya is now in Build Week implementation. The public shell is intentionally
+honest about its current state: it shows the frozen Testnet route matrix and a
+route preview, but never displays a fake completed transaction.
 
-The public Testnet deployment and exact judge walkthrough will be added here as soon as the first deployable shell is live.
+Local development:
+
+Node.js 20.9 or newer and pnpm 11 are required.
+
+```bash
+pnpm install
+pnpm dev
+```
+
+Open `http://localhost:3000`. The readiness endpoint is available at
+`http://localhost:3000/api/health`; it returns HTTP `200` only when the app can
+reach Neon and HTTP `503` with a sanitized `degraded` response otherwise.
+
+Runtime behavior:
+
+- local and preview environments use Testnet configuration;
+- the production branch is `main` and deploys to the existing Vercel project;
+- `NEXT_PUBLIC_*` values are browser-safe and build-time inlined;
+- `DATABASE_URL` and all sponsor/provider secrets remain server-only;
+- the health endpoint never returns connection strings or provider errors.
+
+The exact public Testnet URL and judge walkthrough will be added after the first
+successful production deployment is verified.
 
 Planned test environment:
 - Stellar Testnet

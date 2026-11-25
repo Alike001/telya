@@ -8,12 +8,17 @@
     "node": ">=22"
   },
   "scripts": {
+    "build": "next build",
+    "dev": "next dev",
+    "start": "next start",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "db:migrate": "tsc --project tsconfig.server.json && node dist/scripts/migrate.js"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",
+    "@types/react": "19.2.7",
+    "@types/react-dom": "19.2.3",
     "typescript": "^5.9.3",
     "vitest": "5.0.5"
   },
@@ -22,6 +27,10 @@
     "@neondatabase/serverless": "1.2.1",
     "@privy-io/node": "0.42.0",
     "@stellar/stellar-sdk": "^16.4.1",
+    "next": "16.4.6",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "server-only": "0.0.1",
     "smart-account-kit": "0.10.0"
   }
 }
