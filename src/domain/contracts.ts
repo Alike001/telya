@@ -10,6 +10,7 @@ export type DecimalAmount = string;
 
 export type Network = "stellar" | "base";
 export type Asset = "USDC";
+export type WalletAddress = string;
 
 export type WalletKind = "stellar_smart_account" | "base_wallet";
 export type WalletStatus = "pending" | "active" | "disabled";
@@ -72,13 +73,54 @@ export interface PaymentIntent {
   readonly updatedAt: IsoDateTime;
 }
 
-export type Route =
-  | "stellar_to_stellar"
-  | "base_to_base"
-  | "base_to_stellar_cctp"
-  | "stellar_to_base_cctp";
+/** A username, saved contact, or explicit network address from the user's input. */
+export type RecipientReference =
+  | { readonly kind: "username"; readonly username: string }
+  | { readonly kind: "contact"; readonly contactId: Identifier }
+  | { readonly kind: "address"; readonly network: Network; readonly address: WalletAddress };
 
-export type RouteRail = "stellar_usdc" | "base_usdc" | "circle_cctp_standard";
+export type FeeKind = "network" | "provider" | "sponsor";
+export type FeePayer = "sender" | "recipient" | "sponsor";
+
+/** A separately displayable fee; amounts remain decimal strings. */
+export interface Fee {
+  readonly kind: FeeKind;
+  readonly amount: DecimalAmount;
+  readonly asset: string;
+  readonly payer: FeePayer;
+  readonly label: string;
+}
+
+/** The only route/network/rail combinations supported by the P0 product. */
+export type PaymentRoute =
+  | {
+      readonly id: "stellar_to_stellar";
+      readonly sourceNetwork: "stellar";
+      readonly destinationNetwork: "stellar";
+      readonly rail: "stellar_usdc";
+    }
+  | {
+      readonly id: "base_to_base";
+      readonly sourceNetwork: "base";
+      readonly destinationNetwork: "base";
+      readonly rail: "base_usdc";
+    }
+  | {
+      readonly id: "base_to_stellar_cctp";
+      readonly sourceNetwork: "base";
+      readonly destinationNetwork: "stellar";
+      readonly rail: "circle_cctp_standard";
+    }
+  | {
+      readonly id: "stellar_to_base_cctp";
+      readonly sourceNetwork: "stellar";
+      readonly destinationNetwork: "base";
+      readonly rail: "circle_cctp_standard";
+    };
+
+/** Route IDs and rails stay derived from the route union. */
+export type Route = PaymentRoute["id"];
+export type RouteRail = PaymentRoute["rail"];
 
 export type RouteReasonCode =
   | "explicit_user_instruction"
@@ -88,23 +130,42 @@ export type RouteReasonCode =
   | "only_sufficient_balance"
   | "ambiguous_requires_clarification";
 
-export type RouteDecisionStatus = "resolved" | "needs_clarification";
+export type RouteDecisionStatus = "resolved" | "needs_clarification" | "unavailable";
 
-export interface RouteDecision {
+interface RouteDecisionBase {
   readonly id: Identifier;
   readonly paymentIntentId: Identifier;
-  readonly status: RouteDecisionStatus;
-  readonly route: Route | null;
-  readonly rail: RouteRail | null;
-  readonly sourceNetwork: Network | null;
-  readonly destinationNetwork: Network | null;
   readonly sourceWalletId: Identifier | null;
   readonly destinationAddress: string | null;
   readonly reasonCode: RouteReasonCode;
   /** Consumer-safe explanation of why this route was or was not chosen. */
   readonly explanation: string;
+  readonly fees: readonly Fee[];
   readonly decidedAt: IsoDateTime;
 }
+
+export type RouteDecision =
+  | (RouteDecisionBase & {
+      readonly status: "resolved";
+      readonly route: PaymentRoute;
+      readonly recipient: RecipientReference;
+    })
+  | (RouteDecisionBase & {
+      readonly status: "needs_clarification";
+      readonly route: null;
+      readonly recipient: RecipientReference | null;
+      readonly requestedSourceNetwork: Network | null;
+      readonly requestedDestinationNetwork: Network | null;
+      readonly clarificationQuestion: string;
+    })
+  | (RouteDecisionBase & {
+      readonly status: "unavailable";
+      readonly route: null;
+      readonly recipient: RecipientReference | null;
+      readonly requestedSourceNetwork: Network | null;
+      readonly requestedDestinationNetwork: Network | null;
+      readonly unavailabilityReason: string;
+    });
 
 export type PaymentStatus =
   | "created"
@@ -126,31 +187,52 @@ export interface TransactionReference {
   readonly explorerUrl: string;
 }
 
-export interface Payment {
+interface PaymentRecord {
   readonly id: Identifier;
   readonly userId: Identifier;
   readonly paymentIntentId: Identifier;
   readonly routeDecisionId: Identifier;
   readonly idempotencyKey: string;
-  readonly route: Route;
-  readonly sourceNetwork: Network;
-  readonly destinationNetwork: Network;
+  readonly route: PaymentRoute;
   readonly sourceWalletId: Identifier;
+  readonly recipient: RecipientReference;
   readonly expectedRecipient: string;
-  readonly actualRecipient: string | null;
   readonly asset: Asset;
   readonly expectedAmount: DecimalAmount;
-  readonly actualAmount: DecimalAmount | null;
+  readonly fees: readonly Fee[];
   readonly feeAmount: DecimalAmount;
-  readonly status: PaymentStatus;
   readonly sourceTransaction: TransactionReference | null;
-  readonly destinationTransaction: TransactionReference | null;
   readonly failureCode: string | null;
   readonly failureStage: PaymentStatus | null;
   readonly createdAt: IsoDateTime;
   readonly updatedAt: IsoDateTime;
-  readonly completedAt: IsoDateTime | null;
 }
+
+/**
+ * Completed payments must carry destination and recipient/amount verification
+ * evidence. A source transaction alone cannot produce the completed variant.
+ */
+export type Payment =
+  | (PaymentRecord & {
+      readonly status: Exclude<PaymentStatus, "completed">;
+      readonly actualRecipient: string | null;
+      readonly actualAmount: DecimalAmount | null;
+      readonly destinationTransaction: TransactionReference | null;
+      readonly recipientVerification?: never;
+      readonly completedAt: null;
+    })
+  | (PaymentRecord & {
+      readonly status: "completed";
+      readonly actualRecipient: string;
+      readonly actualAmount: DecimalAmount;
+      readonly destinationTransaction: TransactionReference;
+      readonly recipientVerification: {
+        readonly recipientAddress: WalletAddress;
+        readonly receivedAmount: DecimalAmount;
+        readonly verifiedAt: IsoDateTime;
+      };
+      readonly completedAt: IsoDateTime;
+    });
 
 export type PaymentEventStatus = "started" | "succeeded" | "failed";
 
