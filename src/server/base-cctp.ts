@@ -1,0 +1,801 @@
+import "server-only";
+
+import { randomUUID } from "node:crypto";
+
+import { StrKey } from "@stellar/stellar-sdk";
+import { rpc } from "@stellar/stellar-sdk";
+
+import { getSqlClient } from "../../server/db/client";
+import {
+  BASE_SEPOLIA_MESSAGE_TRANSMITTER,
+  BASE_SEPOLIA_USDC,
+  CCTP_BASE_DOMAIN,
+  CCTP_STELLAR_DOMAIN,
+  encodeCctpReceiveMessage,
+  findBaseCctpMessage,
+  getBaseTransactionReceipt,
+  isBaseTransactionFinalized,
+  normalizeBaseUsdcAmount,
+  normalizeBaseUsdcFee,
+  parseCctpMessage,
+  requireEvmAddress,
+  verifyBaseCctpMint,
+  verifyBaseUsdcTransfer,
+  type BaseRpc,
+} from "../base/evm";
+import { getCircleCctpStatus, type CircleCctpStatus } from "../base/circle";
+import {
+  reconcileStellarCctpSource,
+  settleBaseToStellarCctp,
+} from "./stellar-cctp";
+import { stellarCctpConfigFromEnvironment } from "../stellar/cctp";
+import { normalizeStellarUsdcAmount } from "../stellar/usdc";
+
+export type BaseCctpSourceVerification =
+  | { readonly status: "pending"; readonly sourceTransactionHash: string }
+  | {
+      readonly status: "verified";
+      readonly sourceTransactionHash: string;
+      readonly circle: Extract<CircleCctpStatus, { status: "complete" }>;
+      readonly amountAtomic: string;
+    }
+  | {
+      readonly status: "failed" | "mismatch";
+      readonly sourceTransactionHash: string;
+      readonly reason: string;
+    };
+
+function baseAddressAsBytes32(address: string): string {
+  return `0x${requireEvmAddress(address, "source wallet").slice(2).padStart(64, "0")}`;
+}
+
+function stellarContractAsBytes32(address: string): string {
+  return `0x${Buffer.from(StrKey.decodeContract(address)).toString("hex")}`;
+}
+
+/** Verify the finalized Base burn and bind Circle's attestation to its MessageSent log. */
+export async function verifyBaseCctpSource(input: {
+  readonly rpc: BaseRpc;
+  readonly sourceTransactionHash: string;
+  readonly sourceAddress: string;
+  readonly burnAmount: string;
+  readonly maxFee: string;
+  readonly expectedMintRecipient: string;
+  readonly destinationDomain?: number;
+  readonly fetchCircle?: typeof getCircleCctpStatus;
+}): Promise<BaseCctpSourceVerification> {
+  const sourceTransactionHash = input.sourceTransactionHash.trim().toLowerCase();
+  const receipt = await getBaseTransactionReceipt(input.rpc, sourceTransactionHash);
+  if (!receipt) return { status: "pending", sourceTransactionHash };
+  if (receipt.status !== "0x1") {
+    return {
+      status: "failed",
+      sourceTransactionHash,
+      reason: "Base finalized the CCTP source transaction as failed",
+    };
+  }
+  if (!(await isBaseTransactionFinalized(input.rpc, receipt))) {
+    return { status: "pending", sourceTransactionHash };
+  }
+  const emittedMessage = findBaseCctpMessage({
+    receipt,
+    messageTransmitterAddress: BASE_SEPOLIA_MESSAGE_TRANSMITTER,
+  });
+  if (!emittedMessage) {
+    return {
+      status: "mismatch",
+      sourceTransactionHash,
+      reason: "Finalized Base transaction did not emit exactly one CCTP message",
+    };
+  }
+  const circle = await (input.fetchCircle ?? getCircleCctpStatus)({
+    sourceDomain: CCTP_BASE_DOMAIN,
+    sourceTransactionHash,
+  });
+  if (circle.status === "pending") return { status: "pending", sourceTransactionHash };
+  if (circle.message !== emittedMessage) {
+    return {
+      status: "mismatch",
+      sourceTransactionHash,
+      reason: "Circle's attested message does not match the Base MessageSent log",
+    };
+  }
+  const parsed = parseCctpMessage(circle.message);
+  const expectedAmount = normalizeBaseUsdcAmount(input.burnAmount);
+  const expectedMaxFee = normalizeBaseUsdcFee(input.maxFee);
+  const destinationDomain = input.destinationDomain ?? CCTP_STELLAR_DOMAIN;
+  let expectedMintRecipient: string;
+  try {
+    expectedMintRecipient = /^C[A-Z2-7]{55}$/.test(input.expectedMintRecipient)
+      ? stellarContractAsBytes32(input.expectedMintRecipient)
+      : input.expectedMintRecipient.toLowerCase();
+  } catch {
+    return {
+      status: "mismatch",
+      sourceTransactionHash,
+      reason: "Expected Stellar CCTP mint recipient is not a valid contract address",
+    };
+  }
+  const matches =
+    parsed.sourceDomain === CCTP_BASE_DOMAIN &&
+    parsed.destinationDomain === destinationDomain &&
+    parsed.burnToken.toLowerCase() === baseAddressAsBytes32(BASE_SEPOLIA_USDC) &&
+    parsed.messageSender.toLowerCase() === baseAddressAsBytes32(input.sourceAddress) &&
+    parsed.mintRecipient.toLowerCase() === expectedMintRecipient &&
+    parsed.amount === expectedAmount &&
+    parsed.maxFee === expectedMaxFee;
+  if (!matches) {
+    return {
+      status: "mismatch",
+      sourceTransactionHash,
+      reason: "Attested CCTP burn does not match the payment's source, destination, token, and amount",
+    };
+  }
+  return {
+    status: "verified",
+    sourceTransactionHash,
+    circle,
+    amountAtomic: parsed.amount.toString(),
+  };
+}
+
+export class BaseCctpPersistenceError extends Error {
+  constructor(
+    readonly code:
+      | "PAYMENT_NOT_FOUND"
+      | "INVALID_PAYMENT_STATE"
+      | "DESTINATION_IN_PROGRESS"
+      | "DESTINATION_MISMATCH"
+      | "SUBMISSION_FAILED",
+    message: string,
+    options?: ErrorOptions,
+  ) {
+    super(message, options);
+    this.name = "BaseCctpPersistenceError";
+  }
+}
+
+interface PaymentOperationRow extends Record<string, unknown> {
+  readonly id: string;
+  readonly route_id: string;
+  readonly status: string;
+  readonly recipient_address: string;
+  readonly expected_amount: string;
+  readonly source_address: string | null;
+  readonly source_transaction_hash: string | null;
+  readonly destination_transaction_hash: string | null;
+  readonly verified_recipient_address: string | null;
+  readonly verified_recipient_amount: string | null;
+}
+
+function requirePaymentId(value: string): string {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) {
+    throw new BaseCctpPersistenceError("PAYMENT_NOT_FOUND", "Invalid payment ID");
+  }
+  return value.toLowerCase();
+}
+
+function decimalToBaseAtomic(amount: string): string {
+  return normalizeBaseUsdcAmount(amount).toString();
+}
+
+function atomicToDecimal(value: string, decimals: number): string {
+  const atomic = BigInt(value);
+  const scale = 10n ** BigInt(decimals);
+  const whole = atomic / scale;
+  const fraction = (atomic % scale).toString().padStart(decimals, "0").replace(/0+$/, "");
+  return fraction ? `${whole}.${fraction}` : whole.toString();
+}
+
+function normalizeStellarUsdcFee(amount: string): bigint {
+  const value = amount.trim();
+  if (!/^(?:0|[1-9]\d*)(?:\.\d{1,7})?$/.test(value)) {
+    throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "Stellar CCTP fee must be a non-negative decimal with at most 7 places");
+  }
+  const [whole, fraction = ""] = value.split(".");
+  return BigInt(whole!) * 10_000_000n + BigInt(fraction.padEnd(7, "0") || "0");
+}
+
+async function getPaymentOperation(paymentId: string, routes: readonly string[]) {
+  const sql = getSqlClient();
+  const rows = await sql`
+    SELECT p.id, p.route_id, p.status, p.recipient_address,
+      p.expected_recipient_amount::text AS expected_amount,
+      p.source_transaction_hash, p.destination_transaction_hash,
+      p.verified_recipient_address,
+      p.verified_recipient_amount::text AS verified_recipient_amount,
+      w.address AS source_address
+    FROM payments p
+    LEFT JOIN messages m ON m.id = p.intent_message_id
+    LEFT JOIN wallets w ON w.id::text =
+      m.structured_intent->'selectedSourceWallet'->>'id'
+    WHERE p.id = ${paymentId}::uuid
+      AND p.route_id = ANY(${[...routes]}::text[])
+    LIMIT 1
+  `;
+  const payment = rows[0] as PaymentOperationRow | undefined;
+  if (!payment) {
+    throw new BaseCctpPersistenceError("PAYMENT_NOT_FOUND", "Base payment not found");
+  }
+  return { sql, payment };
+}
+
+/** Persist deterministic burn/fee limits before a wallet is asked to sign. */
+export async function reserveBaseCctpOperation(input: {
+  readonly paymentId: string;
+  readonly burnAmount: string;
+  readonly maxFee: string;
+}): Promise<{ readonly burnAmountAtomic: string; readonly maxFeeAtomic: string }> {
+  const paymentId = requirePaymentId(input.paymentId);
+  const { sql, payment } = await getPaymentOperation(paymentId, ["base_to_stellar", "stellar_to_base"]);
+  if (!["awaiting_confirmation", "authorized"].includes(payment.status)) {
+    throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "CCTP payment is not ready for source authorization");
+  }
+  const sourceIsStellar = payment.route_id === "stellar_to_base";
+  const decimals = sourceIsStellar ? 7 : 6;
+  let burnAmountAtomic: bigint;
+  let maxFeeAtomic: bigint;
+  try {
+    if (sourceIsStellar) {
+      const normalizedBurn = normalizeStellarUsdcAmount(input.burnAmount);
+      burnAmountAtomic = normalizedBurn.raw;
+      maxFeeAtomic = normalizeStellarUsdcFee(input.maxFee);
+    } else {
+      burnAmountAtomic = normalizeBaseUsdcAmount(input.burnAmount);
+      maxFeeAtomic = normalizeBaseUsdcFee(input.maxFee);
+    }
+  } catch (error) {
+    throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "CCTP burn amount or fee is invalid", { cause: error });
+  }
+  if (burnAmountAtomic <= 0n || maxFeeAtomic < 0n || maxFeeAtomic >= burnAmountAtomic) {
+    throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "CCTP max fee must be non-negative and less than the burn amount");
+  }
+  const expectedAmountAtomic = sourceIsStellar
+    ? normalizeBaseUsdcAmount(String(payment.expected_amount))
+    : normalizeStellarUsdcAmount(String(payment.expected_amount)).raw;
+  const rows = await sql`
+    INSERT INTO base_cctp_operations (
+      payment_id, route_id, status, burn_amount_atomic, max_fee_atomic,
+      expected_recipient_address, expected_amount_atomic
+    ) VALUES (
+      ${paymentId}::uuid, ${payment.route_id}, 'authorized',
+      ${burnAmountAtomic.toString()}::numeric, ${maxFeeAtomic.toString()}::numeric,
+      ${payment.recipient_address}, ${expectedAmountAtomic.toString()}::numeric
+    )
+    ON CONFLICT (payment_id) DO UPDATE SET updated_at = now()
+    WHERE base_cctp_operations.route_id = EXCLUDED.route_id
+      AND base_cctp_operations.burn_amount_atomic = EXCLUDED.burn_amount_atomic
+      AND base_cctp_operations.max_fee_atomic = EXCLUDED.max_fee_atomic
+      AND base_cctp_operations.expected_recipient_address = EXCLUDED.expected_recipient_address
+      AND base_cctp_operations.expected_amount_atomic = EXCLUDED.expected_amount_atomic
+    RETURNING burn_amount_atomic::text AS burn_amount, max_fee_atomic::text AS max_fee
+  `;
+  if (rows.length === 0) {
+    throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "CCTP payment already has a conflicting burn intent");
+  }
+  return {
+    burnAmountAtomic: String(rows[0]!.burn_amount),
+    maxFeeAtomic: String(rows[0]!.max_fee),
+  };
+}
+
+/** Records Base -> Base only after a finalized exact USDC transfer is proven. */
+export async function reconcileBaseDirectPayment(input: {
+  readonly paymentId: string;
+  readonly transactionHash: string;
+  readonly rpc: BaseRpc;
+}): Promise<{ readonly status: "pending" | "completed"; readonly transactionHash: string }> {
+  const paymentId = requirePaymentId(input.paymentId);
+  const { sql, payment } = await getPaymentOperation(paymentId, ["base_to_base"]);
+  if (payment.status === "completed") {
+    if (payment.destination_transaction_hash !== input.transactionHash.trim().toLowerCase()) {
+      throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "Payment was completed by a different Base transaction");
+    }
+    return { status: "completed", transactionHash: String(payment.destination_transaction_hash) };
+  }
+  if (!["authorized", "submitted", "destination_submitted"].includes(payment.status)) {
+    throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "Base payment is not authorized for reconciliation");
+  }
+  if (payment.destination_transaction_hash &&
+      payment.destination_transaction_hash !== input.transactionHash.trim().toLowerCase()) {
+    throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "A different Base destination transaction is already recorded");
+  }
+  if (typeof payment.source_address !== "string") {
+    throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "Base source wallet is missing");
+  }
+  const hash = input.transactionHash.trim().toLowerCase();
+  const verification = await verifyBaseUsdcTransfer({
+    rpc: input.rpc,
+    txHash: hash,
+    expectedSender: payment.source_address,
+    expectedRecipient: payment.recipient_address,
+    expectedAmount: String(payment.expected_amount),
+  });
+  if (verification.status === "pending") return { status: "pending", transactionHash: hash };
+  if (verification.status !== "verified") {
+    throw new BaseCctpPersistenceError(
+      "DESTINATION_MISMATCH",
+      "Base did not finalize the exact USDC transfer to the expected recipient",
+    );
+  }
+  const amountAtomic = decimalToBaseAtomic(verification.amount!);
+  await sql.transaction([
+    sql`
+      INSERT INTO base_cctp_operations (
+        payment_id, route_id, status, destination_transaction_hash,
+        expected_recipient_address, expected_amount_atomic,
+        verified_recipient_address, verified_amount_atomic, verified_at
+      ) VALUES (
+        ${paymentId}::uuid, 'base_to_base', 'completed', ${hash},
+        ${verification.recipient}, ${amountAtomic}::numeric,
+        ${verification.recipient}, ${amountAtomic}::numeric, now()
+      )
+      ON CONFLICT (payment_id) DO UPDATE SET
+        status = 'completed', destination_transaction_hash = EXCLUDED.destination_transaction_hash,
+        verified_recipient_address = EXCLUDED.verified_recipient_address,
+        verified_amount_atomic = EXCLUDED.verified_amount_atomic,
+        verified_at = COALESCE(base_cctp_operations.verified_at, now()), updated_at = now()
+      WHERE base_cctp_operations.destination_transaction_hash IS NULL
+        OR base_cctp_operations.destination_transaction_hash = EXCLUDED.destination_transaction_hash
+    `,
+    sql`
+      UPDATE payments SET status = 'completed',
+        destination_transaction_hash = ${hash},
+        verified_recipient_address = ${verification.recipient},
+        verified_recipient_amount = ${verification.amount}::numeric,
+        recipient_verified_at = COALESCE(recipient_verified_at, now()), updated_at = now()
+      WHERE id = ${paymentId}::uuid AND route_id = 'base_to_base'
+        AND recipient_address = ${verification.recipient}
+        AND expected_recipient_amount = ${verification.amount}::numeric
+        AND status IN ('authorized', 'submitted', 'destination_submitted', 'completed')
+        AND (destination_transaction_hash IS NULL OR destination_transaction_hash = ${hash})
+    `,
+    sql`
+      INSERT INTO payment_events (
+        payment_id, event_key, stage, status, network, transaction_hash,
+        public_message, completed_at
+      ) VALUES (
+        ${paymentId}::uuid, 'base_direct_destination_confirmed',
+        'destination_confirmation', 'destination_confirmed', 'base', ${hash},
+        'Base Sepolia finalized the USDC transfer.', now()
+      ) ON CONFLICT (payment_id, event_key) DO NOTHING
+    `,
+    sql`
+      INSERT INTO payment_events (
+        payment_id, event_key, stage, status, network, transaction_hash,
+        public_message, completed_at
+      ) VALUES (
+        ${paymentId}::uuid, 'base_direct_recipient_verified',
+        'recipient_verification', 'recipient_verified', 'base', ${hash},
+        'The finalized Base transfer matches the expected recipient and USDC amount.', now()
+      ) ON CONFLICT (payment_id, event_key) DO NOTHING
+    `,
+    sql`
+      INSERT INTO payment_events (
+        payment_id, event_key, stage, status, network, transaction_hash,
+        public_message, completed_at
+      ) VALUES (
+        ${paymentId}::uuid, 'base_direct_completed',
+        'completion', 'completed', 'base', ${hash},
+        'The recipient received the verified USDC amount on Base.', now()
+      ) ON CONFLICT (payment_id, event_key) DO NOTHING
+    `,
+  ]);
+  return { status: "completed", transactionHash: hash };
+}
+
+/** Confirms a Base burn, records Circle evidence, then delegates Stellar settlement to ST-04. */
+export async function reconcileBaseToStellarCctp(input: {
+  readonly paymentId: string;
+  readonly sourceTransactionHash: string;
+  readonly rpc: BaseRpc;
+  readonly stellarRpc?: Pick<rpc.Server, "getTransaction">;
+}): Promise<{
+  readonly status: "pending" | "in_progress" | "completed";
+  readonly destinationTransactionHash?: string;
+}> {
+  const paymentId = requirePaymentId(input.paymentId);
+  const { sql, payment } = await getPaymentOperation(paymentId, ["base_to_stellar"]);
+  if (payment.status === "completed") {
+    if (
+      typeof payment.destination_transaction_hash === "string" &&
+      typeof payment.verified_recipient_address === "string" &&
+      typeof payment.verified_recipient_amount === "string"
+    ) {
+      const verifiedAtomic = normalizeStellarUsdcAmount(payment.verified_recipient_amount).raw.toString();
+      await sql`
+        UPDATE base_cctp_operations SET status = 'completed',
+          destination_transaction_hash = ${payment.destination_transaction_hash},
+          verified_recipient_address = ${payment.verified_recipient_address},
+          verified_amount_atomic = ${verifiedAtomic}::numeric,
+          verified_at = COALESCE(verified_at, now()), updated_at = now()
+        WHERE payment_id = ${paymentId}::uuid
+          AND route_id = 'base_to_stellar'
+          AND (destination_transaction_hash IS NULL
+            OR destination_transaction_hash = ${payment.destination_transaction_hash})
+      `;
+    }
+    return {
+      status: "completed",
+      destinationTransactionHash: String(payment.destination_transaction_hash ?? ""),
+    };
+  }
+  if (!["authorized", "submitted", "source_confirmed", "awaiting_attestation"].includes(payment.status)) {
+    throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "Base-to-Stellar payment is not awaiting source reconciliation");
+  }
+  if (typeof payment.source_address !== "string") {
+    throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "Base source wallet is missing");
+  }
+  if (payment.source_transaction_hash &&
+      payment.source_transaction_hash !== input.sourceTransactionHash.trim().toLowerCase()) {
+    throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "A different Base source burn is already recorded");
+  }
+  const operations = await sql`
+    SELECT burn_amount_atomic::text AS burn_amount,
+      max_fee_atomic::text AS max_fee
+    FROM base_cctp_operations WHERE payment_id = ${paymentId}::uuid
+  `;
+  const operation = operations[0] as Record<string, unknown> | undefined;
+  if (typeof operation?.burn_amount !== "string" || typeof operation.max_fee !== "string") {
+    throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "Base CCTP burn amount and max fee must be reserved before signing");
+  }
+  const stellarConfig = stellarCctpConfigFromEnvironment();
+  const verification = await verifyBaseCctpSource({
+    rpc: input.rpc,
+    sourceTransactionHash: input.sourceTransactionHash,
+    sourceAddress: payment.source_address,
+    burnAmount: atomicToDecimal(String(operation.burn_amount), 6),
+    maxFee: atomicToDecimal(String(operation.max_fee), 6),
+    expectedMintRecipient: stellarConfig.forwarder,
+  });
+  if (verification.status === "pending") return { status: "pending" };
+  if (verification.status !== "verified") {
+    throw new BaseCctpPersistenceError(
+      "DESTINATION_MISMATCH",
+      verification.reason,
+    );
+  }
+  const atomic = normalizeStellarUsdcAmount(String(payment.expected_amount)).raw.toString();
+  const persisted = await sql`
+    UPDATE base_cctp_operations SET
+      status = CASE WHEN status = 'completed' THEN status ELSE 'awaiting_attestation' END,
+      source_transaction_hash = ${verification.sourceTransactionHash},
+      circle_message_hash = ${verification.circle.messageHash},
+      circle_attestation_hash = ${verification.circle.attestationHash},
+      circle_message = ${verification.circle.message},
+      circle_attestation = ${verification.circle.attestation}, updated_at = now()
+    WHERE payment_id = ${paymentId}::uuid
+      AND route_id = 'base_to_stellar'
+      AND burn_amount_atomic = ${operation.burn_amount}::numeric
+      AND max_fee_atomic = ${operation.max_fee}::numeric
+      AND expected_recipient_address = ${payment.recipient_address}
+      AND expected_amount_atomic = ${atomic}::numeric
+      AND (source_transaction_hash IS NULL
+        OR source_transaction_hash = ${verification.sourceTransactionHash})
+      AND (circle_message_hash IS NULL
+        OR circle_message_hash = ${verification.circle.messageHash})
+    RETURNING payment_id
+  `;
+  if (persisted.length === 0) {
+    throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "Base CCTP evidence conflicts with the reserved payment intent");
+  }
+  await sql.transaction([
+    sql`
+      UPDATE payments SET status = 'awaiting_attestation',
+        source_transaction_hash = ${verification.sourceTransactionHash}, updated_at = now()
+      WHERE id = ${paymentId}::uuid AND route_id = 'base_to_stellar'
+        AND status IN ('authorized', 'submitted', 'source_confirmed', 'awaiting_attestation')
+        AND (source_transaction_hash IS NULL OR source_transaction_hash = ${verification.sourceTransactionHash})
+    `,
+    sql`
+      INSERT INTO payment_events (
+        payment_id, event_key, stage, status, network, transaction_hash,
+        public_message, completed_at
+      ) VALUES (
+        ${paymentId}::uuid, 'base_cctp_source_confirmed', 'source_confirmation',
+        'source_confirmed', 'base', ${verification.sourceTransactionHash},
+        'Base finalized the USDC burn. The payment is waiting for Circle attestation.', now()
+      ) ON CONFLICT (payment_id, event_key) DO NOTHING
+    `,
+    sql`
+      INSERT INTO payment_events (
+        payment_id, event_key, stage, status, network, transaction_hash,
+        public_message, completed_at
+      ) VALUES (
+        ${paymentId}::uuid, 'base_cctp_attestation_ready', 'attestation',
+        'awaiting_attestation', 'base', ${verification.sourceTransactionHash},
+        'Circle completed the Base burn attestation. Stellar settlement is starting.', now()
+      ) ON CONFLICT (payment_id, event_key) DO NOTHING
+    `,
+  ]);
+  const result = await settleBaseToStellarCctp({
+    paymentId,
+    sourceTransactionHash: verification.sourceTransactionHash.replace(/^0x/, ""),
+    message: verification.circle.message,
+    attestation: verification.circle.attestation,
+    rpc: input.stellarRpc ?? new rpc.Server(stellarConfig.rpcUrl),
+    config: stellarConfig,
+  });
+  if (result.status === "completed") {
+    await sql`
+      UPDATE base_cctp_operations SET status = 'completed',
+        destination_transaction_hash = ${result.destinationTransactionHash},
+        verified_recipient_address = ${payment.recipient_address},
+        verified_amount_atomic = ${atomic}::numeric,
+        verified_at = COALESCE(verified_at, now()), updated_at = now()
+      WHERE payment_id = ${paymentId}::uuid
+    `;
+  }
+  return result;
+}
+
+export interface PreparedBaseCctpDestination {
+  readonly status: "pending" | "in_progress" | "ready";
+  readonly transactionTo?: string;
+  readonly transactionData?: string;
+  readonly sourceTransactionHash?: string;
+}
+
+/** Reconciles Stellar source finality and returns a reserved, wallet-signed Base mint request. */
+export async function prepareStellarToBaseCctpDestination(input: {
+  readonly paymentId: string;
+  readonly stellarSourceTransactionHash: string;
+  readonly stellarRpc: Pick<rpc.Server, "getTransaction">;
+  readonly config?: ReturnType<typeof stellarCctpConfigFromEnvironment>;
+  readonly fetchCircle?: typeof getCircleCctpStatus;
+}): Promise<PreparedBaseCctpDestination> {
+  const paymentId = requirePaymentId(input.paymentId);
+  const { sql, payment } = await getPaymentOperation(paymentId, ["stellar_to_base"]);
+  const rows = await sql`
+    SELECT burn_amount_atomic::text AS burn_amount,
+      max_fee_atomic::text AS max_fee, status, source_transaction_hash,
+      circle_message, circle_attestation, submission_lease_expires_at,
+      destination_transaction_hash
+    FROM base_cctp_operations
+    WHERE payment_id = ${paymentId}::uuid
+  `;
+  const operation = rows[0] as Record<string, unknown> | undefined;
+  if (!operation || typeof operation.burn_amount !== "string" || typeof operation.max_fee !== "string") {
+    throw new BaseCctpPersistenceError(
+      "INVALID_PAYMENT_STATE",
+      "Stellar-to-Base CCTP requires server-approved burn amount and fee limits before signing",
+    );
+  }
+  if (operation.status === "completed" || typeof operation.destination_transaction_hash === "string") {
+    throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "Base destination mint has already been submitted");
+  }
+  if (typeof operation.source_transaction_hash === "string" &&
+      operation.source_transaction_hash !== input.stellarSourceTransactionHash.trim().toLowerCase()) {
+    throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "A different Stellar source burn is already reserved");
+  }
+  const config = input.config ?? stellarCctpConfigFromEnvironment();
+  const source = await reconcileStellarCctpSource({
+    paymentId,
+    transactionHash: input.stellarSourceTransactionHash,
+    burnAmount: atomicToDecimal(String(operation.burn_amount), 7),
+    maxFee: atomicToDecimal(String(operation.max_fee), 7),
+    rpc: input.stellarRpc,
+    config,
+  });
+  if (source.status === "pending") return { status: "pending" };
+  const circle = await (input.fetchCircle ?? getCircleCctpStatus)({
+    sourceDomain: CCTP_STELLAR_DOMAIN,
+    sourceTransactionHash: input.stellarSourceTransactionHash,
+  });
+  if (circle.status === "pending") {
+    await sql`
+      UPDATE base_cctp_operations SET status = 'awaiting_attestation',
+        source_transaction_hash = ${input.stellarSourceTransactionHash.trim().toLowerCase()},
+        updated_at = now()
+      WHERE payment_id = ${paymentId}::uuid
+        AND (source_transaction_hash IS NULL OR source_transaction_hash = ${input.stellarSourceTransactionHash.trim().toLowerCase()})
+    `;
+    return { status: "pending" };
+  }
+  const parsed = parseCctpMessage(circle.message);
+  const expectedRecipient = `0x${requireEvmAddress(payment.recipient_address, "recipient").slice(2).padStart(64, "0")}`;
+  const burnAmount = BigInt(operation.burn_amount);
+  const maxFee = BigInt(operation.max_fee);
+  if (
+    parsed.sourceDomain !== CCTP_STELLAR_DOMAIN ||
+    parsed.destinationDomain !== CCTP_BASE_DOMAIN ||
+    parsed.mintRecipient.toLowerCase() !== expectedRecipient ||
+    parsed.amount !== burnAmount ||
+    parsed.maxFee !== maxFee ||
+    parsed.destinationCaller !== `0x${"0".repeat(64)}`
+  ) {
+    throw new BaseCctpPersistenceError(
+      "DESTINATION_MISMATCH",
+      "Circle attestation does not match the persisted Stellar burn intent",
+    );
+  }
+  const leaseId = randomUUID();
+  const reserved = await sql`
+    UPDATE base_cctp_operations SET status = 'destination_prepared',
+      source_transaction_hash = ${input.stellarSourceTransactionHash.trim().toLowerCase()},
+      circle_message_hash = ${circle.messageHash}, circle_attestation_hash = ${circle.attestationHash},
+      circle_message = ${circle.message}, circle_attestation = ${circle.attestation},
+      submission_lease_id = ${leaseId}::uuid,
+      submission_lease_expires_at = now() + interval '60 seconds', updated_at = now()
+    WHERE payment_id = ${paymentId}::uuid
+      AND status IN ('authorized', 'source_confirmed', 'awaiting_attestation', 'destination_prepared')
+      AND (
+        status <> 'destination_prepared'
+        OR submission_lease_expires_at IS NULL
+        OR submission_lease_expires_at <= now()
+      )
+      AND (source_transaction_hash IS NULL
+        OR source_transaction_hash = ${input.stellarSourceTransactionHash.trim().toLowerCase()})
+      AND (circle_message_hash IS NULL OR circle_message_hash = ${circle.messageHash})
+    RETURNING payment_id
+  `;
+  if (reserved.length === 0) return { status: "in_progress" };
+  await sql.transaction([
+    sql`
+      UPDATE payments SET status = 'awaiting_attestation', updated_at = now()
+      WHERE id = ${paymentId}::uuid AND route_id = 'stellar_to_base'
+        AND status IN ('source_confirmed', 'awaiting_attestation')
+    `,
+    sql`
+      INSERT INTO payment_events (
+        payment_id, event_key, stage, status, network, transaction_hash,
+        public_message, completed_at
+      ) VALUES (
+        ${paymentId}::uuid, 'stellar_cctp_attestation_ready', 'attestation',
+        'awaiting_attestation', 'stellar', ${input.stellarSourceTransactionHash.trim().toLowerCase()},
+        'Circle completed the Stellar burn attestation. The Base mint is ready for wallet approval.', now()
+      ) ON CONFLICT (payment_id, event_key) DO NOTHING
+    `,
+  ]);
+  return {
+    status: "ready",
+    transactionTo: BASE_SEPOLIA_MESSAGE_TRANSMITTER,
+    transactionData: encodeCctpReceiveMessage(circle.message, circle.attestation),
+    sourceTransactionHash: input.stellarSourceTransactionHash.trim().toLowerCase(),
+  };
+}
+
+export async function recordStellarToBaseDestinationSubmitted(input: {
+  readonly paymentId: string;
+  readonly destinationTransactionHash: string;
+}): Promise<void> {
+  const paymentId = requirePaymentId(input.paymentId);
+  const hash = input.destinationTransactionHash.trim().toLowerCase();
+  if (!/^0x[0-9a-f]{64}$/.test(hash)) {
+    throw new BaseCctpPersistenceError("SUBMISSION_FAILED", "Invalid Base destination transaction hash");
+  }
+  const { sql, payment } = await getPaymentOperation(paymentId, ["stellar_to_base"]);
+  if (payment.status === "completed") {
+    if (payment.destination_transaction_hash !== hash) {
+      throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "Payment was completed by a different Base transaction");
+    }
+    return;
+  }
+  if (!["source_confirmed", "awaiting_attestation", "destination_submitted"].includes(payment.status)) {
+    throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "Stellar-to-Base payment is not ready for destination submission");
+  }
+  if (payment.destination_transaction_hash && payment.destination_transaction_hash !== hash) {
+    throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "A different Base destination transaction is already recorded");
+  }
+  const reserved = await sql`
+    UPDATE base_cctp_operations SET status = CASE WHEN status = 'completed'
+        THEN status ELSE 'destination_submitted' END,
+      destination_transaction_hash = ${hash}, submission_lease_id = NULL,
+      submission_lease_expires_at = NULL, updated_at = now()
+    WHERE payment_id = ${paymentId}::uuid
+      AND status IN ('destination_prepared', 'destination_submitted', 'destination_confirmed', 'recipient_verified', 'completed')
+      AND (destination_transaction_hash IS NULL OR destination_transaction_hash = ${hash})
+    RETURNING payment_id
+  `;
+  if (reserved.length === 0) {
+    throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "Base destination has no matching attestation reservation");
+  }
+  await sql.transaction([
+    sql`
+      UPDATE payments SET status = 'destination_submitted',
+        destination_transaction_hash = ${hash}, updated_at = now()
+      WHERE id = ${paymentId}::uuid AND route_id = 'stellar_to_base'
+        AND status IN ('source_confirmed', 'awaiting_attestation', 'destination_submitted')
+        AND (destination_transaction_hash IS NULL OR destination_transaction_hash = ${hash})
+    `,
+    sql`
+      INSERT INTO payment_events (
+        payment_id, event_key, stage, status, network, transaction_hash,
+        public_message, completed_at
+      ) VALUES (
+        ${paymentId}::uuid, 'base_cctp_destination_submitted', 'destination_submission',
+        'destination_submitted', 'base', ${hash},
+        'The Base wallet submitted the Circle CCTP mint transaction.', now()
+      ) ON CONFLICT (payment_id, event_key) DO NOTHING
+    `,
+  ]);
+}
+
+/** Destination receipt is the only path that completes Stellar -> Base. */
+export async function reconcileStellarToBaseDestination(input: {
+  readonly paymentId: string;
+  readonly destinationTransactionHash: string;
+  readonly rpc: BaseRpc;
+}): Promise<{ readonly status: "pending" | "completed"; readonly destinationTransactionHash: string }> {
+  const paymentId = requirePaymentId(input.paymentId);
+  const { sql, payment } = await getPaymentOperation(paymentId, ["stellar_to_base"]);
+  if (!["source_confirmed", "awaiting_attestation", "destination_submitted", "completed"].includes(payment.status)) {
+    throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "Stellar-to-Base payment is not awaiting destination verification");
+  }
+  const hash = input.destinationTransactionHash.trim().toLowerCase();
+  const rows = await sql`
+    SELECT status, source_transaction_hash, circle_message, circle_attestation,
+      destination_transaction_hash
+    FROM base_cctp_operations WHERE payment_id = ${paymentId}::uuid
+  `;
+  const operation = rows[0] as Record<string, unknown> | undefined;
+  if (!operation || typeof operation.circle_message !== "string" ||
+      typeof operation.circle_attestation !== "string" ||
+      !["destination_submitted", "destination_confirmed", "recipient_verified", "completed"].includes(String(operation.status))) {
+    throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "Base destination mint has no persisted Circle attestation reservation");
+  }
+  if (typeof operation.destination_transaction_hash !== "string" || operation.destination_transaction_hash !== hash) {
+    throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "A different Base destination transaction is already reserved");
+  }
+  if (payment.status === "completed") {
+    if (payment.destination_transaction_hash !== hash) {
+      throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "Payment was completed by a different Base transaction");
+    }
+    return { status: "completed", destinationTransactionHash: hash };
+  }
+  const verification = await verifyBaseCctpMint({
+    rpc: input.rpc,
+    txHash: hash,
+    message: operation.circle_message,
+    attestation: operation.circle_attestation,
+    expectedRecipient: payment.recipient_address,
+    expectedAmount: String(payment.expected_amount),
+  });
+  if (verification.status === "pending") return { status: "pending", destinationTransactionHash: hash };
+  if (verification.status !== "verified") {
+    throw new BaseCctpPersistenceError(
+      "DESTINATION_MISMATCH",
+      "Base did not finalize the exact CCTP USDC mint to the expected recipient",
+    );
+  }
+  const amountAtomic = decimalToBaseAtomic(verification.amount!);
+  await sql.transaction([
+    sql`
+      UPDATE base_cctp_operations SET status = 'completed',
+        destination_transaction_hash = ${hash},
+        verified_recipient_address = ${verification.recipient},
+        verified_amount_atomic = ${amountAtomic}::numeric, verified_at = now(),
+        submission_lease_id = NULL, submission_lease_expires_at = NULL, updated_at = now()
+      WHERE payment_id = ${paymentId}::uuid
+        AND status IN ('destination_prepared', 'destination_submitted', 'destination_confirmed', 'recipient_verified', 'completed')
+        AND (destination_transaction_hash IS NULL OR destination_transaction_hash = ${hash})
+    `,
+    sql`
+      UPDATE payments SET status = 'completed',
+        destination_transaction_hash = ${hash},
+        verified_recipient_address = ${verification.recipient},
+        verified_recipient_amount = ${verification.amount}::numeric,
+        recipient_verified_at = COALESCE(recipient_verified_at, now()), updated_at = now()
+      WHERE id = ${paymentId}::uuid AND route_id = 'stellar_to_base'
+        AND recipient_address = ${verification.recipient}
+        AND expected_recipient_amount = ${verification.amount}::numeric
+        AND status IN ('source_confirmed', 'awaiting_attestation', 'destination_submitted',
+          'destination_confirmed', 'recipient_verified', 'completed')
+        AND (destination_transaction_hash IS NULL OR destination_transaction_hash = ${hash})
+    `,
+    ...[
+      ["base_cctp_destination_confirmed", "destination_confirmation", "destination_confirmed", "Base finalized the CCTP destination transaction."],
+      ["base_cctp_recipient_verified", "recipient_verification", "recipient_verified", "The finalized Base mint matches the exact recipient and USDC amount."],
+      ["base_cctp_completed", "completion", "completed", "The recipient received the verified USDC amount on Base."],
+    ].map(([eventKey, stage, status, publicMessage]) => sql`
+      INSERT INTO payment_events (
+        payment_id, event_key, stage, status, network, transaction_hash,
+        public_message, completed_at
+      ) VALUES (
+        ${paymentId}::uuid, ${eventKey}, ${stage}, ${status}, 'base', ${hash},
+        ${publicMessage}, now()
+      ) ON CONFLICT (payment_id, event_key) DO NOTHING
+    `),
+  ]);
+  return { status: "completed", destinationTransactionHash: hash };
+}
