@@ -47,7 +47,7 @@ Owns database/API, auth verification, Base-side integration, AI/voice backend, r
 
 ## In progress
 
-- PR #46 onboarding/auth/username experience. Its Vercel check is failing, and silent mock username availability on database failure must be removed before acceptance.
+- PR #46 onboarding/auth/username experience. Vercel reports that team authorization is required before it can deploy the fork commit; GitHub has no deployment record or preview build log for the current attempt, so this is not evidence of a build failure. GitGuardian currently flags a high-entropy value in `src/stellar/public-config.ts`; that gate needs disposition, but the finding alone is not proof that a secret was committed. Silent mock username availability on database failure must still be removed before acceptance.
 - Payment progression, refresh recovery, and receipt UI across the P0 route matrix.
 
 ## Not implemented or not verified
@@ -55,7 +55,7 @@ Owns database/API, auth verification, Base-side integration, AI/voice backend, r
 - Issue #16 Base/Circle coordinator; owned by @Webghost01-NG, with no implementation PR at this assessment date.
 - Base-to-Base execution and real Base Sepolia settlement evidence.
 - Bidirectional CCTP destination recipient/amount/finality and retry evidence.
-- MoneyGram sandbox flow.
+- MoneyGram sandbox flow. Partner access has not been obtained; new widget integrations require sandbox credentials and company-email registration.
 - External user-testing evidence.
 - Official submission cutoff, artifacts, rubric details, and video requirements.
 
@@ -67,3 +67,11 @@ Owns database/API, auth verification, Base-side integration, AI/voice backend, r
 4. Integrate Issue #16 through PR #44's agreed seam, then prove both CCTP directions and retry/recovery behavior.
 5. Confirm Issue #22 and remaining provider access from official sources.
 6. Preserve the frozen P0 scope and the rule that source confirmation is never cross-chain completion.
+
+## External MoneyGram constraint
+
+- MoneyGram's documented non-custodial Stellar widget flow uses G-addresses.
+- Telya uses Stellar Smart Account Kit contract accounts.
+- Contract-wallet compatibility requires explicit MoneyGram confirmation before implementation.
+- Do not create fake provider responses or simulated completed payments.
+- Continue direct Stellar, CCTP, and the core journey while provider access is blocked.

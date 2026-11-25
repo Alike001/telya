@@ -84,7 +84,8 @@ Build Week is active. The evidence/status baseline is `product/JUDGING-AND-GRANT
 - Smart-account lifecycle, direct Stellar USDC, and Agent Pass have verified real Testnet evidence.
 - PR #44 is the draft Stellar CCTP implementation. Keep it draft until Issue #16 is integrated and both directions have exact destination recipient/amount/finality and retry evidence.
 - Issue #16 belongs to @Webghost01-NG. Do not modify his branch or create a competing Base/Circle coordinator.
-- PR #46 is in progress and must not be treated as complete until its deployment check, fail-closed username behavior, production-code tests, and durable authenticated claim path are accepted.
+- PR #46 is in progress. Its Vercel status is blocked on authorization before deployment, not a proven build failure; no preview build log exists for the current attempt. GitGuardian separately flags a high-entropy public-configuration value and needs disposition, but that finding alone is not proof of a committed secret. Fail-closed username behavior, production-code tests, and the durable authenticated claim path must also be accepted before merge.
+- MoneyGram partner access has not been obtained. The documented non-custodial Stellar widget flow uses G-addresses, while Telya uses Smart Account Kit contract accounts; compatibility requires explicit provider confirmation. Do not simulate provider success, and do not let this external blocker interrupt direct Stellar or CCTP work.
 - Source confirmation never completes a cross-chain payment.
 
 ## Resume rule
