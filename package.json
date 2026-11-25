@@ -8,7 +8,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "build": "tsc --project tsconfig.server.json && node dist/scripts/migrate-stellar-relayer-http.js && next build",
+    "build": "next build",
     "dev": "next dev",
     "start": "next start",
     "test": "vitest run",
