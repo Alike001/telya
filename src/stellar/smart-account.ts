@@ -5,7 +5,7 @@ import {
   type CreateWalletResult,
   type TransactionResult,
 } from "smart-account-kit";
-import { StrKey } from "@stellar/stellar-sdk";
+import { Networks, StrKey } from "@stellar/stellar-sdk";
 
 const TelyaSmartAccount = {
   appName: "Telya",
@@ -21,6 +21,9 @@ export interface SmartAccountPublicConfig {
   readonly networkPassphrase: string;
   readonly accountWasmHash: string;
   readonly webauthnVerifierAddress: string;
+  readonly ed25519VerifierAddress: string;
+  readonly spendingLimitPolicyAddress: string;
+  readonly usdcContract: string;
   readonly relayerUrl: string;
   readonly rpId?: string;
   readonly allowedOrigins?: readonly string[];
@@ -29,6 +32,7 @@ export interface SmartAccountPublicConfig {
 export interface ConnectedSmartAccount {
   readonly contractId: string;
   readonly credentialId: string;
+  readonly deploymentTransactionHash?: string;
 }
 
 export interface SmartAccountLifecycleKit {
@@ -82,6 +86,28 @@ function requirePublicValue(value: string, label: string): string {
 export function validateSmartAccountPublicConfig(
   config: SmartAccountPublicConfig,
 ): SmartAccountPublicConfig {
+  if (config.networkPassphrase !== Networks.TESTNET) {
+    throw new SmartAccountLifecycleError(
+      "INVALID_PUBLIC_CONFIG",
+      "Telya wallet onboarding is restricted to Stellar Testnet",
+    );
+  }
+
+  let rpcUrl: URL;
+  try {
+    rpcUrl = new URL(requirePublicValue(config.rpcUrl, "rpcUrl"));
+  } catch {
+    throw new SmartAccountLifecycleError(
+      "INVALID_PUBLIC_CONFIG",
+      "rpcUrl must be a valid URL",
+    );
+  }
+  if (rpcUrl.protocol !== "https:" || rpcUrl.username || rpcUrl.password) {
+    throw new SmartAccountLifecycleError(
+      "INVALID_PUBLIC_CONFIG",
+      "rpcUrl must be a credential-free HTTPS URL",
+    );
+  }
   const accountWasmHash = requirePublicValue(
     config.accountWasmHash,
     "accountWasmHash",
@@ -106,18 +132,51 @@ export function validateSmartAccountPublicConfig(
     );
   }
 
+  const ed25519VerifierAddress = requirePublicValue(
+    config.ed25519VerifierAddress,
+    "ed25519VerifierAddress",
+  );
+  if (!StrKey.isValidContract(ed25519VerifierAddress)) {
+    throw new SmartAccountLifecycleError(
+      "INVALID_PUBLIC_CONFIG",
+      "ed25519VerifierAddress must be a valid Stellar contract address",
+    );
+  }
+
+  const spendingLimitPolicyAddress = requirePublicValue(
+    config.spendingLimitPolicyAddress,
+    "spendingLimitPolicyAddress",
+  );
+  if (!StrKey.isValidContract(spendingLimitPolicyAddress)) {
+    throw new SmartAccountLifecycleError(
+      "INVALID_PUBLIC_CONFIG",
+      "spendingLimitPolicyAddress must be a valid Stellar contract address",
+    );
+  }
+
+  const usdcContract = requirePublicValue(config.usdcContract, "usdcContract");
+  if (!StrKey.isValidContract(usdcContract)) {
+    throw new SmartAccountLifecycleError(
+      "INVALID_PUBLIC_CONFIG",
+      "usdcContract must be a valid Stellar contract address",
+    );
+  }
+
   const allowedOrigins = config.allowedOrigins?.map((origin) =>
     requirePublicValue(origin, "allowedOrigins entry"),
   );
 
   return {
-    rpcUrl: requirePublicValue(config.rpcUrl, "rpcUrl"),
+    rpcUrl: rpcUrl.toString().replace(/\/$/, ""),
     networkPassphrase: requirePublicValue(
       config.networkPassphrase,
       "networkPassphrase",
     ),
     accountWasmHash,
     webauthnVerifierAddress,
+    ed25519VerifierAddress,
+    spendingLimitPolicyAddress,
+    usdcContract,
     relayerUrl: requirePublicValue(config.relayerUrl, "relayerUrl"),
     ...(config.rpId
       ? { rpId: requirePublicValue(config.rpId, "rpId") }
@@ -130,7 +189,14 @@ export function createBrowserSmartAccountKit(
   rawConfig: SmartAccountPublicConfig,
 ): SmartAccountKit {
   const config = validateSmartAccountPublicConfig(rawConfig);
-  const { allowedOrigins, ...baseConfig } = config;
+  const {
+    allowedOrigins,
+    usdcContract: _usdcContract,
+    spendingLimitPolicyAddress: _spendingLimitPolicyAddress,
+    ...baseConfig
+  } = config;
+  void _usdcContract;
+  void _spendingLimitPolicyAddress;
 
   return new SmartAccountKit({
     ...baseConfig,
@@ -207,7 +273,12 @@ export async function createSmartAccount(
     );
   }
 
-  return accountFromResult(result);
+  return {
+    ...accountFromResult(result),
+    ...(result.submitResult.hash
+      ? { deploymentTransactionHash: result.submitResult.hash }
+      : {}),
+  };
 }
 
 export async function disconnectSmartAccount(

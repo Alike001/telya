@@ -1,6 +1,6 @@
 import { Buffer } from "node:buffer";
 
-import { StrKey } from "@stellar/stellar-sdk";
+import { Keypair, Networks, StrKey } from "@stellar/stellar-sdk";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -19,6 +19,9 @@ const publicConfig: SmartAccountPublicConfig = {
   accountWasmHash:
     "c514d35ea67eaea9bfc1fb3327854c0c06111bc1ddebd4fe217c504c1004b9e1",
   webauthnVerifierAddress: StrKey.encodeContract(Buffer.alloc(32, 1)),
+  ed25519VerifierAddress: StrKey.encodeContract(Buffer.alloc(32, 2)),
+  spendingLimitPolicyAddress: StrKey.encodeContract(Buffer.alloc(32, 3)),
+  usdcContract: StrKey.encodeContract(Buffer.alloc(32, 4)),
   relayerUrl: "/api/stellar/relayer",
 };
 
@@ -58,6 +61,33 @@ describe("validateSmartAccountPublicConfig", () => {
       }),
     ).toThrow("relayerUrl is required");
   });
+
+  it("rejects a non-contract USDC asset configuration", () => {
+    expect(() =>
+      validateSmartAccountPublicConfig({
+        ...publicConfig,
+        usdcContract: Keypair.random().publicKey(),
+      }),
+    ).toThrow("usdcContract must be a valid Stellar contract address");
+  });
+
+  it("rejects a non-Testnet network instead of silently switching networks", () => {
+    expect(() =>
+      validateSmartAccountPublicConfig({
+        ...publicConfig,
+        networkPassphrase: Networks.PUBLIC,
+      }),
+    ).toThrow("restricted to Stellar Testnet");
+  });
+
+  it("rejects RPC URLs that could expose embedded credentials", () => {
+    expect(() =>
+      validateSmartAccountPublicConfig({
+        ...publicConfig,
+        rpcUrl: "https://user:secret@example.com",
+      }),
+    ).toThrow("credential-free HTTPS URL");
+  });
 });
 
 describe("smart-account lifecycle", () => {
@@ -76,6 +106,24 @@ describe("smart-account lifecycle", () => {
     expect(connectWallet).toHaveBeenCalledWith();
   });
 
+  it("restores the same persisted account after a simulated page refresh", async () => {
+    const storedAccount = {
+      contractId: "CREFRESHED",
+      credentialId: "persisted-credential",
+    };
+    const connectWallet = vi.fn().mockResolvedValue(storedAccount);
+    const firstPageKit = lifecycleKit({ connectWallet });
+    const refreshedPageKit = lifecycleKit({ connectWallet });
+
+    await expect(restoreSmartAccount(firstPageKit)).resolves.toEqual(
+      storedAccount,
+    );
+    await expect(restoreSmartAccount(refreshedPageKit)).resolves.toEqual(
+      storedAccount,
+    );
+    expect(connectWallet).toHaveBeenCalledTimes(2);
+  });
+
   it("prompts for a passkey when reconnecting", async () => {
     const connectWallet = vi.fn().mockResolvedValue({
       contractId: "CCONNECTED",
@@ -84,6 +132,23 @@ describe("smart-account lifecycle", () => {
 
     await connectSmartAccount(lifecycleKit({ connectWallet }));
 
+    expect(connectWallet).toHaveBeenCalledWith({ prompt: true });
+  });
+
+  it("restores account state through a prompted re-login", async () => {
+    const disconnect = vi.fn().mockResolvedValue(undefined);
+    const connectWallet = vi.fn().mockResolvedValue({
+      contractId: "CRELOGIN",
+      credentialId: "relogin-credential",
+    });
+    const kit = lifecycleKit({ connectWallet, disconnect });
+
+    await kit.disconnect();
+    await expect(connectSmartAccount(kit)).resolves.toEqual({
+      contractId: "CRELOGIN",
+      credentialId: "relogin-credential",
+    });
+    expect(disconnect).toHaveBeenCalledOnce();
     expect(connectWallet).toHaveBeenCalledWith({ prompt: true });
   });
 
@@ -96,7 +161,13 @@ describe("smart-account lifecycle", () => {
       submitResult: { success: true, hash: "tx-hash" },
     });
 
-    await createSmartAccount(lifecycleKit({ createWallet }), "alice");
+    await expect(
+      createSmartAccount(lifecycleKit({ createWallet }), "alice"),
+    ).resolves.toEqual({
+      contractId: "CCREATED",
+      credentialId: "created-credential",
+      deploymentTransactionHash: "tx-hash",
+    });
 
     expect(createWallet).toHaveBeenCalledWith("Telya", "alice", {
       autoSubmit: true,

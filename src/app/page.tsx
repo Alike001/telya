@@ -1,3 +1,5 @@
+import { StellarWalletPanel } from "./stellar-wallet-panel";
+
 const routes = [
   ["Stellar", "Stellar", "Direct USDC"],
   ["Base", "Base", "Direct USDC"],
@@ -84,6 +86,8 @@ export default function HomePage() {
           </article>
         </div>
       </section>
+
+      <StellarWalletPanel />
 
       <section className="trust-section shell" aria-labelledby="trust-title">
         <p className="eyebrow">One rule at every stage</p>
