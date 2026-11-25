@@ -73,6 +73,7 @@ If you are a developer or AI agent joining the project, start here:
 - [Team responsibilities](product/TEAM.md)
 - [Decision log](product/DECISIONS.md)
 - [Roadmap](product/ROADMAP.md)
+- [Database setup and migrations](db/README.md)
 - [Agent operating rules](AGENTS.md)
 
 ## Development status
