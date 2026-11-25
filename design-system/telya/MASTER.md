@@ -1,6 +1,6 @@
 # Telya Master Design System: High-Trust Consumer Fintech
 
-> **Source of Truth**: Governed by `ui-ux-pro-max` guidelines and synthesized from the world's finest consumer finance & product experiences: **Wise** (transparency & tracking), **Family** (delightful crypto & passkey onboarding), **Linear & Raycast** (keyboard precision & micro-interactions), **Talise** (handle-based money movement & on-chain Agent Passes), and **CowryPay** (conversational AI automation scheme).
+> **Visual Source of Truth**: These tokens and component rules remain subordinate to Telya's product, architecture, decision, and acceptance-test documents. The direction synthesizes patterns from **Wise** (transparency & tracking), **Family** (delightful crypto & passkey onboarding), **Linear & Raycast** (keyboard precision & micro-interactions), **Talise** (handle-based money movement & on-chain Agent Passes), and **CowryPay** (conversational AI automation scheme).
 
 ---
 
@@ -111,7 +111,7 @@ Telya blends the warmth and human simplicity of **Wise** and **Family** with the
 | **Wise** (`wise.com`) | Guaranteed fee breakdown, "You send / Recipient gets", stage tracker | Exact recipient payout principle (recipient gets exactly what was asked; network fees sponsored or broken out). Multi-stage verified timeline. |
 | **Linear** (`linear.app`) | Keyboard shortcuts, command speed, precision border system | Quick command palette, action chips, instant keyboard focus (`Cmd+K` / `/`), subtle 1px border tokens. |
 | **Raycast** (`raycast.com`) | Conversational intent with action pills | Quick actions (`Send @alice 5 USDC`, `Check balance`, `Revoke Agent Pass`). |
-| **Talise** (`talise.io`) | Handle-based payments & on-chain Agent Passes | Send money to `@username` as simply as sending a message. On-chain Agent Pass allowances with daily limits & one-tap revocation. |
+| **Talise** (`talise.io`) | Handle-based payments & on-chain Agent Passes | Send money to `@username` as simply as sending a message. On-chain Agent Pass allowances with cumulative limits, expiry, and owner-authorized revocation. |
 | **CowryPay** (`cowrypay.xyz`) | "Talk-to-Pay" conversational AI automation flow | Natural language input (voice/text) -> Structured intent -> Deterministic route validation -> User passkey confirmation -> Event-driven progress. |
 
 ---
@@ -119,7 +119,7 @@ Telya blends the warmth and human simplicity of **Wise** and **Family** with the
 ## 5. Non-Negotiable UX & Engineering Guardrails
 
 1. **No Emojis as UI Icons**: Always use crisp, fixed viewBox (24x24) SVGs from Lucide or Heroicons.
-2. **Explicit Financial Confirmation**: The AI agent drafts intent; it NEVER signs transactions or accesses keys. Every transfer requires explicit passkey biometric approval.
+2. **Bounded Financial Authorization**: The AI may draft intent but NEVER signs transactions or accesses keys. Owner-controlled payments require explicit passkey approval. Agent Pass payments use a separately held agent signer and must remain within the on-chain direct-Stellar-USDC rule, cumulative limit, and expiry; they do not require a new owner passkey prompt per payment.
 3. **Zero Fake Progress**: Never simulate a timer or fake success. The payment stage must reflect confirmed on-chain or Circle CCTP attestations.
 4. **All Interactive Elements**: Must have `cursor: pointer;`, active states, and focus rings conforming to WCAG 2.1 AA.
 5. **Jargon-Free by Default**: Hide RPCs, Soroban contract hashes, domain IDs, and gas limits behind an optional "Inspect / Judge Mode" toggle.

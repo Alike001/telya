@@ -1,6 +1,6 @@
 # Telya UI/UX Inspo Scrutinization & Architectural Blueprint
 
-This document analyzes and synthesizes the design inspirations, visual standards, and workflow patterns provided for **Telya**, incorporating the guidelines of the `ui-ux-pro-max` design intelligence skill.
+This document analyzes and synthesizes the design inspirations, visual standards, and workflow patterns provided for **Telya**. Repository product and architecture documents remain authoritative when a reference pattern conflicts with frozen scope.
 
 ---
 
@@ -42,10 +42,10 @@ This document analyzes and synthesizes the design inspirations, visual standards
 - **Core Value**: **Self-custodial handle payments (`@username`) & on-chain Agent Passes**.
 - **Key Concepts**:
   - Sending money by handle feels like messaging a friend.
-  - **Agent Pass**: On-chain spending allowances (enforced by smart contracts) granting AI assistants controlled daily caps with instant revocation.
+  - **Agent Pass**: On-chain spending allowances (enforced by smart contracts) granting agents cumulative limits, expiry, and owner-authorized revocation.
   - Passkey-backed self-custody with zero private key handling by servers.
 - **Telya Translation**:
-  - Directly informs Telya's **Stellar Agent Pass** UI: sleek digital card interface displaying active daily spending allowances, transaction limits, expiration dates, and a one-tap emergency revocation killswitch.
+  - Directly informs Telya's **Stellar Agent Pass** UI: a digital card displaying the cumulative allowance, verified spend, expiration ledger, and one-tap revocation.
 
 ### E. Linear (`linear.app` & Linear Web Onboarding) & Raycast (`raycast.com`)
 - **Visual Essence**: Razor-sharp craft, dark/light precision, subtle 1px border tokens (`border-white/5` or `border-black/5`), keyboard-first speed (`Cmd+K`, Enter, Esc).
@@ -73,11 +73,13 @@ The resulting Telya design system combines:
 
 ---
 
-## 3. Pre-Delivery Quality Checklist (from `ui-ux-pro-max`)
+## 3. Implementation Quality Gates
 
-- [x] **No Emojis as UI Icons**: All navigation, action, and status icons use SVG only.
-- [x] **Stable Hover States**: Hover transitions use opacity and color shifts (`transition: all 200ms ease`); no layout shifts.
-- [x] **Cursor Pointer**: Explicit `cursor-pointer` applied across all cards, chips, and interactive buttons.
-- [x] **Accessible Contrast**: All text satisfies WCAG 2.1 AA (headings > 7:1, body > 4.5:1).
-- [x] **Tabular Numerics**: `tabular-nums lining-nums` used on all balances, rates, and fee amounts.
-- [x] **Deterministic Safety**: AI never signs; all transactions require explicit passkey biometrics.
+These remain unchecked until the responsive shell is implemented and verified:
+
+- [ ] **No Emojis as UI Icons**: Navigation, action, and status icons use SVG only.
+- [ ] **Stable Hover States**: Hover transitions do not introduce layout shifts.
+- [ ] **Pointer and Keyboard Semantics**: Interactive elements expose correct cursor, focus, and keyboard behavior.
+- [ ] **Accessible Contrast**: Implemented text and controls satisfy WCAG 2.1 AA.
+- [ ] **Tabular Numerics**: `tabular-nums lining-nums` is applied to balances, rates, and fee amounts.
+- [ ] **Deterministic Safety**: AI never signs; owner payments use passkey authorization, while Agent Pass payments remain bounded by their on-chain rule.

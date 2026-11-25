@@ -10,16 +10,16 @@ In compliance with Telya architectural rules, the timeline is driven strictly by
 
 ### A. Direct Stellar Route (`Stellar -> Stellar USDC`)
 ```
-[●] 1. Authorized with Passkey (0.2s)
- └── [●] 2. Submitted to Stellar Network (1.1s)
-      └── [●] 3. Confirmed & Delivered to @alice (2.4s) — FINAL
+[●] 1. Authorized by owner passkey or active Agent Pass
+ └── [●] 2. Submitted to Stellar Network
+      └── [●] 3. Recipient and amount verified — FINAL
 ```
 
 ### B. Cross-Chain Circle CCTP Route (`Base -> Stellar USDC`)
 ```
 [●] 1. Authorized with Passkey
  └── [●] 2. Burn Confirmed on Base (BaseScan tx proof)
-      └── [●] 3. Circle Attestation In Flight (~10-15 mins)
+      └── [●] 3. Circle Attestation In Flight (show a provider estimate only when available)
            └── [●] 4. Mint Submitted to Stellar (Stellar Expert tx proof)
                 └── [●] 5. Destination Verified: 5.00 USDC delivered to @alice — FINAL
 ```

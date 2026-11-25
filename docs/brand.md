@@ -113,7 +113,7 @@ Telya speaks with the confidence of a private banker and the clarity of a modern
    - ❌ *"Submitting CCTP burn message on Base domain 6..."*
    - ✅ *"Moving funds between Base and Stellar via Circle..."*
    - ❌ *"Allowance limit exceeded on contract `CC3CE...`"*
-   - ✅ *"This agent has reached its daily 50 USDC limit."*
+   - ✅ *"This payment would exceed the agent's cumulative 50 USDC allowance."*
 2. **Deterministic Route Explanation ("Why this route?")**:
    - Always explain choices plainly:
      - *"Direct Stellar transfer selected because @alice prefers receiving on Stellar."*
@@ -143,7 +143,7 @@ Rendered before any funds move:
 - Source network & Destination network.
 - Transfer breakdown:
   - Amount: `5.00 USDC`
-  - Network Fee: `Sponsored (Free)`
+  - Network/provider fee: show the calculated value, or `Sponsored` only when sponsorship applies to the selected route
   - Total: `5.00 USDC`
 - Clear explanation badge: *"Fastest & lowest cost route"*.
 - Actions: **Confirm with Passkey** (primary) and **Cancel** (subtle).
@@ -160,9 +160,9 @@ Step tracker with active state pulses:
 - Styled like an elegant digital membership card or allowance ticket.
 - Visual elements:
   - Agent Name / Purpose (e.g., *"Subscription Agent"*).
-  - Spending progress bar (`12.50 / 50.00 USDC`).
-  - Active expiration date (`Valid until Nov 30, 2026`).
-  - One-tap **"Revoke Pass"** destructive button.
+  - Cumulative spending progress bar (`12.50 / 50.00 USDC`).
+  - On-chain expiration ledger, with a derived approximate time only when current ledger data is available.
+  - Passkey-authorized **"Revoke Pass"** destructive button.
 
 ---
 

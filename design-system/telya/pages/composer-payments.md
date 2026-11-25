@@ -25,11 +25,12 @@ sequenceDiagram
     Note over Engine: AI is done. Deterministic code takes over.
     Engine->>Engine: Resolve @alice to Stellar address
     Engine->>Engine: Verify route: Base -> Stellar (Circle CCTP)
-    Engine->>Engine: Calculate fees: Sponsored (0 USDC)
+    Engine->>Engine: Calculate and display applicable fees
     Engine-->>Card: Render immutable Review Card
     Card->>User: Displays exact route, recipient amount, fee breakdown
-    User->>Passkey: Approves with Touch ID / Face ID
-    Passkey->>Rail: Signs & broadcasts transaction (LLM never touches keys)
+    User->>Passkey: Authorizes the exact owner-controlled operation
+    Passkey-->>Engine: Returns owner authorization (LLM never touches keys)
+    Engine->>Rail: Executes through the validated deterministic payment system
     Rail-->>User: Emits verified state events to Timeline
 ```
 
@@ -62,9 +63,9 @@ Before any money moves, an interactive review card renders in the conversation s
 1. **Recipient Header**: Recipient avatar, verified badge, `@alice`, and resolved destination network (`Stellar`).
 2. **Transfer Line Items**:
    - **Amount to Send**: `5.00 USDC`
-   - **Transfer Fee**: `Sponsored (Free)` — tagged with green pill badge.
+   - **Transfer Fee**: Show the calculated fee, or `Sponsored` only when sponsorship is actually configured for that route.
    - **Route Selected**: `Circle CCTP (Base → Stellar)` with explanation tooltip: *"Selected because your funds are on Base and @alice prefers Stellar."*
-   - **Recipient Gets**: `5.00 USDC` (highlighted in bold tabular numbers).
+   - **Recipient Gets**: `5.00 USDC` (highlighted in bold tabular numbers; provider/network costs remain separate).
 3. **Action Triggers**:
    - Primary: **"Confirm with Passkey"** (Deep navy button with fingerprint SVG).
    - Secondary: **"Cancel"** (Muted text link).
@@ -76,5 +77,5 @@ Before any money moves, an interactive review card renders in the conversation s
 If the intent is ambiguous (e.g. user has funds on both Stellar and Base and says *"Send @bob 10 USDC"*):
 - Telya **NEVER** silently guesses.
 - An interactive option selector is displayed:
-  - Option A: *"Send from Stellar USDC (Instant · Free)"*
-  - Option B: *"Send from Base USDC via Circle CCTP (~10-15 mins · Free)"*
+  - Option A: *"Send from Stellar USDC"* with its current fee and timing.
+  - Option B: *"Send from Base USDC via Circle CCTP"* with its current fee and provider estimate.
