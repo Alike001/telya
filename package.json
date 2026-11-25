@@ -4,9 +4,13 @@
   "private": true,
   "description": "Conversational money movement on Stellar",
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "db:migrate": "tsc --project tsconfig.server.json && node dist/scripts/migrate.js"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",
@@ -15,6 +19,8 @@
   },
   "packageManager": "pnpm@11.24.0",
   "dependencies": {
+    "@neondatabase/serverless": "1.2.1",
+    "@privy-io/node": "0.42.0",
     "@stellar/stellar-sdk": "^16.4.1",
     "smart-account-kit": "0.10.0"
   }
