@@ -13,3 +13,19 @@ export type {
   SmartAccountLifecycleKit,
   SmartAccountPublicConfig,
 } from "./smart-account";
+
+export {
+  STELLAR_USDC_DECIMALS,
+  StellarUsdcValidationError,
+  normalizeStellarUsdcAmount,
+  submitStellarUsdcTransfer,
+  verifyStellarUsdcTransfer,
+} from "./usdc";
+
+export type {
+  StellarRpcServer,
+  StellarTransactionRpc,
+  StellarUsdcSubmission,
+  StellarUsdcTransferKit,
+  StellarUsdcVerification,
+} from "./usdc";
