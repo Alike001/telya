@@ -21,6 +21,7 @@ export interface SmartAccountPublicConfig {
   readonly networkPassphrase: string;
   readonly accountWasmHash: string;
   readonly webauthnVerifierAddress: string;
+  readonly usdcContract: string;
   readonly relayerUrl: string;
   readonly rpId?: string;
   readonly allowedOrigins?: readonly string[];
@@ -129,6 +130,14 @@ export function validateSmartAccountPublicConfig(
     );
   }
 
+  const usdcContract = requirePublicValue(config.usdcContract, "usdcContract");
+  if (!StrKey.isValidContract(usdcContract)) {
+    throw new SmartAccountLifecycleError(
+      "INVALID_PUBLIC_CONFIG",
+      "usdcContract must be a valid Stellar contract address",
+    );
+  }
+
   const allowedOrigins = config.allowedOrigins?.map((origin) =>
     requirePublicValue(origin, "allowedOrigins entry"),
   );
@@ -141,6 +150,7 @@ export function validateSmartAccountPublicConfig(
     ),
     accountWasmHash,
     webauthnVerifierAddress,
+    usdcContract,
     relayerUrl: requirePublicValue(config.relayerUrl, "relayerUrl"),
     ...(config.rpId
       ? { rpId: requirePublicValue(config.rpId, "rpId") }
@@ -153,7 +163,8 @@ export function createBrowserSmartAccountKit(
   rawConfig: SmartAccountPublicConfig,
 ): SmartAccountKit {
   const config = validateSmartAccountPublicConfig(rawConfig);
-  const { allowedOrigins, ...baseConfig } = config;
+  const { allowedOrigins, usdcContract: _usdcContract, ...baseConfig } = config;
+  void _usdcContract;
 
   return new SmartAccountKit({
     ...baseConfig,

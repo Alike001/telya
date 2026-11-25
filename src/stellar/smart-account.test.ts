@@ -1,6 +1,6 @@
 import { Buffer } from "node:buffer";
 
-import { Networks, StrKey } from "@stellar/stellar-sdk";
+import { Keypair, Networks, StrKey } from "@stellar/stellar-sdk";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -19,6 +19,7 @@ const publicConfig: SmartAccountPublicConfig = {
   accountWasmHash:
     "c514d35ea67eaea9bfc1fb3327854c0c06111bc1ddebd4fe217c504c1004b9e1",
   webauthnVerifierAddress: StrKey.encodeContract(Buffer.alloc(32, 1)),
+  usdcContract: StrKey.encodeContract(Buffer.alloc(32, 2)),
   relayerUrl: "/api/stellar/relayer",
 };
 
@@ -57,6 +58,15 @@ describe("validateSmartAccountPublicConfig", () => {
         relayerUrl: " ",
       }),
     ).toThrow("relayerUrl is required");
+  });
+
+  it("rejects a non-contract USDC asset configuration", () => {
+    expect(() =>
+      validateSmartAccountPublicConfig({
+        ...publicConfig,
+        usdcContract: Keypair.random().publicKey(),
+      }),
+    ).toThrow("usdcContract must be a valid Stellar contract address");
   });
 
   it("rejects a non-Testnet network instead of silently switching networks", () => {

@@ -14,6 +14,7 @@ export function smartAccountPublicConfigFromEnvironment(
       environment.STELLAR_NETWORK_PASSPHRASE ?? Networks.TESTNET,
     accountWasmHash: environment.STELLAR_ACCOUNT_WASM_HASH ?? "",
     webauthnVerifierAddress: environment.STELLAR_WEBAUTHN_VERIFIER ?? "",
+    usdcContract: environment.STELLAR_USDC_SAC ?? "",
     relayerUrl: environment.STELLAR_RELAYER_URL ?? "/api/stellar/relayer",
     ...(environment.STELLAR_WEBAUTHN_RP_ID
       ? { rpId: environment.STELLAR_WEBAUTHN_RP_ID }

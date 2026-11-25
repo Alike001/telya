@@ -310,7 +310,7 @@ function decodeTransferEvent(
   }
 }
 
-function decimalFromRawAmount(amount: bigint): DecimalAmount {
+export function stellarUsdcAmountFromRawUnits(amount: bigint): DecimalAmount {
   const scale = 10n ** BigInt(STELLAR_USDC_DECIMALS);
   const whole = amount / scale;
   const fraction = (amount % scale)
@@ -377,7 +377,7 @@ export async function verifyStellarUsdcTransfer(input: {
       ledger: transaction.ledger,
       sender: exactTransfer.sender,
       recipient: exactTransfer.recipient,
-      amount: decimalFromRawAmount(exactTransfer.amountRaw),
+      amount: stellarUsdcAmountFromRawUnits(exactTransfer.amountRaw),
     };
   }
 
@@ -393,7 +393,7 @@ export async function verifyStellarUsdcTransfer(input: {
       ledger: transaction.ledger,
       reason: actual ? "recipient_mismatch" : "transfer_event_missing",
       actualRecipient: actual?.recipient ?? null,
-      actualAmount: actual ? decimalFromRawAmount(actual.amountRaw) : null,
+      actualAmount: actual ? stellarUsdcAmountFromRawUnits(actual.amountRaw) : null,
     };
   }
 
@@ -403,7 +403,7 @@ export async function verifyStellarUsdcTransfer(input: {
     ledger: transaction.ledger,
     reason: "amount_mismatch",
     actualRecipient: recipientTransfer.recipient,
-    actualAmount: decimalFromRawAmount(recipientTransfer.amountRaw),
+    actualAmount: stellarUsdcAmountFromRawUnits(recipientTransfer.amountRaw),
   };
 }
 

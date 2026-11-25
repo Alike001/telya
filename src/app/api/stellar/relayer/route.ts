@@ -3,14 +3,22 @@ import "server-only";
 import {
   parseStellarRelayerRequest,
   StellarRelayerError,
-  submitStellarDeployment,
-  validateStellarDeploymentSubmission,
+  submitStellarRelayerTransaction,
+  validateStellarRelayerSubmission,
 } from "../../../../stellar/relayer";
 import {
+  stellarUsdcAmountFromRawUnits,
+  verifyStellarUsdcTransfer,
+} from "../../../../stellar/usdc";
+import {
+  completeStellarUsdcTransferRequest,
   completeStellarRelayerRequest,
+  recordStellarUsdcTransferAuthorization,
+  recordStellarUsdcTransferSubmission,
   reserveStellarRelayerRequest,
   stellarRelayerRequestIdentity,
 } from "../../../../server/stellar-relayer-requests";
+import { rpc } from "@stellar/stellar-sdk";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -35,7 +43,7 @@ function errorResponse(error: unknown): Response {
   return Response.json(
     {
       success: false,
-      error: "The Stellar deployment relayer is temporarily unavailable",
+      error: "The Stellar relayer is temporarily unavailable",
       errorCode: "RELAYER_UNAVAILABLE",
     },
     { status: 503, headers: { "cache-control": "no-store" } },
@@ -44,6 +52,9 @@ function errorResponse(error: unknown): Response {
 
 export async function POST(request: Request): Promise<Response> {
   let reservedRequestHash: string | undefined;
+  let submittedTransfer:
+    | { readonly transactionHash: string; readonly ledger: number }
+    | undefined;
   try {
     const contentLength = Number(request.headers.get("content-length") ?? 0);
     if (!Number.isSafeInteger(contentLength) || contentLength > 48_000) {
@@ -62,9 +73,10 @@ export async function POST(request: Request): Promise<Response> {
       );
     }
     const submission = parseStellarRelayerRequest(await request.json());
-    const validated = validateStellarDeploymentSubmission(submission, {
+    const validated = validateStellarRelayerSubmission(submission, {
       accountWasmHash: process.env.STELLAR_ACCOUNT_WASM_HASH?.toLowerCase() ?? "",
       webauthnVerifierAddress: process.env.STELLAR_WEBAUTHN_VERIFIER ?? "",
+      usdcContract: process.env.STELLAR_USDC_SAC ?? "",
     });
     const forwardedFor = request.headers
       .get("x-forwarded-for")
@@ -90,23 +102,58 @@ export async function POST(request: Request): Promise<Response> {
     if (reservation.decision === "in_progress") {
       throw new StellarRelayerError(
         "SUBMISSION_FAILED",
-        "This smart-account deployment is already in progress",
+        "This sponsored Stellar operation is already in progress",
         409,
       );
     }
     if (reservation.decision === "limit_reached") {
       throw new StellarRelayerError(
         "FEE_LIMIT_EXCEEDED",
-        "The Testnet sponsor deployment limit has been reached",
+        "The Testnet sponsor daily limit has been reached",
         429,
       );
     }
     reservedRequestHash = identity.requestHash;
-    const result = await submitStellarDeployment(validated);
-    await completeStellarRelayerRequest(identity.requestHash, {
-      status: "succeeded",
-      transactionHash: result.hash,
-    });
+    if (validated.kind === "usdc_transfer") {
+      await recordStellarUsdcTransferAuthorization(identity.requestHash, validated);
+    }
+    const result = await submitStellarRelayerTransaction(validated);
+    if (validated.kind === "usdc_transfer") {
+      submittedTransfer = {
+        transactionHash: result.hash,
+        ledger: result.ledger,
+      };
+      await recordStellarUsdcTransferSubmission(
+        identity.requestHash,
+        submittedTransfer,
+      );
+      const verification = await verifyStellarUsdcTransfer({
+        rpc: new rpc.Server(process.env.STELLAR_RPC_URL ?? ""),
+        txHash: result.hash,
+        tokenContract: validated.tokenContract,
+        expectedSender: validated.sender,
+        expectedRecipient: validated.recipient,
+        expectedAmount: stellarUsdcAmountFromRawUnits(validated.amountRaw),
+      });
+      if (verification.status !== "verified") {
+        throw new StellarRelayerError(
+          "SUBMISSION_FAILED",
+          "The Stellar transaction finalized without exact recipient and amount verification",
+          502,
+        );
+      }
+      await completeStellarUsdcTransferRequest(identity.requestHash, {
+        transactionHash: result.hash,
+        ledger: verification.ledger,
+        recipient: verification.recipient,
+        amountRaw: validated.amountRaw,
+      });
+    } else {
+      await completeStellarRelayerRequest(identity.requestHash, {
+        status: "succeeded",
+        transactionHash: result.hash,
+      });
+    }
     return Response.json(
       { success: true, hash: result.hash, status: "SUCCESS" },
       { headers: { "cache-control": "no-store" } },
@@ -124,6 +171,19 @@ export async function POST(request: Request): Promise<Response> {
         // Preserve the original failure response. A stale pending reservation
         // fails closed and can be reconciled by an operator.
       }
+    }
+    if (submittedTransfer) {
+      // The on-chain operation already finalized. Return its hash so the SDK
+      // and UI can reconcile chain state, while the durable receipt remains
+      // failed instead of claiming unverified completion.
+      return Response.json(
+        {
+          success: true,
+          hash: submittedTransfer.transactionHash,
+          status: "SUCCESS",
+        },
+        { headers: { "cache-control": "no-store" } },
+      );
     }
     return errorResponse(error);
   }

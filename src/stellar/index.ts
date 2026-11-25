@@ -18,6 +18,7 @@ export {
   STELLAR_USDC_DECIMALS,
   StellarUsdcValidationError,
   normalizeStellarUsdcAmount,
+  stellarUsdcAmountFromRawUnits,
   submitStellarUsdcTransfer,
   verifyStellarUsdcTransfer,
 } from "./usdc";
