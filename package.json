@@ -1,0 +1,14 @@
+{
+  "name": "telya",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Conversational money movement on Stellar",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  },
+  "packageManager": "pnpm@11.24.0"
+}
