@@ -39,11 +39,25 @@ Stellar passkey account flow:
 5. Refresh the page and verify the same contract restores silently.
 6. Sign out on this browser, choose **Reconnect existing account**, complete the
    passkey prompt, and verify the same contract reconnects.
+7. Fund the smart-account contract with Circle Testnet USDC, enter a distinct
+   Stellar Testnet recipient and amount, then choose **Authorize and send**.
+8. Approve the exact transfer with the account passkey. Verify the receipt shows
+   `completed` only after Stellar finality and exact recipient/amount matching.
+9. Refresh the page and verify the last receipt and its event timeline restore.
 
 The UI reports deployment as connected only after the relayer returns a real
 transaction hash and Smart Account Kit verifies the confirmed deployment. A
 relayer, network, or on-chain failure remains visible as a failure and is never
 presented as account creation success.
+
+Direct Stellar payments use the configured `STELLAR_USDC_SAC` only. Smart
+Account Kit signs the exact token invocation with the user's passkey; the
+server relayer allowlists and revalidates its token, sender, recipient, amount,
+and authorization before paying the network fee. Durable events record
+authorization, submission, destination finality, recipient verification, and
+completion. `GET /api/stellar/transfers/<transaction-hash>` returns the
+consumer-safe receipt used for refresh recovery. It never returns passkey data,
+the sponsor key, database credentials, or internal diagnostics.
 
 Runtime behavior:
 

@@ -12,6 +12,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   StellarUsdcValidationError,
   normalizeStellarUsdcAmount,
+  stellarUsdcAmountFromRawUnits,
   submitStellarUsdcTransfer,
   verifyStellarUsdcTransfer,
   type StellarTransactionRpc,
@@ -68,6 +69,10 @@ describe("normalizeStellarUsdcAmount", () => {
     expect(() => normalizeStellarUsdcAmount("1.00000001")).toThrowError(
       StellarUsdcValidationError,
     );
+  });
+
+  it("formats exact atomic units for durable receipts", () => {
+    expect(stellarUsdcAmountFromRawUnits(51_200_000n)).toBe("5.12");
   });
 });
 

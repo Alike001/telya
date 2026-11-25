@@ -6,7 +6,9 @@ import {
   Keypair,
   Networks,
   Operation,
+  StrKey,
   TransactionBuilder,
+  scValToNative,
   xdr,
 } from "@stellar/stellar-sdk";
 import { rpc } from "@stellar/stellar-sdk";
@@ -41,9 +43,24 @@ export interface StellarDeploymentSubmission {
 }
 
 export interface ValidatedStellarDeployment {
+  readonly kind: "deployment";
   readonly func: xdr.HostFunction;
   readonly auth: readonly xdr.SorobanAuthorizationEntry[];
 }
+
+export interface ValidatedStellarUsdcTransfer {
+  readonly kind: "usdc_transfer";
+  readonly func: xdr.HostFunction;
+  readonly auth: readonly xdr.SorobanAuthorizationEntry[];
+  readonly tokenContract: string;
+  readonly sender: string;
+  readonly recipient: string;
+  readonly amountRaw: bigint;
+}
+
+export type ValidatedStellarRelayerSubmission =
+  | ValidatedStellarDeployment
+  | ValidatedStellarUsdcTransfer;
 
 function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
   return left.length === right.length && left.every((byte, index) => byte === right[index]);
@@ -236,7 +253,153 @@ export function validateStellarDeploymentSubmission(
     );
   }
 
-  return { func, auth };
+  return { kind: "deployment", func, auth };
+}
+
+function requireTransferAddress(value: xdr.ScVal, label: string): string {
+  if (value.switch().name !== "scvAddress") {
+    throw new StellarRelayerError(
+      "FORBIDDEN_DEPLOYMENT",
+      `${label} must be a Stellar address`,
+      403,
+    );
+  }
+  return addressOf(value.address(), `${label} must be a Stellar address`);
+}
+
+/**
+ * Allow only the exact passkey-authorized USDC transfer shape emitted by
+ * Smart Account Kit. The browser signs this invocation; the server pays only
+ * after binding the auth entry to the same sender, token, recipient and amount.
+ */
+export function validateStellarUsdcTransferSubmission(
+  submission: StellarDeploymentSubmission,
+  options: { usdcContract: string },
+): ValidatedStellarUsdcTransfer {
+  let func: xdr.HostFunction;
+  let auth: xdr.SorobanAuthorizationEntry[];
+  try {
+    func = xdr.HostFunction.fromXDR(submission.func, "base64");
+    auth = submission.auth.map((entry) =>
+      xdr.SorobanAuthorizationEntry.fromXDR(entry, "base64"),
+    );
+  } catch {
+    throw new StellarRelayerError(
+      "INVALID_REQUEST",
+      "func/auth contains invalid XDR",
+      400,
+    );
+  }
+
+  if (func.switch().name !== "hostFunctionTypeInvokeContract" || auth.length !== 1) {
+    throw new StellarRelayerError(
+      "FORBIDDEN_DEPLOYMENT",
+      "Only one passkey-authorized USDC transfer is accepted",
+      403,
+    );
+  }
+
+  const invoke = func.invokeContract();
+  const tokenContract = contractIdOf(
+    invoke.contractAddress(),
+    "Transfer token must be a contract",
+  );
+  if (tokenContract !== options.usdcContract) {
+    throw new StellarRelayerError(
+      "FORBIDDEN_DEPLOYMENT",
+      "Transfer token is not the allowlisted Testnet USDC contract",
+      403,
+    );
+  }
+  const args = invoke.args();
+  if (invoke.functionName().toString() !== "transfer" || args.length !== 3) {
+    throw new StellarRelayerError(
+      "FORBIDDEN_DEPLOYMENT",
+      "Only the USDC transfer function is accepted",
+      403,
+    );
+  }
+
+  const sender = requireTransferAddress(args[0]!, "Transfer sender");
+  const recipient = requireTransferAddress(args[1]!, "Transfer recipient");
+  if (!StrKey.isValidContract(sender) || sender === recipient) {
+    throw new StellarRelayerError(
+      "FORBIDDEN_DEPLOYMENT",
+      "Transfer sender must be a distinct smart-account contract",
+      403,
+    );
+  }
+  const amount = scValToNative(args[2]!) as unknown;
+  if (typeof amount !== "bigint" || amount <= 0n) {
+    throw new StellarRelayerError(
+      "FORBIDDEN_DEPLOYMENT",
+      "Transfer amount must be positive atomic USDC units",
+      403,
+    );
+  }
+
+  const entry = auth[0]!;
+  if (entry.credentials().switch().name !== "sorobanCredentialsAddress") {
+    throw new StellarRelayerError(
+      "FORBIDDEN_DEPLOYMENT",
+      "Transfer requires smart-account address credentials",
+      403,
+    );
+  }
+  const credentials = entry.credentials().address();
+  const credentialAddress = addressOf(
+    credentials.address(),
+    "Transfer credential address is invalid",
+  );
+  const root = entry.rootInvocation();
+  const rootFunction = root.function();
+  if (
+    credentialAddress !== sender ||
+    credentials.signature().switch().name === "scvVoid" ||
+    credentials.signatureExpirationLedger() <= 0 ||
+    root.subInvocations().length !== 0 ||
+    rootFunction.switch().name !== "sorobanAuthorizedFunctionTypeContractFn" ||
+    !bytesEqual(rootFunction.contractFn().toXDR(), invoke.toXDR())
+  ) {
+    throw new StellarRelayerError(
+      "FORBIDDEN_DEPLOYMENT",
+      "Transfer authorization does not exactly match the USDC transfer",
+      403,
+    );
+  }
+
+  return {
+    kind: "usdc_transfer",
+    func,
+    auth,
+    tokenContract,
+    sender,
+    recipient,
+    amountRaw: amount,
+  };
+}
+
+export function validateStellarRelayerSubmission(
+  submission: StellarDeploymentSubmission,
+  options: {
+    accountWasmHash: string;
+    webauthnVerifierAddress: string;
+    usdcContract: string;
+  },
+): ValidatedStellarRelayerSubmission {
+  let func: xdr.HostFunction;
+  try {
+    func = xdr.HostFunction.fromXDR(submission.func, "base64");
+  } catch {
+    throw new StellarRelayerError(
+      "INVALID_REQUEST",
+      "func/auth contains invalid XDR",
+      400,
+    );
+  }
+  return func.switch().name === "hostFunctionTypeCreateContractV2"
+    ? validateStellarDeploymentSubmission(submission, options)
+    : validateStellarUsdcTransferSubmission(submission, options);
 }
 
 function requiredEnvironmentValue(
@@ -269,8 +432,8 @@ function maxResourceFee(environment: NodeJS.ProcessEnv): bigint {
   }
 }
 
-export async function submitStellarDeployment(
-  validated: ValidatedStellarDeployment,
+export async function submitStellarRelayerTransaction(
+  validated: ValidatedStellarRelayerSubmission,
   environment: NodeJS.ProcessEnv = process.env,
 ): Promise<{ hash: string; ledger: number }> {
   const rpcUrl = requiredEnvironmentValue(environment, "STELLAR_RPC_URL");
@@ -282,6 +445,7 @@ export async function submitStellarDeployment(
     environment,
     "STELLAR_WEBAUTHN_VERIFIER",
   );
+  const usdcContract = requiredEnvironmentValue(environment, "STELLAR_USDC_SAC");
   const sponsorSecret = requiredEnvironmentValue(
     environment,
     "STELLAR_FEE_SPONSOR_SECRET",
@@ -299,10 +463,18 @@ export async function submitStellarDeployment(
     func: validated.func.toXDR("base64"),
     auth: validated.auth.map((entry) => entry.toXDR("base64")),
   };
-  const checked = validateStellarDeploymentSubmission(submission, {
+  const checked = validateStellarRelayerSubmission(submission, {
     accountWasmHash,
     webauthnVerifierAddress,
+    usdcContract,
   });
+  if (checked.kind !== validated.kind) {
+    throw new StellarRelayerError(
+      "FORBIDDEN_DEPLOYMENT",
+      "Relayer operation changed during validation",
+      403,
+    );
+  }
 
   let sponsor: Keypair;
   try {
@@ -346,14 +518,14 @@ export async function submitStellarDeployment(
   if (!rpc.Api.isSimulationSuccess(simulation) || rpc.Api.isSimulationRestore(simulation)) {
     throw new StellarRelayerError(
       "SUBMISSION_FAILED",
-      "Stellar rejected the smart-account deployment simulation",
+      "Stellar rejected the sponsored operation simulation",
       422,
     );
   }
   if (BigInt(simulation.minResourceFee) > maxResourceFee(environment)) {
     throw new StellarRelayerError(
       "FEE_LIMIT_EXCEEDED",
-      "Smart-account deployment exceeds the sponsor fee ceiling",
+      "The sponsored operation exceeds the fee ceiling",
       413,
     );
   }
@@ -364,7 +536,7 @@ export async function submitStellarDeployment(
   if (sent.status === "ERROR") {
     throw new StellarRelayerError(
       "SUBMISSION_FAILED",
-      "Stellar rejected the smart-account deployment",
+      "Stellar rejected the sponsored operation",
       502,
     );
   }
@@ -374,12 +546,19 @@ export async function submitStellarDeployment(
     throw new StellarRelayerError(
       "SUBMISSION_FAILED",
       result.status === rpc.Api.GetTransactionStatus.FAILED
-        ? "Smart-account deployment failed on-chain"
-        : "Smart-account deployment confirmation timed out",
+        ? "The sponsored operation failed on-chain"
+        : "The sponsored operation confirmation timed out",
       502,
     );
   }
   return { hash: sent.hash, ledger: result.ledger };
+}
+
+export async function submitStellarDeployment(
+  validated: ValidatedStellarDeployment,
+  environment: NodeJS.ProcessEnv = process.env,
+): Promise<{ hash: string; ledger: number }> {
+  return submitStellarRelayerTransaction(validated, environment);
 }
 
 export function parseStellarRelayerRequest(body: unknown): StellarDeploymentSubmission {
