@@ -1,3 +1,6 @@
+import { ArrowRight } from "lucide-react";
+import { SiteHeader } from "./components/site-header";
+import { MobileBottomDock } from "./components/mobile-bottom-dock";
 import { StellarWalletPanel } from "./stellar-wallet-panel";
 
 const routes = [
@@ -10,20 +13,7 @@ const routes = [
 export default function HomePage() {
   return (
     <main>
-      <header className="site-header shell">
-        <a className="wordmark" href="#top" aria-label="Telya home">
-          Telya<span aria-hidden="true">.</span>
-        </a>
-        <div className="header-actions">
-          <span className="network-badge">
-            <span className="status-dot" aria-hidden="true" />
-            Testnet
-          </span>
-          <a className="health-link" href="/api/health">
-            System health
-          </a>
-        </div>
-      </header>
+      <SiteHeader />
 
       <section className="hero shell" id="top">
         <div className="hero-copy">
@@ -36,8 +26,8 @@ export default function HomePage() {
           </p>
           <div className="hero-actions">
             <a className="primary-action" href="#route-preview">
-              See the route preview
-              <span aria-hidden="true">→</span>
+              <span>See the route preview</span>
+              <ArrowRight className="inline-arrow" aria-hidden="true" />
             </a>
             <span className="build-note">Public Build Week shell</span>
           </div>
@@ -87,9 +77,11 @@ export default function HomePage() {
         </div>
       </section>
 
-      <StellarWalletPanel />
+      <div id="agent-pass">
+        <StellarWalletPanel />
+      </div>
 
-      <section className="trust-section shell" aria-labelledby="trust-title">
+      <section className="trust-section shell" id="activity" aria-labelledby="trust-title">
         <p className="eyebrow">One rule at every stage</p>
         <div className="trust-grid">
           <h2 id="trust-title">Where is my money right now?</h2>
@@ -115,7 +107,9 @@ export default function HomePage() {
             <article className="route-row" key={`${source}-${destination}`}>
               <span className="route-number">0{index + 1}</span>
               <strong>{source}</strong>
-              <span className="row-arrow" aria-hidden="true">→</span>
+              <span className="row-arrow" aria-hidden="true">
+                <ArrowRight className="row-arrow-icon" />
+              </span>
               <strong>{destination}</strong>
               <span className="route-type">{rail}</span>
             </article>
@@ -123,13 +117,15 @@ export default function HomePage() {
         </div>
       </section>
 
-      <footer className="site-footer shell">
+      <footer className="site-footer shell" id="contacts">
         <div>
           <strong>Telya</strong>
           <p>Built on Stellar Testnet and Base Sepolia.</p>
         </div>
         <p>Live financial actions will always use real Testnet infrastructure.</p>
       </footer>
+
+      <MobileBottomDock />
     </main>
   );
 }
