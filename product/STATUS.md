@@ -45,10 +45,10 @@ Open draft on Webghost01-NG/telya, latest observed head 481cbba0f8dbda55fe06a05f
 Open draft on Prudentdev-xyz/telya, now at `e8a4ca2`. Codex removed the fabricated Privy DID and browser-triggered wallet verification; claims require a real server-verified Privy session and an already verified Stellar wallet belonging to that user. The wallet check and username claim are one SQL statement. Independently rerun checks: 6 test files / 60 tests passed; typecheck, build, server TypeScript and diff check passed. **Still blocked:** the browser has no Privy token or proof-of-control wallet binding flow, so a new user's claim fails closed. Real database race/claim/reconnect tests and Vercel authorization are pending. Do not merge or close Issue #5.
 
 ### PR #49 — conversational experience, Issue #6
-Open draft on Prudentdev-xyz/telya, latest observed head 56553d6312e3185a5c9410353e540e95124ecf7d. Prudent reported removal of timer-based success, transaction-hash requirement, insufficient-funds behavior, 70 tests and typecheck/build passing. **Critical blockers found in code audit:** balances remain initialized to 0.00 and are never fetched; payment confirm sends a placeholder function string and empty authorization to an XDR relayer; recipient handles are not resolved into verified addresses; route fees remain hardcoded; and a returned hash is not sufficient to claim verified completion. Review comment 7189270232 records the findings. This PR contains onboarding changes from #46 and must be reconciled after #46 is fixed/merged. Vercel is authorization-required, not a successful preview or a code build failure.
+Open draft on Prudentdev-xyz/telya, now at `3336eb6`. Codex removed the application paths that showed invented zero balances, fixed Agent Pass limits, hardcoded fees, placeholder relayer submission and hash-only success. The composer now states that payment review is unavailable until server-verified recipient, balance and fee data and real passkey execution are connected. Exact decimal text is preserved by the intent parser. The #46 identity guard was cherry-picked to this branch and must be reconciled after #46 merges. Local validation: 7 test files / 68 tests, typecheck, build, server TypeScript and diff check passed. Vercel still requires fork authorization. This is a safety cleanup, not completion of Issue #6.
 
 ### PR #50 — execution documentation
-Merged as `ab8d4f5`; current main is `a611173` after a tracker reconciliation commit. The playbook, tracker and execution plan are available on main.
+Merged as `ab8d4f5`; the playbook, tracker and execution plan are available on main. The latest tracker audit was merged in PR #52.
 
 ## Remaining P0 issues
 
@@ -78,3 +78,7 @@ MoneyGram's documented non-custodial Stellar widget flow uses a G-address. Telya
 8. Complete Issue #19/#22, independent teammate testing, bug fixes, demo and submission.
 
 See the [Codex Master Playbook](CODEX-MASTER-PLAYBOOK.md) for the full start-to-finish instructions and the [Execution Tracker](EXECUTION-TRACKER.md) for current task status and human-controlled blockers.
+
+## November 26 backend progress
+
+Draft [PR #53](https://github.com/Alike001/telya/pull/53) mounts existing authenticated contacts, conversations, intent, voice and payment status handlers, adds a read-only Stellar Testnet USDC balance endpoint and corrects zero-balance routing. Base balances and payment preview remain unavailable until trusted providers are integrated. Public payment confirmation was withdrawn because a click cannot count as passkey authorization. The branch passed 48 tests, typecheck, build and server TypeScript locally; an actual RPC read from this workspace failed at the network layer, so no live balance is claimed.
