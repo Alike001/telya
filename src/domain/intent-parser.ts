@@ -9,7 +9,13 @@ import type {
 } from "./contracts";
 
 export interface ParsedUserIntent {
-  readonly kind: "payment" | "balance_check" | "agent_pass_check" | "clarification" | "unknown";
+  readonly kind:
+    | "payment"
+    | "balance_check"
+    | "agent_pass_check"
+    | "activity_check"
+    | "clarification"
+    | "unknown";
   readonly originalInput: string;
   readonly inputMode: PaymentIntentInputMode;
   readonly amount?: DecimalAmount | undefined;
@@ -73,6 +79,22 @@ export function parseNaturalLanguageIntent(
   ) {
     return {
       kind: "agent_pass_check",
+      originalInput: trimmed,
+      inputMode,
+    };
+  }
+
+  // Activity / timeline query intent
+  if (
+    lower.includes("activity") ||
+    lower.includes("history") ||
+    lower.includes("where is my money") ||
+    lower.includes("transactions") ||
+    lower.includes("my payments") ||
+    lower.includes("past payments")
+  ) {
+    return {
+      kind: "activity_check",
       originalInput: trimmed,
       inputMode,
     };

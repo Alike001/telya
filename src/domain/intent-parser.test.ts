@@ -18,6 +18,17 @@ describe("Deterministic Intent Parser", () => {
     expect(result.kind).toBe("agent_pass_check");
   });
 
+  it("parses activity and 'where is my money right now' queries", () => {
+    const result1 = parseNaturalLanguageIntent("Where is my money right now?");
+    expect(result1.kind).toBe("activity_check");
+
+    const result2 = parseNaturalLanguageIntent("Show my payment activity");
+    expect(result2.kind).toBe("activity_check");
+
+    const result3 = parseNaturalLanguageIntent("view transaction history");
+    expect(result3.kind).toBe("activity_check");
+  });
+
   it("parses full payment intent with @username and amount", () => {
     const result = parseNaturalLanguageIntent("Send 5 USDC to @alice");
     expect(result.kind).toBe("payment");

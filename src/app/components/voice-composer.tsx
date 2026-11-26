@@ -14,8 +14,10 @@ interface VoiceComposerProps {
 const QUICK_PROMPTS = [
   { label: "Send @alice 5 USDC", text: "Send 5 USDC to @alice" },
   { label: "Pay @bob 10 USDC from Base", text: "Send 10 USDC to @bob from Base" },
+  { label: "Where is my money right now?", text: "Where is my money right now?" },
   { label: "Check my balances", text: "Check my balances" },
   { label: "View active Agent Passes", text: "View my active Agent Passes" },
+  { label: "Payment activity", text: "View payment activity" },
 ] as const;
 
 export function VoiceComposer({ onSend, isProcessing = false, disabled = false }: VoiceComposerProps) {
