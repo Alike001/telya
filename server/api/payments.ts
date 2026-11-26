@@ -9,6 +9,7 @@ import { appendAssistantMessage } from "../conversations/service.ts";
 import type { Fee, Network } from "../../src/domain/contracts.ts";
 import {
   createPaymentRecord,
+  findPaymentReplay,
   getPaymentWithEvents,
   getVerifiedSourceWallets,
   listPayments,
@@ -112,6 +113,15 @@ function paymentSummary(payment: Record<string, unknown>) {
   };
 }
 
+function paymentReplayResponse(payment: Record<string, unknown>): Response {
+  return jsonResponse({
+    status: payment.status,
+    reused: true,
+    payment: { ...paymentSummary(payment), reasons: parseJsonArray(payment.route_reasons) },
+    explanation: "This payment already exists. Check its current status before taking further action.",
+  });
+}
+
 export function createPaymentHandler(options: PaymentApiOptions = {}) {
   return createAuthenticatedHandler(
     options.authenticate ?? authenticateRequest,
@@ -142,7 +152,6 @@ export function createPaymentHandler(options: PaymentApiOptions = {}) {
         });
       }
       if (request.method !== "POST") return jsonResponse({ error: "method_not_allowed" }, 405);
-      if (!options.getBalances || !options.quoteFees) throw new PaymentProviderUnavailableError();
 
       const idempotencyKey = request.headers.get("idempotency-key")?.trim() ?? "";
       if (!/^[A-Za-z0-9._:-]{8,128}$/.test(idempotencyKey)) {
@@ -160,12 +169,18 @@ export function createPaymentHandler(options: PaymentApiOptions = {}) {
         !(body.selectedSourceWalletId === null || body.selectedSourceWalletId === undefined ||
           (typeof body.selectedSourceWalletId === "string" && isUuid(body.selectedSourceWalletId)))
       ) return jsonResponse({ error: "invalid_payment_request" }, 400);
-      await validatePaymentIntentMessage(user, {
+      const paymentInput = {
+        idempotencyKey,
         conversationId: body.conversationId,
         intentMessageId: body.intentMessageId,
         inputMode: body.inputMode,
         intent,
-      });
+        selectedSourceWalletId: typeof body.selectedSourceWalletId === "string" ? body.selectedSourceWalletId : null,
+      } as const;
+      await validatePaymentIntentMessage(user, paymentInput);
+      const replay = await findPaymentReplay(user, paymentInput);
+      if (replay) return paymentReplayResponse(replay);
+      if (!options.getBalances || !options.quoteFees) throw new PaymentProviderUnavailableError();
       const recipient = await resolveRecipient(user, intent.recipientInput);
       const sourceWallets = await getVerifiedSourceWallets(user);
       let balances: Awaited<ReturnType<BalanceProvider>>;
@@ -239,15 +254,18 @@ export function createPaymentHandler(options: PaymentApiOptions = {}) {
         return jsonResponse({ status: "unavailable", reason: "insufficient_balance_after_fees", message }, 422);
       }
 
-      const result = await createPaymentRecord(user, {
-        idempotencyKey,
-        conversationId: body.conversationId,
-        intentMessageId: body.intentMessageId,
-        inputMode: body.inputMode,
-        intent,
-        selectedSourceWalletId: typeof body.selectedSourceWalletId === "string" ? body.selectedSourceWalletId : null,
-      }, route, fees);
+      let result: Awaited<ReturnType<typeof createPaymentRecord>>;
+      try {
+        result = await createPaymentRecord(user, paymentInput, route, fees);
+      } catch (error) {
+        if (error instanceof PaymentConflictError) {
+          const racedReplay = await findPaymentReplay(user, paymentInput);
+          if (racedReplay) return paymentReplayResponse(racedReplay);
+        }
+        throw error;
+      }
       const payment = result.payment;
+      if (result.reused) return paymentReplayResponse(payment);
       return jsonResponse({
         status: payment.status,
         reused: result.reused,

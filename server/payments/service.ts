@@ -92,6 +92,52 @@ export function validateFeeList(input: readonly Fee[] | null): readonly Fee[] | 
   return input;
 }
 
+/** Recover an existing payment before consulting live providers on a retry. */
+export async function findPaymentReplay(
+  user: Pick<AuthenticatedUser, "id">,
+  input: CreatePaymentInput,
+): Promise<Record<string, unknown> | null> {
+  const sql = getSqlClient();
+  const rows = await sql`
+    SELECT p.id, p.status, p.route_id, p.source_network, p.destination_network,
+      p.rail, p.recipient_address, p.expected_recipient_amount,
+      p.verified_recipient_address, p.verified_recipient_amount,
+      p.source_transaction_hash, p.destination_transaction_hash,
+      p.failure_code, p.fees, p.route_reasons, p.created_at, p.updated_at,
+      p.conversation_id, p.intent_message_id, m.structured_intent
+    FROM payments p
+    JOIN messages m ON m.id = p.intent_message_id AND m.conversation_id = p.conversation_id
+    WHERE p.user_id = ${user.id}::uuid AND p.idempotency_key = ${input.idempotencyKey}
+    LIMIT 1
+  `;
+  const payment = rows[0] as Record<string, unknown> | undefined;
+  if (!payment) return null;
+  const saved = payment.structured_intent;
+  const intent = saved && typeof saved === "object" && !Array.isArray(saved)
+    ? saved as Record<string, unknown>
+    : null;
+  const selectedWallet = intent?.selectedSourceWallet;
+  const selectedWalletId = selectedWallet && typeof selectedWallet === "object" && !Array.isArray(selectedWallet)
+    ? (selectedWallet as Record<string, unknown>).id
+    : null;
+  const requestedWalletId = Object.hasOwn(intent ?? {}, "requestedSourceWalletId")
+    ? intent?.requestedSourceWalletId
+    : input.selectedSourceWalletId === null ? null : selectedWalletId;
+  if (
+    String(payment.conversation_id) !== input.conversationId ||
+    String(payment.intent_message_id) !== input.intentMessageId ||
+    intent?.action !== "send" ||
+    intent.amount !== input.intent.amount ||
+    intent.asset !== input.intent.asset ||
+    intent.recipientInput !== input.intent.recipientInput ||
+    intent.requestedSourceNetwork !== input.intent.requestedSourceNetwork ||
+    intent.requestedDestinationNetwork !== input.intent.requestedDestinationNetwork ||
+    intent.inputMode !== input.inputMode ||
+    requestedWalletId !== input.selectedSourceWalletId
+  ) throw new PaymentConflictError("The idempotency key was already used for different payment details");
+  return payment;
+}
+
 function decimal18(value: string): bigint | null {
   const match = /^(0|[1-9]\d{0,19})(?:\.(\d{1,18}))?$/.exec(value);
   if (!match) return null;
@@ -209,6 +255,7 @@ export async function createPaymentRecord(
     requestedSourceNetwork: input.intent.requestedSourceNetwork,
     requestedDestinationNetwork: input.intent.requestedDestinationNetwork,
     inputMode: input.inputMode,
+    requestedSourceWalletId: input.selectedSourceWalletId,
     selectedSourceWallet: {
       id: route.sourceWallet.id,
       network: route.sourceWallet.network,
