@@ -106,7 +106,7 @@ Planned test environment:
 - Stellar Testnet
 - Base Sepolia
 - Circle CCTP test configuration
-- MoneyGram sandbox
+- MoneyGram sandbox, pending partner access and contract-wallet compatibility confirmation
 
 The final judge flow will include:
 1. Open the public Testnet app.
@@ -133,7 +133,7 @@ AI agents also need safer wallet permissions than unrestricted access.
 - Persistent history and receipts.
 - Unique human-readable usernames mapped to verified wallet records.
 - Agent Pass: limited, expiring, revocable Stellar agent spending.
-- MoneyGram sandbox cash-in/cash-out integration.
+- Planned MoneyGram sandbox cash-in/cash-out integration; provider access is pending and the integration is not implemented.
 
 ## Required payment routes
 
@@ -155,6 +155,10 @@ Completion requires destination finality plus recipient and amount verification.
 If you are a developer or AI agent joining the project, start here:
 
 - [Current project status](product/STATUS.md)
+- [Codex master playbook](product/CODEX-MASTER-PLAYBOOK.md)
+- [Live execution tracker](product/EXECUTION-TRACKER.md)
+- [Buildathon execution plan](product/BUILDATHON-EXECUTION-PLAN.md)
+- [Judging and grant readiness baseline](product/JUDGING-AND-GRANT-READINESS.md)
 - [Universal agent handoff](handoffs/AGENT-HANDOFF.md)
 - [Product requirements](product/PRD.md)
 - [Architecture](product/ARCHITECTURE.md)
@@ -168,8 +172,6 @@ If you are a developer or AI agent joining the project, start here:
 
 ## Development status
 
-Foundation planning is complete and stored in the repository so all three contributors and their coding agents work from the same source of truth.
+Build Week implementation is active. Codex continues from the persistent [Master Playbook](product/CODEX-MASTER-PLAYBOOK.md), [Execution Tracker](product/EXECUTION-TRACKER.md) and [Current Project Status](product/STATUS.md). These documents record task order, PR dependencies, acceptance gates and external blockers across sessions.
 
-Build Week begins November 25, 2026. Until then, keep work to preparation, accounts, documentation, deployment plumbing, and Testnet setup unless organizers explicitly permit earlier substantive feature implementation.
-
-Feature implementation begins from the shared contracts and acceptance criteria defined in this repository.
+Only real Stellar Testnet / Base Sepolia / approved provider data may drive financial UI states. Mock fixtures are for tests only and must never appear as real balances, quotes, wallet connections, or successful payments.
