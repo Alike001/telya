@@ -1,7 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { AgentPass } from "../../domain/contracts";
+import type { SmartAccountKit } from "smart-account-kit";
+import {
+  formatStellarAtomicAmount,
+  parsePersistedAgentPass,
+  type PersistedAgentPass,
+} from "../../domain/agent-pass-status";
 import { getExplorerUrl } from "../../domain/payment-timeline";
 import {
   createStellarAgentPass,
@@ -28,18 +33,16 @@ import {
 
 interface AgentPassPanelProps {
   readonly smartAccountAddress: string | null;
-  readonly kit?: any;
+  readonly kit?: SmartAccountKit;
   readonly onClose?: () => void;
-  readonly onOpenPayment?: (prompt: string) => void;
 }
 
 export function AgentPassPanel({
   smartAccountAddress,
   kit,
   onClose,
-  onOpenPayment,
 }: AgentPassPanelProps) {
-  const [pass, setPass] = useState<any | null>(null);
+  const [pass, setPass] = useState<PersistedAgentPass | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -65,8 +68,12 @@ export function AgentPassPanel({
         cache: "no-store",
       });
       if (res.ok) {
-        const data = await res.json();
-        setPass(data);
+        const data: unknown = await res.json();
+        const parsed = parsePersistedAgentPass(data);
+        if (!parsed || parsed.smartAccount !== smartAccountAddress) {
+          throw new Error("Agent Pass status evidence could not be verified.");
+        }
+        setPass(parsed);
       } else if (res.status === 404) {
         setPass(null);
       } else {
@@ -145,11 +152,13 @@ export function AgentPassPanel({
     }
   }
 
-  const isPassActive = pass && pass.status === "active";
-  const limitNum = pass ? parseFloat(pass.spendingLimit) : 0;
-  const spentNum = pass ? parseFloat(pass.spentAmount) : 0;
-  const progressPercent = limitNum > 0 ? Math.min(100, Math.round((spentNum / limitNum) * 100)) : 0;
-  const remainingNum = Math.max(0, limitNum - spentNum);
+  const isPassActive = pass?.status === "active";
+  const progressPercent = pass
+    ? Number((pass.spentAmountAtomic * 100n) / pass.spendingLimitAtomic)
+    : 0;
+  const remainingAmount = pass
+    ? formatStellarAtomicAmount(pass.spendingLimitAtomic - pass.spentAmountAtomic)
+    : "0";
 
   return (
     <div className="agent-pass-panel" role="region" aria-label="Agent Pass Management">
@@ -162,8 +171,8 @@ export function AgentPassPanel({
           </div>
           <h2 className="panel-title">Stellar Agent Pass</h2>
           <p className="panel-sub">
-            Empower AI agents to execute payments within strict spending allowances. You remain in
-            complete control with 1-tap instant revocation.
+            Authorize an ephemeral agent key within an on-chain USDC spending limit and expiry.
+            Owner passkey authorization is required to create or revoke the rule.
           </p>
         </div>
 
@@ -220,7 +229,7 @@ export function AgentPassPanel({
             <div className="metric-labels">
               <span className="metric-label">Allowance Spent</span>
               <span className="metric-values">
-                <strong>${spentNum.toFixed(2)}</strong> / ${limitNum.toFixed(2)} USDC
+                <strong>{pass.spentAmount}</strong> / {pass.spendingLimit} USDC
               </span>
             </div>
             <div className="allowance-progress-track">
@@ -231,7 +240,7 @@ export function AgentPassPanel({
             </div>
             <div className="metric-footer">
               <span>{progressPercent}% consumed</span>
-              <span className="proof-text">${remainingNum.toFixed(2)} USDC remaining</span>
+              <span className="proof-text">{remainingAmount} USDC remaining</span>
             </div>
           </div>
 
@@ -277,18 +286,6 @@ export function AgentPassPanel({
 
           {/* Action Row */}
           <div className="pass-card-actions">
-            {onOpenPayment && (
-              <button
-                type="button"
-                className="cta-button secondary test-agent-btn"
-                onClick={() =>
-                  onOpenPayment("Pay @alice 1 USDC using my active Agent Pass")
-                }
-              >
-                Test Agent Spend
-              </button>
-            )}
-
             <button
               type="button"
               className="revoke-btn"
@@ -351,7 +348,7 @@ export function AgentPassPanel({
               <div className="form-field">
                 <label htmlFor="limitInput">Spending Allowance (USDC)</label>
                 <div className="input-with-affix">
-                  <span className="affix">$</span>
+                  <span className="affix">USDC</span>
                   <input
                     id="limitInput"
                     type="number"
@@ -372,7 +369,7 @@ export function AgentPassPanel({
                       className={`preset-chip ${spendingLimitInput === val ? "active" : ""}`}
                       onClick={() => setSpendingLimitInput(val)}
                     >
-                      ${val}
+                      {val} USDC
                     </button>
                   ))}
                 </div>
@@ -396,7 +393,7 @@ export function AgentPassPanel({
                 <ShieldCheck className="mini-shield" />
                 <p>
                   <strong>Non-Custodial Enforcement:</strong> The smart account contract rejects any
-                  agent transaction exceeding <strong>${spendingLimitInput} USDC</strong> or submitted after expiration.
+                  agent transaction exceeding <strong>{spendingLimitInput} USDC</strong> or submitted after expiration.
                 </p>
               </div>
 

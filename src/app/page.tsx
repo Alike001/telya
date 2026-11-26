@@ -4,6 +4,7 @@ import { SiteHeader } from "./components/site-header";
 import { MobileBottomDock } from "./components/mobile-bottom-dock";
 import { ConversationalHome } from "./components/conversational-home";
 import { PaymentActivityPanel } from "./components/payment-activity-panel";
+import { AccountToolsPanel } from "./components/account-tools-panel";
 import { StellarWalletPanel } from "./stellar-wallet-panel";
 
 const routes = [
@@ -44,9 +45,9 @@ export default function HomePage() {
         </div>
       </section>
 
-      <div id="agent-pass">
-        <StellarWalletPanel />
-      </div>
+      <StellarWalletPanel />
+
+      <AccountToolsPanel />
 
       <section className="activity-section shell" id="activity" aria-label="Authenticated payment activity">
         <PaymentActivityPanel />
@@ -88,7 +89,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      <footer className="site-footer shell" id="contacts">
+      <footer className="site-footer shell">
         <div>
           <strong>Telya</strong>
           <p>Built on Stellar Testnet and Base Sepolia.</p>

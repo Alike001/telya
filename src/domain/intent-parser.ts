@@ -11,6 +11,9 @@ export interface ParsedUserIntent {
     | "balance_check"
     | "agent_pass_check"
     | "activity_check"
+    | "contacts_check"
+    | "ramp_check"
+    | "judge_check"
     | "clarification"
     | "unknown";
   readonly originalInput: string;
@@ -60,6 +63,24 @@ export function parseNaturalLanguageIntent(
       originalInput: trimmed,
       inputMode,
     };
+  }
+
+  if (lower.includes("contact") || lower.includes("who can i pay")) {
+    return { kind: "contacts_check", originalInput: trimmed, inputMode };
+  }
+
+  if (
+    lower.includes("moneygram") || lower.includes("deposit cash") ||
+    lower.includes("withdraw cash") || lower.includes("cash in") || lower.includes("cash out")
+  ) {
+    return { kind: "ramp_check", originalInput: trimmed, inputMode };
+  }
+
+  if (
+    lower.includes("judge mode") || lower.includes("testnet guide") ||
+    lower.includes("how to test telya") || lower.includes("evaluator guide")
+  ) {
+    return { kind: "judge_check", originalInput: trimmed, inputMode };
   }
 
   // Agent pass check intent

@@ -12,12 +12,12 @@ interface VoiceComposerProps {
 }
 
 const QUICK_PROMPTS = [
-  { label: "Send @alice 5 USDC", text: "Send 5 USDC to @alice" },
-  { label: "Pay @bob 10 USDC from Base", text: "Send 10 USDC to @bob from Base" },
   { label: "Where is my money right now?", text: "Where is my money right now?" },
   { label: "Check my balances", text: "Check my balances" },
   { label: "View active Agent Passes", text: "View my active Agent Passes" },
   { label: "Payment activity", text: "View payment activity" },
+  { label: "Open contacts", text: "Open my contacts" },
+  { label: "MoneyGram status", text: "Add money with MoneyGram" },
 ] as const;
 
 export function VoiceComposer({ onSend, isProcessing = false, disabled = false }: VoiceComposerProps) {
@@ -69,6 +69,17 @@ export function VoiceComposer({ onSend, isProcessing = false, disabled = false }
       recognitionRef.current = recognition;
     }
   }, [onSend]);
+
+  useEffect(() => {
+    function prefill(event: Event) {
+      const detail = (event as CustomEvent<unknown>).detail;
+      if (typeof detail !== "string" || !detail.trim() || detail.length > 200) return;
+      setInput(detail.trim());
+      inputRef.current?.focus();
+    }
+    window.addEventListener("telya:prefill-payment", prefill);
+    return () => window.removeEventListener("telya:prefill-payment", prefill);
+  }, []);
 
   function handleVoiceToggle() {
     if (!speechSupported) {
@@ -127,7 +138,7 @@ export function VoiceComposer({ onSend, isProcessing = false, disabled = false }
           type="button"
           className={`voice-mic-btn ${voiceState}`}
           onClick={handleVoiceToggle}
-          title={speechSupported ? "Press to talk with voice" : "Insert sample prompt"}
+          title={speechSupported ? "Press to talk with voice" : "Voice input unavailable; type instead"}
           aria-label={
             voiceState === "listening"
               ? "Stop listening"

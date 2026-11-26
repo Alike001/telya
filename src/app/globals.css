@@ -3966,6 +3966,18 @@ h2 {
   width: 100%;
 }
 
+.account-tools-section {
+  display: grid;
+  gap: 32px;
+  padding-block: 48px;
+}
+
+.account-tools-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
 .contacts-header {
   display: flex;
   justify-content: space-between;

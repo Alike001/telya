@@ -34,6 +34,7 @@ export async function GET(
       spendingLimit: stellarUsdcAmountFromRawUnits(spendingLimitAtomic),
       spendingLimitAtomic: spendingLimitAtomic.toString(),
       spentAmount: stellarUsdcAmountFromRawUnits(spentAmountAtomic),
+      spentAmountAtomic: spentAmountAtomic.toString(),
       validUntilLedger: pass.validUntilLedger,
       status: pass.status,
       createTransactionHash: pass.createTransactionHash,

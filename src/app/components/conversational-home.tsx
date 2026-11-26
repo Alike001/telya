@@ -190,8 +190,20 @@ function AuthenticatedConversation() {
         appendTelya("Your authenticated payment history and persisted event timelines are available in Activity below. Refresh there to reconcile a submitted Stellar payment without resubmitting it.");
         return;
       }
+      if (parsed.kind === "contacts_check") {
+        appendTelya("Your authenticated, owner-scoped contacts are available below. Selecting one only prefills a payment request; passkey confirmation is still required.");
+        return;
+      }
+      if (parsed.kind === "ramp_check") {
+        appendTelya("MoneyGram Ramps is unavailable while partner access and Stellar smart-account compatibility remain unconfirmed. No quote, reference or cash transaction has been created.");
+        return;
+      }
+      if (parsed.kind === "judge_check") {
+        appendTelya("Use the Testnet guide below to inspect current evidence and known unavailable routes. It does not mark a provider or payment successful.");
+        return;
+      }
       if (parsed.kind === "agent_pass_check") {
-        appendTelya("Agent Pass details are not connected to this conversation yet.");
+        appendTelya("Agent Pass management is available below from persisted Stellar Testnet rule evidence. Creating or revoking a rule still requires the owner passkey.");
         return;
       }
       if (parsed.kind === "clarification") {
