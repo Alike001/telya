@@ -2,12 +2,14 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   BASE_SEPOLIA_MESSAGE_TRANSMITTER,
+  BASE_SEPOLIA_CHAIN_ID,
   BASE_SEPOLIA_USDC,
   encodeCctpDepositForBurn,
   encodeCctpReceiveMessage,
   encodeErc20Transfer,
   findBaseCctpMessage,
   normalizeBaseUsdcAmount,
+  readBaseUsdcBalance,
   parseCctpMessage,
   verifyBaseCctpMint,
   verifyBaseUsdcTransfer,
@@ -40,6 +42,31 @@ function finalizedRpc(receipt: BaseTransactionReceipt): BaseRpc {
 }
 
 describe("Base Sepolia transaction encoding and verification", () => {
+  it("reads an exact on-chain Base Sepolia USDC balance and rejects wrong-chain or malformed RPC data", async () => {
+    const rpc = {
+      request: vi.fn(async (method: string) => method === "eth_chainId" ? `0x0${BASE_SEPOLIA_CHAIN_ID.toString(16)}` : `0x${word(12_345_678n)}`),
+    } as unknown as BaseRpc;
+    await expect(readBaseUsdcBalance({ rpc, owner: SENDER })).resolves.toBe("12.345678");
+    expect(rpc.request).toHaveBeenCalledWith("eth_call", [{
+      to: BASE_SEPOLIA_USDC.toLowerCase(),
+      data: `0x70a08231${SENDER.slice(2).padStart(64, "0")}`,
+    }, "latest"]);
+
+    const zeroRpc = {
+      request: vi.fn(async (method: string) => method === "eth_chainId" ? `0x${BASE_SEPOLIA_CHAIN_ID.toString(16)}` : `0x${word(0n)}`),
+    } as unknown as BaseRpc;
+    await expect(readBaseUsdcBalance({ rpc: zeroRpc, owner: SENDER })).resolves.toBe("0");
+    const wrongChain = {
+      request: vi.fn(async () => "0x1"),
+    } as unknown as BaseRpc;
+    await expect(readBaseUsdcBalance({ rpc: wrongChain, owner: SENDER })).rejects.toMatchObject({ code: "WRONG_NETWORK" });
+    expect(wrongChain.request).toHaveBeenCalledTimes(1);
+    const malformed = {
+      request: vi.fn(async (method: string) => method === "eth_chainId" ? `0x${BASE_SEPOLIA_CHAIN_ID.toString(16)}` : "0x1"),
+    } as unknown as BaseRpc;
+    await expect(readBaseUsdcBalance({ rpc: malformed, owner: SENDER })).rejects.toMatchObject({ code: "RPC_FAILED" });
+  });
+
   it("converts decimal USDC to six decimal places without floating point", () => {
     expect(normalizeBaseUsdcAmount("2.000001")).toBe(2_000_001n);
     expect(normalizeBaseUsdcAmount("0.000001")).toBe(1n);

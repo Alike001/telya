@@ -17,6 +17,7 @@ const MESSAGE_SENT_TOPIC =
 const ERC20_TRANSFER_SELECTOR = "0xa9059cbb";
 const ERC20_APPROVE_SELECTOR = "0x095ea7b3";
 const ERC20_ALLOWANCE_SELECTOR = "0xdd62ed3e";
+const ERC20_BALANCE_OF_SELECTOR = "0x70a08231";
 const CCTP_DEPOSIT_FOR_BURN_SELECTOR = "0x8e0250ee";
 const CCTP_RECEIVE_MESSAGE_SELECTOR = "0x57ecfd28";
 const UINT256_MAX = (1n << 256n) - 1n;
@@ -336,6 +337,32 @@ export async function submitBaseCctpBurn(input: {
 
 export interface BaseRpc {
   request<T>(method: string, params: readonly unknown[]): Promise<T>;
+}
+
+/** Read Base Sepolia USDC in exact decimal units from the configured contract. */
+export async function readBaseUsdcBalance(input: {
+  readonly rpc: BaseRpc;
+  readonly owner: string;
+  readonly usdcAddress?: string;
+}): Promise<string> {
+  const owner = requireEvmAddress(input.owner, "owner");
+  const usdcAddress = requireEvmAddress(input.usdcAddress ?? BASE_SEPOLIA_USDC, "USDC contract");
+  const chainId = await input.rpc.request<unknown>("eth_chainId", []);
+  if (typeof chainId !== "string" || !/^0x[0-9a-f]+$/i.test(chainId) ||
+      BigInt(chainId) !== BigInt(BASE_SEPOLIA_CHAIN_ID)) {
+    throw new BaseEvmError("WRONG_NETWORK", "Base balance RPC is not on Base Sepolia");
+  }
+  const result = await input.rpc.request<unknown>("eth_call", [{
+    to: usdcAddress,
+    data: `${ERC20_BALANCE_OF_SELECTOR}${addressWord(owner)}`,
+  }, "latest"]);
+  if (typeof result !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(result)) {
+    throw new BaseEvmError("RPC_FAILED", "Base USDC balance query returned invalid data");
+  }
+  const units = BigInt(result);
+  const whole = units / 1_000_000n;
+  const fraction = (units % 1_000_000n).toString().padStart(6, "0").replace(/0+$/, "");
+  return fraction ? `${whole}.${fraction}` : whole.toString();
 }
 
 export function createBaseRpc(config: BaseEvmConfig, fetcher: typeof fetch = fetch): BaseRpc {
