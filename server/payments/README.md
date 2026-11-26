@@ -22,9 +22,9 @@ All handlers verify the Privy bearer session and scope database reads/writes to 
 
 ## Payment flow
 
-Payment creation requires an existing user message ID from the owned conversation and an `Idempotency-Key` header. For text/voice intents, the amount, recipient, and requested networks are checked against that saved message. The selected verified source wallet is also persisted with the structured intent, without adding a database column.
+Payment creation requires an existing user message ID from the owned conversation and an `Idempotency-Key` header. For text, voice and manual intents, the amount, recipient, and requested networks are checked against that saved message. The selected verified source wallet is also persisted with the structured intent, without adding a database column.
 
-`createPaymentHandler` requires server-side `getBalances` and `quoteFees` adapters. Missing/erroring providers fail closed with 503. An empty fee list is valid only when the trusted quote adapter confirms that there are no displayable fees. Fee details are stored separately and returned for the user review card. `GET` returns only consumer-safe event fields and never includes internal debug messages.
+`createPaymentHandler` requires server-side `getBalances` and `quoteFees` adapters. Missing/erroring providers fail closed with 503. An empty fee list is valid only when the trusted quote adapter confirms that there are no displayable fees. The server rejects a malformed quote and checks the full source USDC spend, including sender-paid USDC fees, against the server-read balance before creating a review card. Fee details are stored separately and returned for the user review card. `GET` returns only consumer-safe event fields and never includes internal debug messages.
 
 The created payment stays in `awaiting_confirmation`. No confirmation handler is exposed until a real wallet authorization proof is verified. The later execution integration must recheck current balance, fee quote, wallet state, and idempotency before submission. Chain execution and finality verification are outside this handler and must use the existing payment completion invariant.
 
