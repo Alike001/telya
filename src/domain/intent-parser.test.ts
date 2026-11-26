@@ -97,4 +97,34 @@ describe("Deterministic Route Resolver", () => {
       expect(decision.clarificationQuestion).toContain("Which wallet would you like to send");
     }
   });
+
+  it("returns unavailable status when total balance across all networks is insufficient", () => {
+    const decision = resolvePaymentRouteDecision({
+      paymentIntentId: "intent_insufficient",
+      amount: "50.00",
+      recipientInput: "@bob",
+      userBalances: { stellarUsdc: "10.00", baseUsdc: "5.00" },
+    });
+
+    expect(decision.status).toBe("unavailable");
+    if (decision.status === "unavailable") {
+      expect(decision.unavailabilityReason).toContain("Insufficient funds");
+      expect(decision.unavailabilityReason).toContain("exceeds your available balance");
+    }
+  });
+
+  it("returns unavailable status when explicitly chosen source wallet has insufficient balance", () => {
+    const decision = resolvePaymentRouteDecision({
+      paymentIntentId: "intent_insufficient_stellar",
+      amount: "20.00",
+      recipientInput: "@bob",
+      requestedSourceNetwork: "stellar",
+      userBalances: { stellarUsdc: "5.00", baseUsdc: "100.00" },
+    });
+
+    expect(decision.status).toBe("unavailable");
+    if (decision.status === "unavailable") {
+      expect(decision.unavailabilityReason).toContain("Insufficient Stellar balance");
+    }
+  });
 });

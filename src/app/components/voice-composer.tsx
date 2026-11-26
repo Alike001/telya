@@ -70,8 +70,8 @@ export function VoiceComposer({ onSend, isProcessing = false, disabled = false }
 
   function handleVoiceToggle() {
     if (!speechSupported) {
-      // Simulate quick sample query for environments without microphone access
-      setInput("Send 5 USDC to @alice");
+      setVoiceState("error");
+      setTimeout(() => setVoiceState("idle"), 2500);
       inputRef.current?.focus();
       return;
     }

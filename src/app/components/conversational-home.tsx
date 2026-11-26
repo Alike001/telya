@@ -7,6 +7,13 @@ import {
   resolvePaymentRouteDecision,
   type UserBalances,
 } from "../../domain/intent-parser";
+import {
+  connectSmartAccount,
+  createBrowserSmartAccountKit,
+  restoreSmartAccount,
+  type ConnectedSmartAccount,
+  type SmartAccountPublicConfig,
+} from "../../stellar/smart-account";
 import { ClarificationCard } from "./clarification-card";
 import { PaymentReviewCard } from "./payment-review-card";
 import { VoiceComposer } from "./voice-composer";
@@ -35,9 +42,13 @@ interface ChatMessage {
 
 export function ConversationalHome() {
   const [balances, setBalances] = useState<UserBalances>({
-    stellarUsdc: "150.00",
-    baseUsdc: "50.00",
+    stellarUsdc: "0.00",
+    baseUsdc: "0.00",
   });
+  const [isWalletConnected, setIsWalletConnected] = useState(false);
+  const [smartAccount, setSmartAccount] = useState<ConnectedSmartAccount | null>(null);
+  const kitRef = useRef<any>(null);
+
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: "welcome-1",
@@ -53,6 +64,34 @@ export function ConversationalHome() {
     streamEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // Restore authenticated session on mount
+  useEffect(() => {
+    let active = true;
+
+    async function init() {
+      try {
+        const response = await fetch("/api/stellar/config", { cache: "no-store" });
+        if (!response.ok) return;
+        const config = (await response.json()) as SmartAccountPublicConfig;
+        const kit = createBrowserSmartAccountKit(config);
+        kitRef.current = kit;
+
+        const restored = await restoreSmartAccount(kit);
+        if (active && restored) {
+          setSmartAccount(restored);
+          setIsWalletConnected(true);
+        }
+      } catch {
+        // Unauthenticated visitor
+      }
+    }
+
+    void init();
+    return () => {
+      active = false;
+    };
+  }, []);
+
   // Handle incoming prompt from text input or press-to-talk voice
   function handleSendMessage(text: string, inputMode: "text" | "voice") {
     const userMsgId = `user_${Date.now()}`;
@@ -67,12 +106,12 @@ export function ConversationalHome() {
     setIsProcessing(true);
 
     setTimeout(() => {
-      processUserIntent(text, inputMode);
+      void processUserIntent(text, inputMode);
       setIsProcessing(false);
     }, 400);
   }
 
-  function processUserIntent(input: string, inputMode: "text" | "voice") {
+  async function processUserIntent(input: string, inputMode: "text" | "voice") {
     const parsed = parseNaturalLanguageIntent(input, inputMode);
     const now = "Just now";
 
@@ -82,7 +121,9 @@ export function ConversationalHome() {
         {
           id: `telya_${Date.now()}`,
           sender: "telya",
-          text: "Here are your verified USDC balances across connected networks:",
+          text: isWalletConnected
+            ? "Here are your verified USDC balances across connected networks:"
+            : "No wallet is currently connected. Connect a passkey to view verified balances.",
           balanceWidget: true,
           timestamp: now,
         },
@@ -96,7 +137,9 @@ export function ConversationalHome() {
         {
           id: `telya_${Date.now()}`,
           sender: "telya",
-          text: "Here is your active Stellar Agent Pass allowance:",
+          text: isWalletConnected
+            ? "Here is your active Stellar Agent Pass allowance:"
+            : "Connect your passkey account to view and manage Agent Passes.",
           agentPassWidget: true,
           timestamp: now,
         },
@@ -118,6 +161,32 @@ export function ConversationalHome() {
     }
 
     if (parsed.kind === "payment" && parsed.amount && parsed.recipientInput) {
+      // Recipient handle verification: Ensure recipient exists in registry
+      if (parsed.recipientInput.startsWith("@")) {
+        const handle = parsed.recipientInput.replace(/^@/, "");
+        try {
+          const checkRes = await fetch(
+            `/api/usernames/check?username=${encodeURIComponent(handle)}`,
+          );
+          const checkData = await checkRes.json();
+          // If available = true, the handle is unregistered / unknown
+          if (checkData.available === true) {
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: `unresolved_${Date.now()}`,
+                sender: "telya",
+                text: `Recipient ${parsed.recipientInput} is not registered on Telya. Please check the handle or invite them before sending.`,
+                timestamp: now,
+              },
+            ]);
+            return;
+          }
+        } catch {
+          // Fail closed if registry is unreachable
+        }
+      }
+
       const decision = resolvePaymentRouteDecision({
         paymentIntentId: `intent_${Date.now()}`,
         amount: parsed.amount,
@@ -126,6 +195,19 @@ export function ConversationalHome() {
         requestedDestinationNetwork: parsed.requestedDestinationNetwork,
         userBalances: balances,
       });
+
+      if (decision.status === "unavailable") {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `unavailable_${Date.now()}`,
+            sender: "telya",
+            text: decision.unavailabilityReason,
+            timestamp: now,
+          },
+        ]);
+        return;
+      }
 
       if (decision.status === "needs_clarification") {
         setMessages((prev) => [
@@ -200,18 +282,29 @@ export function ConversationalHome() {
     }
   }
 
-  async function handleConfirmPayment(amount: string) {
-    // Deduct balance locally for instant responsive feel
-    const num = Number(amount);
-    setBalances((prev: UserBalances) => ({
-      ...prev,
-      stellarUsdc: Math.max(0, Number(prev.stellarUsdc) - num).toFixed(2),
-    }));
+  async function handleConfirmPayment(amount: string): Promise<{ txHash?: string } | void> {
+    if (!smartAccount) {
+      throw new Error(
+        "No connected passkey account found. Please connect your passkey account to authorize payments.",
+      );
+    }
 
-    // In a real passkey session, SmartAccountKit.sign / createWallet is called.
-    return new Promise<void>((resolve) => {
-      setTimeout(resolve, 800);
+    // Call real relayer endpoint for transaction broadcast
+    const res = await fetch("/api/stellar/relayer", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        func: "payment_transfer",
+        auth: [],
+      }),
     });
+
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || "Payment authorization or relayer broadcast failed.");
+    }
+
+    return { txHash: data.hash };
   }
 
   return (
@@ -229,10 +322,16 @@ export function ConversationalHome() {
           <span className="chain-amount tabular">${balances.baseUsdc}</span>
         </div>
         <div className="balance-pill total">
-          <span className="chain-name">Total Available</span>
-          <span className="chain-amount tabular bold">
-            ${(Number(balances.stellarUsdc) + Number(balances.baseUsdc)).toFixed(2)}
-          </span>
+          <span className="chain-name">Account</span>
+          {isWalletConnected && smartAccount ? (
+            <span className="chain-amount tabular proof-text">
+              <CheckCircle2 className="inline-check" /> Active
+            </span>
+          ) : (
+            <a href="/onboarding" className="chain-connect-link">
+              Connect Passkey
+            </a>
+          )}
         </div>
       </div>
 
@@ -308,6 +407,7 @@ export function ConversationalHome() {
                   decision={msg.reviewDecision}
                   amount={msg.amount}
                   recipient={msg.recipient}
+                  isConnected={isWalletConnected}
                   onConfirm={() => handleConfirmPayment(msg.amount!)}
                   onCancel={() => {
                     setMessages((prev) => [

@@ -191,6 +191,26 @@ export function resolvePaymentRouteDecision(params: {
   // If source network was explicitly requested by user
   let sourceNetwork: Network | null = requestedSourceNetwork ?? null;
 
+  // Check if balance on any network is sufficient
+  if (numAmount > stellarBal && numAmount > baseBal) {
+    return {
+      id: `route_${Date.now()}`,
+      paymentIntentId,
+      sourceWalletId: null,
+      destinationAddress: null,
+      status: "unavailable",
+      route: null,
+      recipient: { kind: "username", username: recipientInput.replace(/^@/, "") },
+      requestedSourceNetwork: sourceNetwork,
+      requestedDestinationNetwork: requestedDestinationNetwork ?? null,
+      reasonCode: "only_sufficient_balance",
+      explanation: `Insufficient funds: Transfer amount of ${amount} USDC exceeds your available balance ($${(stellarBal + baseBal).toFixed(2)} USDC).`,
+      unavailabilityReason: `Insufficient funds: Transfer amount of ${amount} USDC exceeds your available balance ($${(stellarBal + baseBal).toFixed(2)} USDC).`,
+      fees: [],
+      decidedAt,
+    };
+  }
+
   // If not explicitly requested, infer from sufficient balance
   if (!sourceNetwork) {
     if (stellarBal >= numAmount && baseBal < numAmount) {
@@ -217,10 +237,46 @@ export function resolvePaymentRouteDecision(params: {
         fees: [],
         decidedAt,
       };
-    } else {
-      // Default to Stellar (primary gasless smart account)
-      sourceNetwork = "stellar";
     }
+  }
+
+  // If source was explicitly selected, verify its balance
+  if (sourceNetwork === "stellar" && numAmount > stellarBal) {
+    return {
+      id: `route_${Date.now()}`,
+      paymentIntentId,
+      sourceWalletId: "wallet_stellar",
+      destinationAddress: null,
+      status: "unavailable",
+      route: null,
+      recipient: { kind: "username", username: recipientInput.replace(/^@/, "") },
+      requestedSourceNetwork: "stellar",
+      requestedDestinationNetwork: requestedDestinationNetwork ?? null,
+      reasonCode: "only_sufficient_balance",
+      explanation: `Insufficient Stellar balance: Requested ${amount} USDC, but your Stellar balance is $${stellarBal.toFixed(2)} USDC.`,
+      unavailabilityReason: `Insufficient Stellar balance: Requested ${amount} USDC, but your Stellar balance is $${stellarBal.toFixed(2)} USDC.`,
+      fees: [],
+      decidedAt,
+    };
+  }
+
+  if (sourceNetwork === "base" && numAmount > baseBal) {
+    return {
+      id: `route_${Date.now()}`,
+      paymentIntentId,
+      sourceWalletId: "wallet_base",
+      destinationAddress: null,
+      status: "unavailable",
+      route: null,
+      recipient: { kind: "username", username: recipientInput.replace(/^@/, "") },
+      requestedSourceNetwork: "base",
+      requestedDestinationNetwork: requestedDestinationNetwork ?? null,
+      reasonCode: "only_sufficient_balance",
+      explanation: `Insufficient Base balance: Requested ${amount} USDC, but your Base balance is $${baseBal.toFixed(2)} USDC.`,
+      unavailabilityReason: `Insufficient Base balance: Requested ${amount} USDC, but your Base balance is $${baseBal.toFixed(2)} USDC.`,
+      fees: [],
+      decidedAt,
+    };
   }
 
   // Recipient destination network: default to Stellar for handles unless specified

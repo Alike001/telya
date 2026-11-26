@@ -17,7 +17,8 @@ interface PaymentReviewCardProps {
   readonly decision: RouteDecision & { status: "resolved" };
   readonly amount: string;
   readonly recipient: string;
-  readonly onConfirm: () => Promise<void>;
+  readonly isConnected?: boolean;
+  readonly onConfirm: () => Promise<{ txHash?: string } | void>;
   readonly onCancel: () => void;
 }
 
@@ -25,11 +26,13 @@ export function PaymentReviewCard({
   decision,
   amount,
   recipient,
+  isConnected = false,
   onConfirm,
   onCancel,
 }: PaymentReviewCardProps) {
   const [whyOpen, setWhyOpen] = useState(false);
   const [isAuthorizing, setIsAuthorizing] = useState(false);
+  const [txHash, setTxHash] = useState<string | null>(null);
   const [executionState, setExecutionState] = useState<
     "idle" | "authorizing" | "broadcasting" | "success" | "error"
   >("idle");
@@ -53,12 +56,15 @@ export function PaymentReviewCard({
     setExecutionState("authorizing");
     setErrorMessage(null);
     try {
-      await onConfirm();
-      setExecutionState("success");
+      const result = await onConfirm();
+      if (result && result.txHash) {
+        setTxHash(result.txHash);
+        setExecutionState("success");
+      }
     } catch (err) {
       setExecutionState("error");
       setErrorMessage(
-        err instanceof Error ? err.message : "Passkey authorization was cancelled.",
+        err instanceof Error ? err.message : "Payment authorization was cancelled or failed.",
       );
     } finally {
       setIsAuthorizing(false);
@@ -147,36 +153,53 @@ export function PaymentReviewCard({
         </div>
       )}
 
-      {/* Success State */}
-      {executionState === "success" ? (
+      {/* Success State with Real Transaction Evidence */}
+      {executionState === "success" && txHash ? (
         <div className="review-success-banner">
           <CheckCircle2 className="success-icon" />
           <div>
             <strong>Payment authorized & submitted!</strong>
-            <p>Tracking destination finality on the live payment timeline.</p>
+            <p>
+              Transaction Hash:{" "}
+              <a
+                href={`https://stellar.expert/explorer/testnet/tx/${txHash}`}
+                target="_blank"
+                rel="noreferrer"
+                className="tx-hash-link"
+              >
+                {txHash.slice(0, 8)}...{txHash.slice(-6)} ↗
+              </a>
+            </p>
           </div>
         </div>
       ) : (
         /* Action Buttons */
         <div className="review-card-actions">
-          <button
-            type="button"
-            className="cta-button primary review-submit-btn"
-            onClick={handleConfirm}
-            disabled={isAuthorizing}
-          >
-            {isAuthorizing ? (
-              <>
-                <Loader2 className="btn-icon spinner" />
-                <span>Authorizing Passkey...</span>
-              </>
-            ) : (
-              <>
-                <Fingerprint className="btn-icon" />
-                <span>Confirm with Passkey</span>
-              </>
-            )}
-          </button>
+          {isConnected ? (
+            <button
+              type="button"
+              className="cta-button primary review-submit-btn"
+              onClick={handleConfirm}
+              disabled={isAuthorizing}
+            >
+              {isAuthorizing ? (
+                <>
+                  <Loader2 className="btn-icon spinner" />
+                  <span>Authorizing Passkey...</span>
+                </>
+              ) : (
+                <>
+                  <Fingerprint className="btn-icon" />
+                  <span>Confirm with Passkey</span>
+                </>
+              )}
+            </button>
+          ) : (
+            <a href="/onboarding" className="cta-button primary review-submit-btn">
+              <Fingerprint className="btn-icon" />
+              <span>Connect Passkey to Authorize</span>
+            </a>
+          )}
 
           <button
             type="button"
