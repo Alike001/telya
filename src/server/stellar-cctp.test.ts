@@ -78,6 +78,9 @@ function fakeSql(state: OperationState) {
         reserved: false,
       }];
     }
+    if (query.startsWith("WITH eligible AS MATERIALIZED")) {
+      return [{ id: PAYMENT_ID }];
+    }
     if (
       query.includes("status = 'destination_submitting'") &&
       query.includes("RETURNING payment_id") &&
