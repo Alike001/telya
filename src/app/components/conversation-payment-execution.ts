@@ -123,12 +123,25 @@ export async function executeConversationPayment(
   if (!restored || restored.contractId !== input.smartAccount.contractId) {
     throw new Error("The active passkey does not match the verified source wallet for this payment.");
   }
-  const submission = await input.submitTransfer({
-    kit: paymentKit,
-    tokenContract: input.config.usdcContract,
-    recipient: review.recipientAddress,
-    amount: review.expectedRecipientAmount,
-  });
+  let submission: StellarUsdcSubmission;
+  try {
+    submission = await input.submitTransfer({
+      kit: paymentKit,
+      tokenContract: input.config.usdcContract,
+      recipient: review.recipientAddress,
+      amount: review.expectedRecipientAmount,
+    });
+  } catch {
+    try {
+      return await reconcileConversationPayment(review, undefined, input.request);
+    } catch {
+      return {
+        status: "status_unknown",
+        transactionHash: null,
+        message: "The authorization response was interrupted and persisted status is temporarily unavailable. Do not submit again; refresh the existing payment status.",
+      };
+    }
+  }
   if (submission.status === "failed") {
     if (submission.txHash) {
       try {
