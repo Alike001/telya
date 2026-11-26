@@ -16,7 +16,9 @@ import {
   PaymentInputError,
   PaymentNotFoundError,
   PaymentProviderUnavailableError,
+  paymentSpendFitsBalance,
   validatePaymentIntentMessage,
+  validateFeeList,
 } from "../payments/service.ts";
 import type { BalanceProvider, FeeQuoteProvider } from "../payments/service.ts";
 import { resolvePaymentRoute } from "../payments/routing.ts";
@@ -219,7 +221,23 @@ export function createPaymentHandler(options: PaymentApiOptions = {}) {
       } catch {
         throw new PaymentProviderUnavailableError();
       }
+      fees = validateFeeList(fees);
       if (fees === null) throw new PaymentProviderUnavailableError();
+      const affordable = paymentSpendFitsBalance({
+        balance: balances[route.sourceWallet.id],
+        expectedRecipientAmount: intent.amount,
+        fees,
+      });
+      if (affordable === null) throw new PaymentProviderUnavailableError();
+      if (!affordable) {
+        const message = await appendAssistantMessage(
+          user,
+          body.conversationId,
+          "The selected wallet does not have enough USDC for the amount and quoted sender-paid fees.",
+          { status: "unavailable", reason: "insufficient_balance_after_fees" },
+        );
+        return jsonResponse({ status: "unavailable", reason: "insufficient_balance_after_fees", message }, 422);
+      }
 
       const result = await createPaymentRecord(user, {
         idempotencyKey,

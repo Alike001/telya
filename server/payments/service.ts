@@ -76,9 +76,9 @@ function mapRail(rail: string): string {
   }
 }
 
-function validateFeeList(input: readonly Fee[] | null): readonly Fee[] | null {
+export function validateFeeList(input: readonly Fee[] | null): readonly Fee[] | null {
   if (input === null) return null;
-  if (!Array.isArray(input) || input.length > 12) throw new PaymentInputError("Invalid fee quote");
+  if (!Array.isArray(input) || input.length > 12) throw new PaymentProviderUnavailableError();
   for (const fee of input) {
     if (
       !fee ||
@@ -87,9 +87,34 @@ function validateFeeList(input: readonly Fee[] | null): readonly Fee[] | null {
       typeof fee.amount !== "string" || !/^(?:0|[1-9]\d{0,19})(?:\.\d{1,18})?$/.test(fee.amount) ||
       typeof fee.asset !== "string" || !/^[A-Z0-9]{2,12}$/.test(fee.asset) ||
       typeof fee.label !== "string" || !fee.label.trim() || fee.label.length > 80
-    ) throw new PaymentInputError("Invalid fee quote");
+    ) throw new PaymentProviderUnavailableError();
   }
   return input;
+}
+
+function decimal18(value: string): bigint | null {
+  const match = /^(0|[1-9]\d{0,19})(?:\.(\d{1,18}))?$/.exec(value);
+  if (!match) return null;
+  return BigInt(match[1]!) * 10n ** 18n + BigInt((match[2] ?? "").padEnd(18, "0") || "0");
+}
+
+/** Check the source's full USDC spend, including every sender-paid USDC fee. */
+export function paymentSpendFitsBalance(input: {
+  readonly balance: string | null | undefined;
+  readonly expectedRecipientAmount: string;
+  readonly fees: readonly Fee[];
+}): boolean | null {
+  const available = input.balance == null ? null : decimal18(input.balance);
+  const expected = decimal18(input.expectedRecipientAmount);
+  if (available === null || expected === null || expected <= 0n) return null;
+  let spend = expected;
+  for (const fee of input.fees) {
+    if (fee.payer !== "sender" || fee.asset !== "USDC") continue;
+    const amount = decimal18(fee.amount);
+    if (amount === null) return null;
+    spend += amount;
+  }
+  return available >= spend;
 }
 
 export async function getVerifiedSourceWallets(
@@ -148,7 +173,6 @@ export async function validatePaymentIntentMessage(
 ): Promise<void> {
   const originalInput = await getOwnedIntentMessage(user.id, input.conversationId, input.intentMessageId);
   if (
-    input.inputMode !== "manual" &&
     (
       !intentAppearsInMessage(originalInput, input.intent.amount, input.intent.recipientInput) ||
       (input.intent.requestedSourceNetwork !== null &&
