@@ -153,6 +153,38 @@ describe("conversation payment execution", () => {
     })).resolves.toMatchObject({ status: "unverified", transactionHash: txHash });
   });
 
+  it("does not offer resubmission after a hashless relayer or sponsor failure", async () => {
+    const request = vi.fn()
+      .mockResolvedValueOnce(json({
+        status: "authorization_ready",
+        relayerUrl: "/api/stellar/relayer/payment",
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      }, 201))
+      .mockResolvedValueOnce(json({ error: "payment_state_conflict" }, 409));
+
+    await expect(executeConversationPayment(review, {
+      config,
+      smartAccount,
+      request,
+      createKit: vi.fn().mockReturnValue({}),
+      restoreAccount: vi.fn().mockResolvedValue(smartAccount),
+      submitTransfer: vi.fn().mockResolvedValue({
+        status: "failed",
+        errorCode: "RELAYER_UNAVAILABLE",
+        message: "The Stellar fee sponsor is unavailable",
+        txHash: null,
+      }),
+    })).resolves.toEqual({
+      status: "failed",
+      transactionHash: null,
+      message: "The Stellar fee sponsor is unavailable No transaction hash was returned; create a new review only after checking Activity.",
+    });
+    expect(request.mock.calls.map(([url]) => url)).toEqual([
+      "/api/payments/stellar/direct/authorize",
+      `/api/payments/stellar/direct/reconcile?id=${review.id}`,
+    ]);
+  });
+
   it("reconciles persisted state instead of resubmitting after an interrupted SDK response", async () => {
     const request = vi.fn()
       .mockResolvedValueOnce(json({

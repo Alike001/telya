@@ -157,7 +157,11 @@ export async function executeConversationPayment(
     try {
       return await reconcileConversationPayment(review, undefined, input.request);
     } catch {
-      throw new Error(submission.message);
+      return {
+        status: "failed",
+        transactionHash: null,
+        message: `${submission.message} No transaction hash was returned; create a new review only after checking Activity.`,
+      };
     }
   }
   return reconcileConversationPayment(review, submission.txHash, input.request);
