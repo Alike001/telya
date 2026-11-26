@@ -1,6 +1,6 @@
 import { InvalidAuthTokenError, PrivyClient } from "@privy-io/node";
 import type { VerifyAccessTokenResponse } from "@privy-io/node";
-import { getSqlClient } from "../db/client.js";
+import { getSqlClient } from "../db/client.ts";
 
 export type AuthenticatedUser = {
   id: string;
@@ -55,8 +55,8 @@ function isVerifiedClaims(value: VerifyAccessTokenResponse): boolean {
 }
 
 async function verifyAccessToken(token: string): Promise<VerifyAccessTokenResponse> {
-  const client = getPrivyClient();
   try {
+    const client = getPrivyClient();
     const claims = await client.utils().auth().verifyAccessToken(token);
     if (!isVerifiedClaims(claims)) throw new AuthenticationError("Invalid session");
     return claims;
@@ -80,13 +80,15 @@ function readBearerToken(request: Request): string {
 async function persistVerifiedSession(
   claims: VerifyAccessTokenResponse,
 ): Promise<AuthenticatedUser> {
-  const sql = getSqlClient();
   const verifiedAt = new Date();
   const expiresAt = new Date(claims.expiration * 1000);
 
   // A single statement creates the app user and records the verified session.
   // A revoked session or a session ID attached to another user returns no row.
-  const rows = await sql`
+  let rows;
+  try {
+    const sql = getSqlClient();
+    rows = await sql`
     WITH app_user AS (
       INSERT INTO users (privy_did)
       VALUES (${claims.user_id})
@@ -106,7 +108,10 @@ async function persistVerifiedSession(
     SELECT app_user.id, app_user.privy_did
     FROM app_user
     JOIN verified_session ON verified_session.user_id = app_user.id
-  `;
+    `;
+  } catch {
+    throw new AuthenticationUnavailableError();
+  }
 
   const row = rows[0];
   if (!row) throw new AuthenticationError("Session is no longer active");

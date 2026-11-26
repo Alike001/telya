@@ -1,12 +1,12 @@
-import { authenticateRequest } from "../auth/privy.js";
+import { authenticateRequest } from "../auth/privy.ts";
 import {
   AmbiguousRecipientError,
   ContactInputError,
   ContactNotFoundError,
   resolveRecipient,
-} from "../contacts/service.js";
-import { appendAssistantMessage } from "../conversations/service.js";
-import type { Fee, Network } from "../../src/domain/contracts.js";
+} from "../contacts/service.ts";
+import { appendAssistantMessage } from "../conversations/service.ts";
+import type { Fee, Network } from "../../src/domain/contracts.ts";
 import {
   confirmPayment,
   createPaymentRecord,
@@ -17,11 +17,11 @@ import {
   PaymentNotFoundError,
   PaymentProviderUnavailableError,
   validatePaymentIntentMessage,
-} from "../payments/service.js";
-import type { BalanceProvider, FeeQuoteProvider } from "../payments/service.js";
-import { resolvePaymentRoute } from "../payments/routing.js";
-import { createAuthenticatedHandler, isRecord, jsonResponse, readJson } from "./http.js";
-import type { AuthenticateRequest } from "./http.js";
+} from "../payments/service.ts";
+import type { BalanceProvider, FeeQuoteProvider } from "../payments/service.ts";
+import { resolvePaymentRoute } from "../payments/routing.ts";
+import { createAuthenticatedHandler, isRecord, jsonResponse, readJson } from "./http.ts";
+import type { AuthenticateRequest } from "./http.ts";
 
 export type PaymentApiOptions = {
   readonly authenticate?: AuthenticateRequest;

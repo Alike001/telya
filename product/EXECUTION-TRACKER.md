@@ -1,6 +1,6 @@
 # Telya Execution Tracker
 
-**Last refreshed:** November 26, 2026, 10:47 UTC (live GitHub audit and PR #46 security commit)
+**Last refreshed:** November 26, 2026, 10:52 UTC (Issue #15 API mount in progress)
 **Execution lead:** Codex  
 **Product owner:** Hammed (@Alike001)  
 **Submission date recorded:** November 30, 2026 (exact cutoff/timezone still unconfirmed in Issue #22).
@@ -51,7 +51,7 @@ The main-branch baseline previously recorded was 5 test files / 40 tests, with t
 | [#12 Stellar CCTP](https://github.com/Alike001/telya/issues/12) | Stellar burn/mint, verification and recovery | In PR #44 | Coordinate with #48; prove bidirectional settlement. |
 | [#5 onboarding](https://github.com/Alike001/telya/issues/5) | Passkey onboarding and durable unique username | In PR #46 | Fix authentication/proof of ownership and atomic wallet claim. |
 | [#6 conversational home](https://github.com/Alike001/telya/issues/6) | Text/voice, balances, route review, confirm/cancel | In PR #49 | Replace all placeholders with actual balance, quote, recipient, signing and payment APIs. |
-| [#15 backend orchestration](https://github.com/Alike001/telya/issues/15) | Contacts, conversations, recipient resolution, route/fee, payment/event persistence and idempotency | Open; previously assigned Webghost | Implement/reuse real authenticated service/API boundary; no duplicate of CCTP coordinator. |
+| [#15 backend orchestration](https://github.com/Alike001/telya/issues/15) | Contacts, conversations, recipient resolution, route/fee, payment/event persistence and idempotency | In progress on `feat/backend-api-mount-15`; existing services now have App Router routes for contacts, conversations, intent, voice, payment status and confirmation. Preview creation remains fail-closed without live balance/fee providers. | Wire trusted balances and quotes; bind passkey authorization/execution to durable payment; prove database behavior and idempotency. No duplicate of CCTP coordinator. |
 | [#7 timeline/activity](https://github.com/Alike001/telya/issues/7) | Payment progress, refresh recovery, receipts and history | Open; previously assigned Prudent | Build only from persisted Payment + PaymentEvent and verified receipts. |
 | [#8 Agent Pass/contacts/ramps/Judge mode](https://github.com/Alike001/telya/issues/8) | On-chain Agent Pass UI, verified contacts, add/withdraw and Testnet mode | Open; previously assigned Prudent | Connect existing on-chain evidence; truthful provider-unavailable state. |
 | [#17 MoneyGram](https://github.com/Alike001/telya/issues/17) | MoneyGram Ramps sandbox | External blocker | Await partner enquiry and organizer guidance; require sandbox keys/domain allowlisting and written C-address compatibility. |
@@ -97,5 +97,6 @@ Codex must not ask Hammed to paste secrets into chat. Request a secure environme
 - Reviewed current PR heads, comments, reviews, review requests and CI for #44/#46/#48/#49/#50. #46/#48/#49 retain older changes-requested reviews, have no pending review requests and remain draft. No inline review threads were open on these PRs at this audit. Open issues #5/#6/#7/#8/#12/#15/#16/#17/#18/#19/#22 and prep #24 remain open.
 - `DATABASE_URL`, sponsor secret, Base RPC URL, Circle API key and Privy environment variables were absent from this shell. The user was given steps to place the Neon direct URL in Git-ignored `.env.local` and authorize Vercel. No secret was requested in chat. Organizer details remain pending.
 - PR #46's server guard is a security stopgap, not completed onboarding. Do not merge or mark Issue #5 complete until browser authentication, wallet ownership proof, database race tests and live reconnect are verified.
+- Issue #15 API mounting branch builds with the new `/api/contacts`, `/api/conversations`, `/api/intent`, `/api/voice/transcribe`, `/api/payments` and `/api/payments/confirm` routes. The existing handler rejects payment preview creation with 503 until actual balance/fee providers are configured. Missing Privy configuration now yields 503 instead of a misleading 401 when a bearer token is supplied. Local checks: 6 test files / 42 passed, typecheck, build, server TypeScript and diff check passed. This is not live payment evidence and Issue #15 remains open.
 
 Keep the product moving on unblocked tasks while these actions are pending.

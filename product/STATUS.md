@@ -78,3 +78,7 @@ MoneyGram's documented non-custodial Stellar widget flow uses a G-address. Telya
 8. Complete Issue #19/#22, independent teammate testing, bug fixes, demo and submission.
 
 See the [Codex Master Playbook](CODEX-MASTER-PLAYBOOK.md) for the full start-to-finish instructions and the [Execution Tracker](EXECUTION-TRACKER.md) for current task status and human-controlled blockers.
+
+## Latest engineering progress — November 26
+
+PR #46 has a fail-closed identity guard at `e8a4ca2`; it still needs browser authentication and wallet ownership proof before onboarding works. Issue #15 work on `feat/backend-api-mount-15` exposes the existing authenticated contacts, conversations, AI intent, voice, payment status and confirmation handlers through App Router. Payment preview creation remains unavailable until trusted live balances and fees are supplied. The branch passed 42 tests, typecheck, build and server TypeScript locally; no live payment claim follows from these checks.

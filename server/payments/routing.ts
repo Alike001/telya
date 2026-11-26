@@ -3,8 +3,8 @@ import type {
   PaymentRoute,
   RecipientReference,
   RouteReasonCode,
-} from "../../src/domain/contracts.js";
-import type { ResolvedRecipient } from "../contacts/service.js";
+} from "../../src/domain/contracts.ts";
+import type { ResolvedRecipient } from "../contacts/service.ts";
 
 export type VerifiedSourceWallet = {
   readonly id: string;

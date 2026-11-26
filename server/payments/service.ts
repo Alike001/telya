@@ -1,7 +1,7 @@
-import type { AuthenticatedUser } from "../auth/privy.js";
-import type { Fee, Network } from "../../src/domain/contracts.js";
-import { getSqlClient } from "../db/client.js";
-import type { RouteResult, VerifiedSourceWallet } from "./routing.js";
+import type { AuthenticatedUser } from "../auth/privy.ts";
+import type { Fee, Network } from "../../src/domain/contracts.ts";
+import { getSqlClient } from "../db/client.ts";
+import type { RouteResult, VerifiedSourceWallet } from "./routing.ts";
 
 export type FeeQuoteProvider = (input: {
   readonly route: Extract<RouteResult, { status: "resolved" }>["route"];
