@@ -74,7 +74,7 @@ MoneyGram's documented non-custodial Stellar widget flow uses a G-address. Telya
 
 ## Immediate execution order
 
-1. Prove PR #48 real bidirectional CCTP, recipient/amount/finality and retry/restart behavior using authorized Testnet credentials. Neon migrations through `0008` and guarded source and Stellar destination SQL are verified. The newest guarded attestation and Base submission SQL passed regression and suite checks but lacks a standalone Neon syntax probe.
+1. Prove PR #48 real bidirectional CCTP, recipient/amount/finality and retry/restart behavior using authorized Testnet credentials. Neon migrations through `0008` and guarded source and Stellar destination SQL are verified. The newest guarded attestation and Base submission SQL passed regressions, the suite and read-only Neon `EXPLAIN` probes.
 2. Complete PR #46 browser Privy authentication and proof-of-wallet-ownership; no fabricated Privy DID or client-trusted verification.
 3. Implement Issue #15 service/API contracts using actual balances, recipient resolution, quotes, payment state and idempotency.
 4. Connect PR #49 to the real Smart Account Kit signed XDR and payment/receipt APIs; no hardcoded financial state or hash-only success.
