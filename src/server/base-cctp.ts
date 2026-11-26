@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { StrKey } from "@stellar/stellar-sdk";
 import { rpc } from "@stellar/stellar-sdk";
 
-import { getSqlClient } from "../../server/db/client";
+import { getSqlClient } from "../../server/db/client.ts";
 import {
   BASE_SEPOLIA_MESSAGE_TRANSMITTER,
   BASE_SEPOLIA_USDC,
@@ -22,14 +22,14 @@ import {
   verifyBaseCctpMint,
   verifyBaseUsdcTransfer,
   type BaseRpc,
-} from "../base/evm";
-import { getCircleCctpStatus, type CircleCctpStatus } from "../base/circle";
+} from "../base/evm.ts";
+import { getCircleCctpStatus, type CircleCctpStatus } from "../base/circle.ts";
 import {
   reconcileStellarCctpSource,
   settleBaseToStellarCctp,
-} from "./stellar-cctp";
-import { stellarCctpConfigFromEnvironment } from "../stellar/cctp";
-import { normalizeStellarUsdcAmount } from "../stellar/usdc";
+} from "./stellar-cctp.ts";
+import { stellarCctpConfigFromEnvironment } from "../stellar/cctp.ts";
+import { normalizeStellarUsdcAmount } from "../stellar/usdc.ts";
 
 export type BaseCctpSourceVerification =
   | { readonly status: "pending"; readonly sourceTransactionHash: string }
@@ -319,68 +319,79 @@ export async function reconcileBaseDirectPayment(input: {
     );
   }
   const amountAtomic = decimalToBaseAtomic(verification.amount!);
-  await sql.transaction([
-    sql`
+  const completed = await sql`
+    WITH eligible AS MATERIALIZED (
+      SELECT p.id
+      FROM payments p
+      LEFT JOIN base_cctp_operations o ON o.payment_id = p.id
+      WHERE p.id = ${paymentId}::uuid AND p.route_id = 'base_to_base'
+        AND p.status IN ('authorized', 'submitted', 'destination_submitted', 'completed')
+        AND lower(p.recipient_address) = lower(${verification.recipient})
+        AND p.expected_recipient_amount = ${verification.amount}::numeric
+        AND (p.destination_transaction_hash IS NULL OR p.destination_transaction_hash = ${hash})
+        AND (o.payment_id IS NULL OR (
+          o.route_id = 'base_to_base'
+          AND lower(o.expected_recipient_address) = lower(${verification.recipient})
+          AND o.expected_amount_atomic = ${amountAtomic}::numeric
+          AND (o.destination_transaction_hash IS NULL OR o.destination_transaction_hash = ${hash})
+        ))
+      FOR UPDATE OF p
+    ), operation AS (
       INSERT INTO base_cctp_operations (
         payment_id, route_id, status, destination_transaction_hash,
         expected_recipient_address, expected_amount_atomic,
         verified_recipient_address, verified_amount_atomic, verified_at
-      ) VALUES (
-        ${paymentId}::uuid, 'base_to_base', 'completed', ${hash},
+      )
+      SELECT id, 'base_to_base', 'completed', ${hash},
         ${verification.recipient}, ${amountAtomic}::numeric,
         ${verification.recipient}, ${amountAtomic}::numeric, now()
-      )
+      FROM eligible
+      WHERE true
       ON CONFLICT (payment_id) DO UPDATE SET
         status = 'completed', destination_transaction_hash = EXCLUDED.destination_transaction_hash,
         verified_recipient_address = EXCLUDED.verified_recipient_address,
         verified_amount_atomic = EXCLUDED.verified_amount_atomic,
         verified_at = COALESCE(base_cctp_operations.verified_at, now()), updated_at = now()
-      WHERE base_cctp_operations.destination_transaction_hash IS NULL
-        OR base_cctp_operations.destination_transaction_hash = EXCLUDED.destination_transaction_hash
-    `,
-    sql`
+      WHERE base_cctp_operations.route_id = 'base_to_base'
+        AND lower(base_cctp_operations.expected_recipient_address) = lower(EXCLUDED.expected_recipient_address)
+        AND base_cctp_operations.expected_amount_atomic = EXCLUDED.expected_amount_atomic
+        AND (base_cctp_operations.destination_transaction_hash IS NULL
+          OR base_cctp_operations.destination_transaction_hash = EXCLUDED.destination_transaction_hash)
+      RETURNING payment_id
+    ), payment AS (
       UPDATE payments SET status = 'completed',
         destination_transaction_hash = ${hash},
         verified_recipient_address = ${verification.recipient},
         verified_recipient_amount = ${verification.amount}::numeric,
         recipient_verified_at = COALESCE(recipient_verified_at, now()), updated_at = now()
-      WHERE id = ${paymentId}::uuid AND route_id = 'base_to_base'
-        AND recipient_address = ${verification.recipient}
+      WHERE id IN (SELECT payment_id FROM operation)
+        AND route_id = 'base_to_base'
+        AND lower(recipient_address) = lower(${verification.recipient})
         AND expected_recipient_amount = ${verification.amount}::numeric
         AND status IN ('authorized', 'submitted', 'destination_submitted', 'completed')
         AND (destination_transaction_hash IS NULL OR destination_transaction_hash = ${hash})
-    `,
-    sql`
+      RETURNING id
+    ), events AS (
       INSERT INTO payment_events (
         payment_id, event_key, stage, status, network, transaction_hash,
         public_message, completed_at
-      ) VALUES (
-        ${paymentId}::uuid, 'base_direct_destination_confirmed',
-        'destination_confirmation', 'destination_confirmed', 'base', ${hash},
-        'Base Sepolia finalized the USDC transfer.', now()
-      ) ON CONFLICT (payment_id, event_key) DO NOTHING
-    `,
-    sql`
-      INSERT INTO payment_events (
-        payment_id, event_key, stage, status, network, transaction_hash,
-        public_message, completed_at
-      ) VALUES (
-        ${paymentId}::uuid, 'base_direct_recipient_verified',
-        'recipient_verification', 'recipient_verified', 'base', ${hash},
-        'The finalized Base transfer matches the expected recipient and USDC amount.', now()
-      ) ON CONFLICT (payment_id, event_key) DO NOTHING
-    `,
-    sql`
-      INSERT INTO payment_events (
-        payment_id, event_key, stage, status, network, transaction_hash,
-        public_message, completed_at
-      ) VALUES (
-        ${paymentId}::uuid, 'base_direct_completed',
-        'completion', 'completed', 'base', ${hash},
-        'The recipient received the verified USDC amount on Base.', now()
-      ) ON CONFLICT (payment_id, event_key) DO NOTHING
-    `,
-  ]);
+      )
+      SELECT payment.id, event.event_key, event.stage, event.status, 'base', ${hash},
+        event.public_message, now()
+      FROM payment
+      CROSS JOIN (VALUES
+        ('base_direct_destination_confirmed', 'destination_confirmation', 'destination_confirmed', 'Base Sepolia finalized the USDC transfer.'),
+        ('base_direct_recipient_verified', 'recipient_verification', 'recipient_verified', 'The finalized Base transfer matches the expected recipient and USDC amount.'),
+        ('base_direct_completed', 'completion', 'completed', 'The recipient received the verified USDC amount on Base.')
+      ) AS event(event_key, stage, status, public_message)
+      ON CONFLICT (payment_id, event_key) DO NOTHING
+      RETURNING payment_id
+    )
+    SELECT payment.id FROM payment JOIN operation ON operation.payment_id = payment.id
+  `;
+  if (completed.length === 0) {
+    throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "Base payment changed while destination verification was being recorded");
+  }
   return { status: "completed", transactionHash: hash };
 }
 
@@ -403,7 +414,7 @@ export async function reconcileBaseToStellarCctp(input: {
       typeof payment.verified_recipient_amount === "string"
     ) {
       const verifiedAtomic = normalizeStellarUsdcAmount(payment.verified_recipient_amount).raw.toString();
-      await sql`
+      const persisted = await sql`
         UPDATE base_cctp_operations SET status = 'completed',
           destination_transaction_hash = ${payment.destination_transaction_hash},
           verified_recipient_address = ${payment.verified_recipient_address},
@@ -413,7 +424,13 @@ export async function reconcileBaseToStellarCctp(input: {
           AND route_id = 'base_to_stellar'
           AND (destination_transaction_hash IS NULL
             OR destination_transaction_hash = ${payment.destination_transaction_hash})
+        RETURNING payment_id
       `;
+      if (persisted.length === 0) {
+        throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "Completed Stellar settlement conflicts with persisted Base CCTP state");
+      }
+    } else {
+      throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "Completed Stellar settlement is missing verified destination evidence");
     }
     return {
       status: "completed",
@@ -517,14 +534,22 @@ export async function reconcileBaseToStellarCctp(input: {
     config: stellarConfig,
   });
   if (result.status === "completed") {
-    await sql`
+    const persisted = await sql`
       UPDATE base_cctp_operations SET status = 'completed',
         destination_transaction_hash = ${result.destinationTransactionHash},
         verified_recipient_address = ${payment.recipient_address},
         verified_amount_atomic = ${atomic}::numeric,
         verified_at = COALESCE(verified_at, now()), updated_at = now()
-      WHERE payment_id = ${paymentId}::uuid
+      WHERE payment_id = ${paymentId}::uuid AND route_id = 'base_to_stellar'
+        AND expected_recipient_address = ${payment.recipient_address}
+        AND expected_amount_atomic = ${atomic}::numeric
+        AND (destination_transaction_hash IS NULL
+          OR destination_transaction_hash = ${result.destinationTransactionHash})
+      RETURNING payment_id
     `;
+    if (persisted.length === 0) {
+      throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "Completed Stellar settlement conflicts with persisted Base CCTP state");
+    }
   }
   return result;
 }
@@ -759,43 +784,68 @@ export async function reconcileStellarToBaseDestination(input: {
     );
   }
   const amountAtomic = decimalToBaseAtomic(verification.amount!);
-  await sql.transaction([
-    sql`
+  const completed = await sql`
+    WITH eligible AS MATERIALIZED (
+      SELECT p.id
+      FROM payments p
+      JOIN base_cctp_operations o ON o.payment_id = p.id
+      WHERE p.id = ${paymentId}::uuid AND p.route_id = 'stellar_to_base'
+        AND p.status IN ('source_confirmed', 'awaiting_attestation', 'destination_submitted',
+          'destination_confirmed', 'recipient_verified', 'completed')
+        AND lower(p.recipient_address) = lower(${verification.recipient})
+        AND p.expected_recipient_amount = ${verification.amount}::numeric
+        AND (p.destination_transaction_hash IS NULL OR p.destination_transaction_hash = ${hash})
+        AND o.route_id = 'stellar_to_base'
+        AND o.status IN ('destination_prepared', 'destination_submitted', 'destination_confirmed', 'recipient_verified', 'completed')
+        AND o.destination_transaction_hash = ${hash}
+        AND lower(o.expected_recipient_address) = lower(${verification.recipient})
+        AND o.expected_amount_atomic = ${amountAtomic}::numeric
+      FOR UPDATE OF p, o
+    ), operation AS (
       UPDATE base_cctp_operations SET status = 'completed',
         destination_transaction_hash = ${hash},
         verified_recipient_address = ${verification.recipient},
         verified_amount_atomic = ${amountAtomic}::numeric, verified_at = now(),
         submission_lease_id = NULL, submission_lease_expires_at = NULL, updated_at = now()
-      WHERE payment_id = ${paymentId}::uuid
+      WHERE payment_id IN (SELECT id FROM eligible)
+        AND route_id = 'stellar_to_base'
         AND status IN ('destination_prepared', 'destination_submitted', 'destination_confirmed', 'recipient_verified', 'completed')
-        AND (destination_transaction_hash IS NULL OR destination_transaction_hash = ${hash})
-    `,
-    sql`
+        AND destination_transaction_hash = ${hash}
+      RETURNING payment_id
+    ), payment AS (
       UPDATE payments SET status = 'completed',
         destination_transaction_hash = ${hash},
         verified_recipient_address = ${verification.recipient},
         verified_recipient_amount = ${verification.amount}::numeric,
         recipient_verified_at = COALESCE(recipient_verified_at, now()), updated_at = now()
-      WHERE id = ${paymentId}::uuid AND route_id = 'stellar_to_base'
-        AND recipient_address = ${verification.recipient}
+      WHERE id IN (SELECT payment_id FROM operation)
+        AND route_id = 'stellar_to_base'
+        AND lower(recipient_address) = lower(${verification.recipient})
         AND expected_recipient_amount = ${verification.amount}::numeric
         AND status IN ('source_confirmed', 'awaiting_attestation', 'destination_submitted',
           'destination_confirmed', 'recipient_verified', 'completed')
         AND (destination_transaction_hash IS NULL OR destination_transaction_hash = ${hash})
-    `,
-    ...[
-      ["base_cctp_destination_confirmed", "destination_confirmation", "destination_confirmed", "Base finalized the CCTP destination transaction."],
-      ["base_cctp_recipient_verified", "recipient_verification", "recipient_verified", "The finalized Base mint matches the exact recipient and USDC amount."],
-      ["base_cctp_completed", "completion", "completed", "The recipient received the verified USDC amount on Base."],
-    ].map(([eventKey, stage, status, publicMessage]) => sql`
+      RETURNING id
+    ), events AS (
       INSERT INTO payment_events (
         payment_id, event_key, stage, status, network, transaction_hash,
         public_message, completed_at
-      ) VALUES (
-        ${paymentId}::uuid, ${eventKey}, ${stage}, ${status}, 'base', ${hash},
-        ${publicMessage}, now()
-      ) ON CONFLICT (payment_id, event_key) DO NOTHING
-    `),
-  ]);
+      )
+      SELECT payment.id, event.event_key, event.stage, event.status, 'base', ${hash},
+        event.public_message, now()
+      FROM payment
+      CROSS JOIN (VALUES
+        ('base_cctp_destination_confirmed', 'destination_confirmation', 'destination_confirmed', 'Base finalized the CCTP destination transaction.'),
+        ('base_cctp_recipient_verified', 'recipient_verification', 'recipient_verified', 'The finalized Base mint matches the exact recipient and USDC amount.'),
+        ('base_cctp_completed', 'completion', 'completed', 'The recipient received the verified USDC amount on Base.')
+      ) AS event(event_key, stage, status, public_message)
+      ON CONFLICT (payment_id, event_key) DO NOTHING
+      RETURNING payment_id
+    )
+    SELECT payment.id FROM payment JOIN operation ON operation.payment_id = payment.id
+  `;
+  if (completed.length === 0) {
+    throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "Base CCTP payment changed while destination verification was being recorded");
+  }
   return { status: "completed", destinationTransactionHash: hash };
 }

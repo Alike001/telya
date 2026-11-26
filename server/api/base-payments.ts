@@ -5,10 +5,10 @@ import {
   baseEvmConfigFromEnvironment,
   createBaseRpc,
   normalizeBaseUsdcAmount,
-} from "../../src/base/evm.js";
-import type { DecimalAmount } from "../../src/domain/contracts.js";
-import { CircleCctpError } from "../../src/base/circle.js";
-import { BaseCctpPersistenceError } from "../../src/server/base-cctp.js";
+} from "../../src/base/evm.ts";
+import type { DecimalAmount } from "../../src/domain/contracts.ts";
+import { CircleCctpError } from "../../src/base/circle.ts";
+import { BaseCctpPersistenceError } from "../../src/server/base-cctp.ts";
 import {
   reconcileBaseDirectPayment,
   reconcileBaseToStellarCctp,
@@ -16,23 +16,23 @@ import {
   reconcileStellarToBaseDestination,
   recordStellarToBaseDestinationSubmitted,
   reserveBaseCctpOperation,
-} from "../../src/server/base-cctp.js";
-import { stellarCctpConfigFromEnvironment } from "../../src/stellar/cctp.js";
+} from "../../src/server/base-cctp.ts";
+import { stellarCctpConfigFromEnvironment } from "../../src/stellar/cctp.ts";
 import {
   PaymentConflictError,
   PaymentInputError,
   PaymentNotFoundError,
   PaymentProviderUnavailableError,
   getPaymentWithEvents,
-} from "../payments/service.js";
+} from "../payments/service.ts";
 import {
   createAuthenticatedHandler,
   isRecord,
   jsonResponse,
   readJson,
-} from "./http.js";
-import type { AuthenticateRequest } from "./http.js";
-import { authenticateRequest } from "../auth/privy.js";
+} from "./http.ts";
+import type { AuthenticateRequest } from "./http.ts";
+import { authenticateRequest } from "../auth/privy.ts";
 
 function paymentId(request: Request): string {
   return new URL(request.url).searchParams.get("id") ?? "";

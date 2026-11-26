@@ -1,4 +1,4 @@
-import type { DecimalAmount } from "../domain";
+import type { DecimalAmount } from "../domain/index.ts";
 
 export const BASE_SEPOLIA_CHAIN_ID = 84_532;
 export const CCTP_BASE_DOMAIN = 6;
@@ -412,7 +412,10 @@ export async function verifyBaseUsdcTransfer(input: {
   readonly txHash: string;
   readonly tokenAddress?: string;
   readonly expectedRecipient: string;
+  /** Expected Transfer-event sender (the zero address for Circle mints). */
   readonly expectedSender: string;
+  /** If supplied, also require this EOA/contract to have submitted the transaction. */
+  readonly expectedTransactionSender?: string;
   readonly expectedAmount: DecimalAmount;
 }): Promise<BaseUsdcTransferVerification> {
   const txHash = input.txHash.trim().toLowerCase();
@@ -430,11 +433,16 @@ export async function verifyBaseUsdcTransfer(input: {
     return { status: "pending", transactionHash: txHash };
   }
   const expectedSender = requireEvmAddress(input.expectedSender, "sender");
-  if (requireEvmAddress(transaction.from, "transaction sender") !== expectedSender) {
+  const transactionSender = requireEvmAddress(transaction.from, "transaction sender");
+  const expectedTransactionSender = input.expectedTransactionSender ??
+    (expectedSender === `0x${"0".repeat(40)}` ? undefined : expectedSender);
+  if (transactionSender === `0x${"0".repeat(40)}` ||
+      (expectedTransactionSender !== undefined &&
+        transactionSender !== requireEvmAddress(expectedTransactionSender, "expected transaction sender"))) {
     return {
       status: "mismatch",
       transactionHash: txHash,
-      reason: "Base transaction sender does not match the payment source wallet",
+      reason: "Base transaction submitter does not match the expected wallet",
     };
   }
   const tokenAddress = (input.tokenAddress ?? BASE_SEPOLIA_USDC).toLowerCase();
@@ -503,6 +511,9 @@ export async function verifyBaseCctpMint(input: {
     rpc: input.rpc,
     txHash,
     expectedSender: `0x${"0".repeat(40)}`,
+    // Circle's mint event is emitted from the zero address. The transaction is
+    // submitted by the user's wallet or a relayer, so only require a valid,
+    // nonzero submitter while binding the call target and calldata above.
     expectedRecipient: input.expectedRecipient,
     expectedAmount: input.expectedAmount,
   });

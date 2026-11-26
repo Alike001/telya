@@ -9,15 +9,15 @@ import {
   rpc,
 } from "@stellar/stellar-sdk";
 
-import { getSqlClient } from "../../server/db/client";
+import { getSqlClient } from "../../server/db/client.ts";
 import {
   buildMintAndForwardTransaction,
   stellarCctpConfigFromEnvironment,
   verifyBaseToStellarDestination,
   verifyStellarCctpBurn,
   type StellarCctpConfig,
-} from "../stellar/cctp";
-import { normalizeStellarUsdcAmount } from "../stellar/usdc";
+} from "../stellar/cctp.ts";
+import { normalizeStellarUsdcAmount } from "../stellar/usdc.ts";
 
 const DEFAULT_MAX_RESOURCE_FEE_STROOPS = 1_000_000n;
 

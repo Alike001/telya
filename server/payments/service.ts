@@ -1,6 +1,6 @@
 import type { AuthenticatedUser } from "../auth/privy.js";
 import type { Fee, Network } from "../../src/domain/contracts.js";
-import { getSqlClient } from "../db/client.js";
+import { getSqlClient } from "../db/client.ts";
 import type { RouteResult, VerifiedSourceWallet } from "./routing.js";
 
 export type FeeQuoteProvider = (input: {

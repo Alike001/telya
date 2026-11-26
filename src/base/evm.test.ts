@@ -9,6 +9,7 @@ import {
   findBaseCctpMessage,
   normalizeBaseUsdcAmount,
   parseCctpMessage,
+  verifyBaseCctpMint,
   verifyBaseUsdcTransfer,
   type BaseTransactionReceipt,
   type BaseRpc,
@@ -85,6 +86,46 @@ describe("Base Sepolia transaction encoding and verification", () => {
       expectedSender: SENDER,
       expectedAmount: "4.999999",
     })).resolves.toMatchObject({ status: "mismatch" });
+  });
+
+  it("verifies a Circle mint from the zero address with a real nonzero transaction submitter", async () => {
+    const message = "0x01020304";
+    const attestation = `0x${"c".repeat(130)}`;
+    const input = encodeCctpReceiveMessage(message, attestation);
+    const receipt: BaseTransactionReceipt = {
+      transactionHash: TX_HASH,
+      status: "0x1",
+      blockNumber: "0x100",
+      logs: [{
+        address: BASE_SEPOLIA_USDC,
+        topics: [TOPIC, `0x${"0".repeat(64)}`, `0x${RECIPIENT.slice(2).padStart(64, "0")}`],
+        data: `0x${word(5_000_000n)}`,
+      }],
+    };
+    const rpc: BaseRpc = {
+      request: vi.fn(async (method: string) => {
+        if (method === "eth_getTransactionReceipt") return receipt;
+        if (method === "eth_getBlockByNumber") return { number: "0x200" };
+        if (method === "eth_getTransactionByHash") {
+          return {
+            hash: TX_HASH,
+            from: SENDER,
+            to: BASE_SEPOLIA_MESSAGE_TRANSMITTER,
+            input,
+          };
+        }
+        throw new Error(`Unexpected RPC method: ${method}`);
+      }) as unknown as BaseRpc["request"],
+    };
+
+    await expect(verifyBaseCctpMint({
+      rpc,
+      txHash: TX_HASH,
+      message,
+      attestation,
+      expectedRecipient: RECIPIENT,
+      expectedAmount: "5",
+    })).resolves.toMatchObject({ status: "verified", recipient: RECIPIENT, amount: "5" });
   });
 
   it("decodes the MessageSent bytes and CCTP V2 message domains", () => {
