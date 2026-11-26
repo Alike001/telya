@@ -23,13 +23,18 @@ import {
   type SmartAccountPublicConfig,
 } from "../../stellar/smart-account";
 import { ActivityHistory } from "./activity-history";
+import { AgentPassPanel } from "./agent-pass-panel";
 import { ClarificationCard } from "./clarification-card";
+import { ContactsDirectory } from "./contacts-directory";
+import { JudgeTestnetDrawer } from "./judge-testnet-drawer";
+import { MoneyGramRampModal } from "./moneygram-ramp-modal";
 import { PaymentProgressTimeline } from "./payment-progress-timeline";
 import { PaymentReceiptModal } from "./payment-receipt-modal";
 import { PaymentReviewCard } from "./payment-review-card";
 import { VoiceComposer } from "./voice-composer";
 import {
   ArrowLeftRight,
+  Banknote,
   CheckCircle2,
   Clock,
   History,
@@ -38,6 +43,7 @@ import {
   RefreshCw,
   Shield,
   Sparkles,
+  Users,
   Wallet,
 } from "lucide-react";
 
@@ -69,7 +75,11 @@ export function ConversationalHome() {
   const [smartAccount, setSmartAccount] = useState<ConnectedSmartAccount | null>(null);
   const kitRef = useRef<any>(null);
 
-  const [activeTab, setActiveTab] = useState<"chat" | "activity">("chat");
+  const [activeTab, setActiveTab] = useState<
+    "chat" | "activity" | "contacts" | "agent_pass"
+  >("chat");
+  const [showRampModal, setShowRampModal] = useState(false);
+  const [showJudgeDrawer, setShowJudgeDrawer] = useState(false);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [eventsMap, setEventsMap] = useState<Record<string, PaymentEvent[]>>({});
   const [activeReceiptPayment, setActiveReceiptPayment] = useState<Payment | null>(null);
@@ -294,15 +304,13 @@ export function ConversationalHome() {
     }
 
     if (parsed.kind === "agent_pass_check") {
+      setActiveTab("agent_pass");
       setMessages((prev) => [
         ...prev,
         {
           id: `telya_${Date.now()}`,
           sender: "telya",
-          text: isWalletConnected
-            ? "Here is your active Stellar Agent Pass allowance:"
-            : "Connect your passkey account to view and manage Agent Passes.",
-          agentPassWidget: true,
+          text: "Opening your Stellar Agent Pass autonomous spending controls.",
           timestamp: now,
         },
       ]);
@@ -310,6 +318,7 @@ export function ConversationalHome() {
     }
 
     if (parsed.kind === "activity_check") {
+      setActiveTab("activity");
       setMessages((prev) => [
         ...prev,
         {
@@ -317,6 +326,48 @@ export function ConversationalHome() {
           sender: "telya",
           text: "Here is your verified transaction and money movement history:",
           activityWidget: true,
+          timestamp: now,
+        },
+      ]);
+      return;
+    }
+
+    if (parsed.kind === "contacts_check") {
+      setActiveTab("contacts");
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `telya_${Date.now()}`,
+          sender: "telya",
+          text: "Opening your verified Contacts Directory.",
+          timestamp: now,
+        },
+      ]);
+      return;
+    }
+
+    if (parsed.kind === "ramp_check") {
+      setShowRampModal(true);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `telya_${Date.now()}`,
+          sender: "telya",
+          text: "Opening MoneyGram Access cash deposit and withdrawal sandbox.",
+          timestamp: now,
+        },
+      ]);
+      return;
+    }
+
+    if (parsed.kind === "judge_check") {
+      setShowJudgeDrawer(true);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `telya_${Date.now()}`,
+          sender: "telya",
+          text: "Opening Hackathon Judge & Testnet Evaluation Guide.",
           timestamp: now,
         },
       ]);
@@ -617,24 +668,63 @@ export function ConversationalHome() {
     <div className="conversational-home-wrapper shell">
       {/* Header Bar with Tabs and Balances */}
       <div className="home-top-bar">
-        <div className="view-switcher-tabs">
-          <button
-            type="button"
-            className={`tab-btn ${activeTab === "chat" ? "active" : ""}`}
-            onClick={() => setActiveTab("chat")}
-          >
-            <MessageSquare className="tab-icon" />
-            <span>Chat</span>
-          </button>
-          <button
-            type="button"
-            className={`tab-btn ${activeTab === "activity" ? "active" : ""}`}
-            onClick={() => setActiveTab("activity")}
-          >
-            <History className="tab-icon" />
-            <span>Activity</span>
-            {payments.length > 0 && <span className="tab-badge">{payments.length}</span>}
-          </button>
+        <div className="top-bar-row">
+          <div className="view-switcher-tabs">
+            <button
+              type="button"
+              className={`tab-btn ${activeTab === "chat" ? "active" : ""}`}
+              onClick={() => setActiveTab("chat")}
+            >
+              <MessageSquare className="tab-icon" />
+              <span>Chat</span>
+            </button>
+            <button
+              type="button"
+              className={`tab-btn ${activeTab === "activity" ? "active" : ""}`}
+              onClick={() => setActiveTab("activity")}
+            >
+              <History className="tab-icon" />
+              <span>Activity</span>
+              {payments.length > 0 && <span className="tab-badge">{payments.length}</span>}
+            </button>
+            <button
+              type="button"
+              className={`tab-btn ${activeTab === "contacts" ? "active" : ""}`}
+              onClick={() => setActiveTab("contacts")}
+            >
+              <Users className="tab-icon" />
+              <span>Contacts</span>
+            </button>
+            <button
+              type="button"
+              className={`tab-btn ${activeTab === "agent_pass" ? "active" : ""}`}
+              onClick={() => setActiveTab("agent_pass")}
+            >
+              <KeyRound className="tab-icon" />
+              <span>Agent Pass</span>
+            </button>
+          </div>
+
+          <div className="home-quick-actions">
+            <button
+              type="button"
+              className="quick-action-btn ramp"
+              onClick={() => setShowRampModal(true)}
+              title="MoneyGram Access Cash In/Out Sandbox"
+            >
+              <Banknote className="btn-icon" />
+              <span>Cash In/Out</span>
+            </button>
+            <button
+              type="button"
+              className="quick-action-btn judge"
+              onClick={() => setShowJudgeDrawer(true)}
+              title="Open Hackathon Judge & Testnet Guide"
+            >
+              <Sparkles className="btn-icon" />
+              <span>Judge Guide</span>
+            </button>
+          </div>
         </div>
 
         <div className="home-balances-header">
@@ -683,6 +773,28 @@ export function ConversationalHome() {
             }}
             onOpenTimeline={(payment) => {
               setActiveTimelinePaymentId(payment.id);
+              setActiveTab("chat");
+            }}
+          />
+        </div>
+      ) : activeTab === "contacts" ? (
+        /* Dedicated Contacts View */
+        <div className="contacts-view-panel">
+          <ContactsDirectory
+            onSelectPayContact={(handle) => {
+              handleSendMessage(`Send 10 USDC to ${handle}`, "text");
+              setActiveTab("chat");
+            }}
+          />
+        </div>
+      ) : activeTab === "agent_pass" ? (
+        /* Dedicated Stellar Agent Pass View */
+        <div className="agent-pass-view-panel">
+          <AgentPassPanel
+            smartAccountAddress={smartAccount?.contractId ?? null}
+            kit={kitRef.current}
+            onOpenPayment={(prompt) => {
+              handleSendMessage(prompt, "text");
               setActiveTab("chat");
             }}
           />
@@ -843,6 +955,39 @@ export function ConversationalHome() {
           onClose={() => setActiveReceiptPayment(null)}
         />
       )}
+
+      {/* MoneyGram Ramp Modal */}
+      {showRampModal && (
+        <MoneyGramRampModal
+          stellarAddress={smartAccount?.contractId ?? null}
+          onClose={() => setShowRampModal(false)}
+          onDepositSuccess={(amt) => {
+            setBalances((prev) => ({
+              ...prev,
+              stellarUsdc: (parseFloat(prev.stellarUsdc) + parseFloat(amt)).toFixed(2),
+            }));
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: `ramp_success_${Date.now()}`,
+                sender: "telya",
+                text: `MoneyGram Sandbox Deposit of $${amt} USDC completed! Your updated Stellar balance is available.`,
+                timestamp: "Just now",
+              },
+            ]);
+          }}
+        />
+      )}
+
+      {/* Judge & Testnet Mode Drawer */}
+      <JudgeTestnetDrawer
+        isOpen={showJudgeDrawer}
+        onClose={() => setShowJudgeDrawer(false)}
+        onQuickPrompt={(prompt) => {
+          handleSendMessage(prompt, "text");
+          setActiveTab("chat");
+        }}
+      />
     </div>
   );
 }

@@ -14,6 +14,9 @@ export interface ParsedUserIntent {
     | "balance_check"
     | "agent_pass_check"
     | "activity_check"
+    | "contacts_check"
+    | "ramp_check"
+    | "judge_check"
     | "clarification"
     | "unknown";
   readonly originalInput: string;
@@ -95,6 +98,51 @@ export function parseNaturalLanguageIntent(
   ) {
     return {
       kind: "activity_check",
+      originalInput: trimmed,
+      inputMode,
+    };
+  }
+
+  // Contacts directory intent
+  if (
+    lower.includes("contacts") ||
+    lower.includes("address book") ||
+    lower.includes("recipients") ||
+    lower.includes("who can i pay")
+  ) {
+    return {
+      kind: "contacts_check",
+      originalInput: trimmed,
+      inputMode,
+    };
+  }
+
+  // Fiat ramp & MoneyGram intent
+  if (
+    lower.includes("moneygram") ||
+    lower.includes("add money") ||
+    lower.includes("deposit cash") ||
+    lower.includes("withdraw cash") ||
+    lower.includes("cash out") ||
+    lower.includes("ramp")
+  ) {
+    return {
+      kind: "ramp_check",
+      originalInput: trimmed,
+      inputMode,
+    };
+  }
+
+  // Judge / Testnet guide intent
+  if (
+    lower.includes("judge") ||
+    lower.includes("evaluator") ||
+    lower.includes("how to test") ||
+    lower.includes("demo mode") ||
+    lower.includes("testnet guide")
+  ) {
+    return {
+      kind: "judge_check",
       originalInput: trimmed,
       inputMode,
     };

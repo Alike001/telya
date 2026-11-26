@@ -29,6 +29,33 @@ describe("Deterministic Intent Parser", () => {
     expect(result3.kind).toBe("activity_check");
   });
 
+  it("parses contacts directory queries", () => {
+    const result1 = parseNaturalLanguageIntent("open my contacts");
+    expect(result1.kind).toBe("contacts_check");
+
+    const result2 = parseNaturalLanguageIntent("who can I pay?");
+    expect(result2.kind).toBe("contacts_check");
+  });
+
+  it("parses MoneyGram cash ramp queries", () => {
+    const result1 = parseNaturalLanguageIntent("add money with MoneyGram");
+    expect(result1.kind).toBe("ramp_check");
+
+    const result2 = parseNaturalLanguageIntent("deposit cash in store");
+    expect(result2.kind).toBe("ramp_check");
+
+    const result3 = parseNaturalLanguageIntent("withdraw cash");
+    expect(result3.kind).toBe("ramp_check");
+  });
+
+  it("parses Judge mode and evaluator guide queries", () => {
+    const result1 = parseNaturalLanguageIntent("open judge mode");
+    expect(result1.kind).toBe("judge_check");
+
+    const result2 = parseNaturalLanguageIntent("how to test Telya");
+    expect(result2.kind).toBe("judge_check");
+  });
+
   it("parses full payment intent with @username and amount", () => {
     const result = parseNaturalLanguageIntent("Send 5 USDC to @alice");
     expect(result.kind).toBe("payment");
