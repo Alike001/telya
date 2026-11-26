@@ -4,16 +4,17 @@ This repository is the source of truth for Telya.
 
 Before making changes, read:
 1. `product/STATUS.md`
-2. `handoffs/AGENT-HANDOFF.md`
-3. `product/PRD.md`
-4. `product/ARCHITECTURE.md`
-5. `product/DECISIONS.md`
-6. `product/BUILD-PLAN.md`
-7. `product/TEAM.md`
-8. `product/ACCEPTANCE-TESTS.md`
-9. `product/SETLORA-LESSONS.md`
-10. `product/BUILD-WEEK-DAY1.md` when Build Week implementation begins
-11. The handoff for your assigned area.
+2. `product/JUDGING-AND-GRANT-READINESS.md`
+3. `handoffs/AGENT-HANDOFF.md`
+4. `product/PRD.md`
+5. `product/ARCHITECTURE.md`
+6. `product/DECISIONS.md`
+7. `product/BUILD-PLAN.md`
+8. `product/TEAM.md`
+9. `product/ACCEPTANCE-TESTS.md`
+10. `product/SETLORA-LESSONS.md`
+11. `product/BUILD-WEEK-DAY1.md` when Build Week implementation begins
+12. The handoff for your assigned area.
 
 If these files conflict with an agent's assumptions, the repository files win.
 
@@ -31,6 +32,7 @@ If these files conflict with an agent's assumptions, the repository files win.
 - Do not change the rule that usernames are globally unique and case-insensitive.
 - Do not add unsupported chains or assets during P0.
 - Keep Testnet behavior production-shaped so Mainnet is primarily a configuration/provider transition.
+- Do not declare a major feature complete without the evidence required by `product/JUDGING-AND-GRANT-READINESS.md`.
 
 ## Product principle
 

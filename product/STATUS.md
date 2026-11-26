@@ -1,17 +1,19 @@
 # Telya Current Status
 
-**Date:** November 22, 2026  
+**Date:** November 25, 2026
 **Team:** Bravo  
 **Product:** Telya  
 **Repository:** Alike001/telya
 
-## Program status
+## Readiness verdict
 
 - Stellar Builder's Circle application submitted by Hammed.
 - Stellar Buildathon application submitted.
 - Team size: 3.
-- Team Bravo has chosen November 25, 2026 as the start of substantive feature implementation.
-- Before then, work is limited to preparation, repository access, provider/test-account setup, documentation, deployment plumbing, toolchains, and planning.
+- Build Week implementation is active.
+- The detailed evidence baseline is [`product/JUDGING-AND-GRANT-READINESS.md`](JUDGING-AND-GRANT-READINESS.md).
+- Telya has verified Stellar smart-account, direct-USDC, and Agent Pass evidence, but the complete P0 product and cross-chain demo are not complete.
+- A merged PR or PR description is not sufficient completion evidence.
 
 ## Team
 
@@ -28,54 +30,48 @@ Owns database/API, auth verification, Base-side integration, AI/voice backend, r
 
 **Current GitHub state:** collaborator access accepted.
 
-## Foundation status
+## Verified on `main`
 
-Completed:
-- PRD
-- architecture
-- Build Week plan
-- team split
-- acceptance tests
-- AGENTS.md rules
-- frontend/backend/Hammed handoffs
-- environment contract
-- contribution workflow
-- P0 GitHub issue backlog
-- project README / How to Test skeleton
-- decision log
-- roadmap
-- universal agent handoff
-- pre-build readiness checklist
-- ecosystem/problem-positioning notes
-- Setlora feedback/judging lessons preserved in `product/SETLORA-LESSONS.md`
+- Public Testnet application and database health endpoint.
+- Canonical domain contracts and database migrations through `0005`.
+- Passkey-controlled Stellar smart-account create/reconnect and server-side sponsorship.
+- Direct Stellar Testnet USDC with finality, recipient/amount verification, durable events, and receipt restoration.
+- Agent Pass allowed spend, cumulative-limit rejection, revocation, post-revocation rejection, and continued owner control.
+- Current `main`: 5 test files / 40 tests passed; type generation, TypeScript checking, and production build passed.
 
-Not yet implemented:
-- frontend application
-- backend/API
-- database schema
-- Privy/auth integration
-- Stellar integration inside Telya
-- Base integration
-- CCTP
-- MoneyGram
-- AI/voice
-- deployment
-- acceptance test execution
+## Implemented but awaiting integration
 
-## Immediate next action before November 25
+- AI/voice intent handlers.
+- Contacts, deterministic routing, fee-preview, and payment API handlers.
+- Stellar-side CCTP in draft PR #44, including crash-recovery work. It must remain draft pending Issue #16 and real bidirectional evidence.
 
-1. Finish remaining teammate items in Issue #24.
-2. Confirm provider/Testnet credentials and faucets.
-3. Request/confirm MoneyGram sandbox access.
-4. Confirm final submission/judging requirements in Issue #22 when available.
-5. Keep product scope frozen.
-6. Carry the Setlora lessons into Build Week execution without removing P0 features.
+## In progress
 
-## November 25 start order
+- PR #46 onboarding/auth/username experience. Vercel reports that team authorization is required before it can deploy the fork commit; GitHub has no deployment record or preview build log for the current attempt, so this is not evidence of a build failure. GitGuardian currently flags a high-entropy value in `src/stellar/public-config.ts`; that gate needs disposition, but the finding alone is not proof that a secret was committed. Silent mock username availability on database failure must still be removed before acceptance.
+- Payment progression, refresh recovery, and receipt UI across the P0 route matrix.
 
-1. Shared types/contracts.
-2. Public Telya shell + first deployment.
-3. Frontend design system/app shell.
-4. Database/auth skeleton.
-5. Stellar smart-account integration.
-6. Continue assigned P0 issues in parallel through branches and PRs.
+## Not implemented or not verified
+
+- Issue #16 Base/Circle coordinator; owned by @Webghost01-NG, with no implementation PR at this assessment date.
+- Base-to-Base execution and real Base Sepolia settlement evidence.
+- Bidirectional CCTP destination recipient/amount/finality and retry evidence.
+- MoneyGram sandbox flow. Partner access has not been obtained; new widget integrations require sandbox credentials and company-email registration.
+- External user-testing evidence.
+- Official submission cutoff, artifacts, rubric details, and video requirements.
+
+## Immediate priorities
+
+1. Do not duplicate Issue #16. Wait for @Webghost01-NG's Base/Circle implementation while completing independent work.
+2. Review PR #46 with @Prudentdev-xyz for truthful, durable onboarding and green checks.
+3. Mount and test existing server handlers and connect the already verified direct Stellar route to the visible end-to-end journey.
+4. Integrate Issue #16 through PR #44's agreed seam, then prove both CCTP directions and retry/recovery behavior.
+5. Confirm Issue #22 and remaining provider access from official sources.
+6. Preserve the frozen P0 scope and the rule that source confirmation is never cross-chain completion.
+
+## External MoneyGram constraint
+
+- MoneyGram's documented non-custodial Stellar widget flow uses G-addresses.
+- Telya uses Stellar Smart Account Kit contract accounts.
+- Contract-wallet compatibility requires explicit MoneyGram confirmation before implementation.
+- Do not create fake provider responses or simulated completed payments.
+- Continue direct Stellar, CCTP, and the core journey while provider access is blocked.

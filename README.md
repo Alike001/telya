@@ -106,7 +106,7 @@ Planned test environment:
 - Stellar Testnet
 - Base Sepolia
 - Circle CCTP test configuration
-- MoneyGram sandbox
+- MoneyGram sandbox, pending partner access and contract-wallet compatibility confirmation
 
 The final judge flow will include:
 1. Open the public Testnet app.
@@ -133,7 +133,7 @@ AI agents also need safer wallet permissions than unrestricted access.
 - Persistent history and receipts.
 - Unique human-readable usernames mapped to verified wallet records.
 - Agent Pass: limited, expiring, revocable Stellar agent spending.
-- MoneyGram sandbox cash-in/cash-out integration.
+- Planned MoneyGram sandbox cash-in/cash-out integration; provider access is pending and the integration is not implemented.
 
 ## Required payment routes
 
@@ -155,6 +155,7 @@ Completion requires destination finality plus recipient and amount verification.
 If you are a developer or AI agent joining the project, start here:
 
 - [Current project status](product/STATUS.md)
+- [Judging and grant readiness baseline](product/JUDGING-AND-GRANT-READINESS.md)
 - [Universal agent handoff](handoffs/AGENT-HANDOFF.md)
 - [Product requirements](product/PRD.md)
 - [Architecture](product/ARCHITECTURE.md)

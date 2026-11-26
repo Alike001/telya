@@ -7,14 +7,15 @@ Use this file when continuing Telya from a new AI agent or a new chat.
 Read these files before changing code:
 1. `AGENTS.md`
 2. `product/STATUS.md`
-3. `product/PRD.md`
-4. `product/ARCHITECTURE.md`
-5. `product/BUILD-PLAN.md`
-6. `product/TEAM.md`
-7. `product/ACCEPTANCE-TESTS.md`
-8. `product/SETLORA-LESSONS.md`
-9. `product/BUILD-WEEK-DAY1.md`
-10. Your role-specific handoff in `handoffs/`
+3. `product/JUDGING-AND-GRANT-READINESS.md`
+4. `product/PRD.md`
+5. `product/ARCHITECTURE.md`
+6. `product/BUILD-PLAN.md`
+7. `product/TEAM.md`
+8. `product/ACCEPTANCE-TESTS.md`
+9. `product/SETLORA-LESSONS.md`
+10. `product/BUILD-WEEK-DAY1.md`
+11. Your role-specific handoff in `handoffs/`
 
 ## Product in one sentence
 
@@ -76,11 +77,16 @@ P0 Agent Pass is direct Stellar USDC only.
 
 Do not reassign major areas without explicit team agreement.
 
-## Current timing
+## Current implementation boundary
 
-Build Week begins November 25, 2026.
+Build Week is active. The evidence/status baseline is `product/JUDGING-AND-GRANT-READINESS.md`.
 
-Before then, restrict work to preparation unless official rules explicitly allow substantive feature implementation.
+- Smart-account lifecycle, direct Stellar USDC, and Agent Pass have verified real Testnet evidence.
+- PR #44 is the draft Stellar CCTP implementation. Keep it draft until Issue #16 is integrated and both directions have exact destination recipient/amount/finality and retry evidence.
+- Issue #16 belongs to @Webghost01-NG. Do not modify his branch or create a competing Base/Circle coordinator.
+- PR #46 is in progress. Its Vercel status is blocked on authorization before deployment, not a proven build failure; no preview build log exists for the current attempt. GitGuardian separately flags a high-entropy public-configuration value and needs disposition, but that finding alone is not proof of a committed secret. Fail-closed username behavior, production-code tests, and the durable authenticated claim path must also be accepted before merge.
+- MoneyGram partner access has not been obtained. The documented non-custodial Stellar widget flow uses G-addresses, while Telya uses Smart Account Kit contract accounts; compatibility requires explicit provider confirmation. Do not simulate provider success, and do not let this external blocker interrupt direct Stellar or CCTP work.
+- Source confirmation never completes a cross-chain payment.
 
 ## Resume rule
 
@@ -90,6 +96,8 @@ Before doing work:
 - create a focused branch,
 - link the issue in the PR,
 - include how-to-test evidence,
+- use the factual status labels and evidence requirements in `product/JUDGING-AND-GRANT-READINESS.md`,
+- do not infer completion from a PR description alone,
 - do not expand P0.
 
 
