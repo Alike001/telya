@@ -329,6 +329,86 @@ export async function reserveBaseCctpOperation(input: {
   };
 }
 
+/** Atomically persist Base source/Circle evidence with the Payment timeline. */
+export async function recordBaseCctpAttestation(input: {
+  readonly paymentId: string;
+  readonly sourceTransactionHash: string;
+  readonly expectedRecipientAddress: string;
+  readonly expectedRecipientAmount: string;
+  readonly expectedAmountAtomic: string;
+  readonly burnAmountAtomic: string;
+  readonly maxFeeAtomic: string;
+  readonly circle: Extract<CircleCctpStatus, { status: "complete" }>;
+}): Promise<void> {
+  const sql = getSqlClient();
+  const rows = await sql`
+    WITH eligible AS MATERIALIZED (
+      SELECT p.id
+      FROM payments p
+      JOIN base_cctp_operations o ON o.payment_id = p.id
+      WHERE p.id = ${input.paymentId}::uuid
+        AND p.route_id = 'base_to_stellar'
+        AND p.status IN ('authorized', 'submitted', 'source_confirmed', 'awaiting_attestation')
+        AND p.recipient_address = ${input.expectedRecipientAddress}
+        AND p.expected_recipient_amount = ${input.expectedRecipientAmount}::numeric
+        AND (p.source_transaction_hash IS NULL
+          OR p.source_transaction_hash = ${input.sourceTransactionHash})
+        AND o.route_id = 'base_to_stellar'
+        AND o.status IN ('authorized', 'source_submitted', 'source_confirmed', 'awaiting_attestation')
+        AND o.burn_amount_atomic = ${input.burnAmountAtomic}::numeric
+        AND o.max_fee_atomic = ${input.maxFeeAtomic}::numeric
+        AND o.expected_recipient_address = ${input.expectedRecipientAddress}
+        AND o.expected_amount_atomic = ${input.expectedAmountAtomic}::numeric
+        AND (o.source_transaction_hash IS NULL
+          OR o.source_transaction_hash = ${input.sourceTransactionHash})
+        AND (o.circle_message_hash IS NULL
+          OR o.circle_message_hash = ${input.circle.messageHash})
+        AND (o.circle_attestation_hash IS NULL
+          OR o.circle_attestation_hash = ${input.circle.attestationHash})
+      FOR UPDATE OF p, o
+    ), operation AS (
+      UPDATE base_cctp_operations o SET
+        status = 'awaiting_attestation',
+        source_transaction_hash = ${input.sourceTransactionHash},
+        circle_message_hash = ${input.circle.messageHash},
+        circle_attestation_hash = ${input.circle.attestationHash},
+        circle_message = ${input.circle.message},
+        circle_attestation = ${input.circle.attestation}, updated_at = now()
+      FROM eligible e WHERE o.payment_id = e.id
+      RETURNING o.payment_id
+    ), payment AS (
+      UPDATE payments p SET status = 'awaiting_attestation',
+        source_transaction_hash = ${input.sourceTransactionHash}, updated_at = now()
+      FROM eligible e WHERE p.id = e.id
+      RETURNING p.id
+    ), events AS (
+      INSERT INTO payment_events (
+        payment_id, event_key, stage, status, network, transaction_hash,
+        public_message, completed_at
+      )
+      SELECT p.id, event.event_key, event.stage, event.status, 'base',
+        ${input.sourceTransactionHash}, event.public_message, now()
+      FROM payment p
+      JOIN operation o ON o.payment_id = p.id
+      CROSS JOIN (VALUES
+        ('base_cctp_source_confirmed', 'source_confirmation', 'source_confirmed',
+          'Base finalized the USDC burn. The payment is waiting for Circle attestation.'),
+        ('base_cctp_attestation_ready', 'attestation', 'awaiting_attestation',
+          'Circle completed the Base burn attestation. Stellar settlement is starting.')
+      ) AS event(event_key, stage, status, public_message)
+      ON CONFLICT (payment_id, event_key) DO NOTHING
+      RETURNING payment_id
+    )
+    SELECT p.id FROM payment p JOIN operation o ON o.payment_id = p.id
+  `;
+  if (rows.length === 0) {
+    throw new BaseCctpPersistenceError(
+      "INVALID_PAYMENT_STATE",
+      "Base CCTP payment changed while source evidence was being recorded",
+    );
+  }
+}
+
 /** Records Base -> Base only after a finalized exact USDC transfer is proven. */
 export async function reconcileBaseDirectPayment(input: {
   readonly paymentId: string;
@@ -525,58 +605,16 @@ export async function reconcileBaseToStellarCctp(input: {
     );
   }
   const atomic = normalizeStellarUsdcAmount(String(payment.expected_amount)).raw.toString();
-  const persisted = await sql`
-    UPDATE base_cctp_operations SET
-      status = CASE WHEN status = 'completed' THEN status ELSE 'awaiting_attestation' END,
-      source_transaction_hash = ${verification.sourceTransactionHash},
-      circle_message_hash = ${verification.circle.messageHash},
-      circle_attestation_hash = ${verification.circle.attestationHash},
-      circle_message = ${verification.circle.message},
-      circle_attestation = ${verification.circle.attestation}, updated_at = now()
-    WHERE payment_id = ${paymentId}::uuid
-      AND route_id = 'base_to_stellar'
-      AND burn_amount_atomic = ${operation.burn_amount}::numeric
-      AND max_fee_atomic = ${operation.max_fee}::numeric
-      AND expected_recipient_address = ${payment.recipient_address}
-      AND expected_amount_atomic = ${atomic}::numeric
-      AND (source_transaction_hash IS NULL
-        OR source_transaction_hash = ${verification.sourceTransactionHash})
-      AND (circle_message_hash IS NULL
-        OR circle_message_hash = ${verification.circle.messageHash})
-    RETURNING payment_id
-  `;
-  if (persisted.length === 0) {
-    throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "Base CCTP evidence conflicts with the reserved payment intent");
-  }
-  await sql.transaction([
-    sql`
-      UPDATE payments SET status = 'awaiting_attestation',
-        source_transaction_hash = ${verification.sourceTransactionHash}, updated_at = now()
-      WHERE id = ${paymentId}::uuid AND route_id = 'base_to_stellar'
-        AND status IN ('authorized', 'submitted', 'source_confirmed', 'awaiting_attestation')
-        AND (source_transaction_hash IS NULL OR source_transaction_hash = ${verification.sourceTransactionHash})
-    `,
-    sql`
-      INSERT INTO payment_events (
-        payment_id, event_key, stage, status, network, transaction_hash,
-        public_message, completed_at
-      ) VALUES (
-        ${paymentId}::uuid, 'base_cctp_source_confirmed', 'source_confirmation',
-        'source_confirmed', 'base', ${verification.sourceTransactionHash},
-        'Base finalized the USDC burn. The payment is waiting for Circle attestation.', now()
-      ) ON CONFLICT (payment_id, event_key) DO NOTHING
-    `,
-    sql`
-      INSERT INTO payment_events (
-        payment_id, event_key, stage, status, network, transaction_hash,
-        public_message, completed_at
-      ) VALUES (
-        ${paymentId}::uuid, 'base_cctp_attestation_ready', 'attestation',
-        'awaiting_attestation', 'base', ${verification.sourceTransactionHash},
-        'Circle completed the Base burn attestation. Stellar settlement is starting.', now()
-      ) ON CONFLICT (payment_id, event_key) DO NOTHING
-    `,
-  ]);
+  await recordBaseCctpAttestation({
+    paymentId,
+    sourceTransactionHash: verification.sourceTransactionHash,
+    expectedRecipientAddress: payment.recipient_address,
+    expectedRecipientAmount: String(payment.expected_amount),
+    expectedAmountAtomic: atomic,
+    burnAmountAtomic: String(operation.burn_amount),
+    maxFeeAtomic: String(operation.max_fee),
+    circle: verification.circle,
+  });
   const result = await settleBaseToStellarCctp({
     paymentId,
     sourceTransactionHash: verification.sourceTransactionHash.replace(/^0x/, ""),
