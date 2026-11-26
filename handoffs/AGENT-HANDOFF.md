@@ -1,42 +1,47 @@
 # Telya Universal Agent Handoff
 
-Use this file when continuing Telya from a new AI agent or a new chat.
+This handoff is for any new Codex session or replacement engineering agent. It is intentionally self-contained enough to resume work without the previous chat.
 
-## First read
+## Required source of truth
 
-Read these files before changing code:
-1. `AGENTS.md`
-2. `product/STATUS.md`
-3. `product/JUDGING-AND-GRANT-READINESS.md`
-4. `product/PRD.md`
-5. `product/ARCHITECTURE.md`
-6. `product/BUILD-PLAN.md`
-7. `product/TEAM.md`
-8. `product/ACCEPTANCE-TESTS.md`
-9. `product/SETLORA-LESSONS.md`
-10. `product/BUILD-WEEK-DAY1.md`
-11. Your role-specific handoff in `handoffs/`
+Read these in order:
+1. AGENTS.md
+2. product/CODEX-MASTER-PLAYBOOK.md
+3. product/EXECUTION-TRACKER.md
+4. product/STATUS.md
+5. product/BUILDATHON-EXECUTION-PLAN.md
+6. product/JUDGING-AND-GRANT-READINESS.md
+7. product/PRD.md
+8. product/ARCHITECTURE.md
+9. product/DECISIONS.md
+10. product/ACCEPTANCE-TESTS.md
+11. product/TEAM.md
+12. product/SETLORA-LESSONS.md
+
+Always refresh GitHub PR heads, review comments and CI before acting. The execution tracker is a snapshot; live code and GitHub state supersede it when newer.
 
 ## Product in one sentence
 
-Telya is a conversational money application where users speak or type what they want to do with USDC, while deterministic software routes and verifies payments across Stellar and Base, exposes real money movement/finality, supports fiat ramp flows, and enables limited, revocable AI-agent spending through Stellar smart accounts.
+Telya is a conversational money-movement product where users speak or type USDC payment requests, while deterministic software resolves recipients and routes, passkey authorization approves execution, and durable on-chain/provider evidence powers real progress, receipts and bounded agent spending.
 
 ## P0 route matrix
 
-- Stellar -> Stellar
-- Base -> Base
-- Base -> Stellar via Circle CCTP Standard
-- Stellar -> Base via Circle CCTP Standard
+- Stellar → Stellar
+- Base → Base
+- Base → Stellar via Circle CCTP Standard
+- Stellar → Base via Circle CCTP Standard
+
+MoneyGram sandbox is an additional ramp capability, subject to legitimate partner access and explicit smart-account compatibility confirmation.
 
 ## Core security boundaries
 
-- AI parses intent only.
-- AI never signs.
-- AI never sees private keys.
+- AI parses intent only and never signs.
+- No secrets in browser code, logs or Git.
+- No mock balances, fees, recipients, quotes, wallet connection or completed transaction in app paths.
+- Username claim must authenticate the caller and prove wallet ownership; client-supplied public address is not authentication.
 - Ambiguous payment routes require clarification.
-- Cross-chain completion requires destination finality + recipient/amount verification.
+- Cross-chain completion requires destination finality and recipient/amount verification.
 - Irreversible operations require idempotency.
-- Secrets are server-only.
 - Testnet success states must be real, not mocked.
 
 ## Consumer principle
@@ -45,67 +50,61 @@ At every stage, the user should be able to answer:
 
 **Where is my money right now?**
 
-The UI must expose real states such as approved, source confirmed, waiting for attestation, destination submitted, finality confirmed, recipient verified, completed, or failed.
+The UI must show real states such as awaiting confirmation, authorized, submitted, source confirmed, waiting for attestation, destination submitted, destination confirmed, recipient verified, completed or failed.
 
 ## Username model
 
-A username such as `@alice` is a human-readable application identity, not an on-chain wallet address.
+A username such as @alice is a human-readable application identity, not an on-chain wallet address. It resolves to verified wallet records such as the Stellar smart-account address, optional Base address and preferred receive network. Usernames are globally unique and case-insensitive. The database uniqueness constraint is authoritative.
 
-It resolves to verified wallet records such as:
-- Stellar smart-account address,
-- optional Base address,
-- preferred receive network.
-
-Usernames are globally unique and case-insensitive.
+Never manufacture a Privy DID from a Stellar address. Use a real verified auth session or an explicitly designed cryptographic proof-of-control flow.
 
 ## Agent Pass
 
-The validated Stellar Testnet spike proved:
-- a delegated agent can spend within allowance,
-- cumulative spend above allowance is rejected,
-- the owner can revoke,
-- the agent cannot spend after revocation,
+The validated Stellar Testnet proof demonstrated:
+- a delegated agent can spend within allowance;
+- cumulative spend above allowance is rejected;
+- the owner can revoke;
+- the agent cannot spend after revocation;
 - the owner retains control.
 
 P0 Agent Pass is direct Stellar USDC only.
 
-## Team ownership
+## Current PR dependencies
 
-- @Alike001: Stellar, Agent Pass, settlement verification, integration/deployment.
-- @Prudentdev-xyz: frontend/product/design.
-- @Webghost01-NG: backend/AI/Base/Circle/MoneyGram.
+- PR #48 Base/Circle is stacked on PR #44 Stellar CCTP. Do not create a competing CCTP coordinator.
+- PR #46 onboarding is a prerequisite to safely accepting PR #49.
+- PR #49 currently contains onboarding code from #46; after #46 is secured and merged, reconcile/rebase #49 against main.
+- Codex may commit directly into an existing teammate PR branch where repository permissions allow. If it cannot push, request the original author to enable maintainer edits; do not duplicate the PR.
+- PR #50 is the documentation PR containing the execution plan, playbook and tracker.
 
-Do not reassign major areas without explicit team agreement.
+## Current implementation and blocker summary
 
-## Current implementation boundary
+Use product/EXECUTION-TRACKER.md for exact SHA/status and refresh it before acting.
 
-Build Week is active. The evidence/status baseline is `product/JUDGING-AND-GRANT-READINESS.md`.
+- Main already includes verified Stellar smart-account creation/reconnect, sponsored direct USDC, persistent receipt evidence and Agent Pass on-chain behavior.
+- PR #48 has commit 481cbba on its existing Webghost PR branch. Circle message verification now handles nonce, executed finality, executed fee and expiration fields with strict immutable-byte checks. Remaining gates: Neon migrations 0007/0008, DB-backed test, real bidirectional Base Sepolia ↔ Stellar Testnet hashes/amounts/recipients and retry evidence. Keep draft.
+- PR #46 has the reported fail-closed username availability and claim/lookup implementation, but its claim endpoint still trusts the request body's wallet address, fabricates a Privy DID and marks the wallet verified without authenticated proof. This is a critical security blocker. A review comment records it.
+- PR #49 has removed the timer-based card success and added insufficient-funds behavior, but its current home still does not fetch balances; the confirm request is not valid relayer XDR/passkey authorization; the username is not resolved to an address; fees are hardcoded; and a hash alone can be unverified. A review comment records it.
+- MoneyGram partner access is pending. The user's official enquiry was submitted November 25, 2026; no response had arrived at last report. The documented widget uses G-addresses; Telya uses Smart Account Kit C-addresses. Obtain written compatibility confirmation and sandbox credentials before building the provider flow.
+- Vercel authorization-required statuses are not proof of an app build failure and are not successful deployments. The user must authorize the team integration before previews can run.
 
-- Smart-account lifecycle, direct Stellar USDC, and Agent Pass have verified real Testnet evidence.
-- PR #44 is the draft Stellar CCTP implementation. Keep it draft until Issue #16 is integrated and both directions have exact destination recipient/amount/finality and retry evidence.
-- Issue #16 belongs to @Webghost01-NG. Do not modify his branch or create a competing Base/Circle coordinator.
-- PR #46 is in progress. Its Vercel status is blocked on authorization before deployment, not a proven build failure; no preview build log exists for the current attempt. GitGuardian separately flags a high-entropy public-configuration value and needs disposition, but that finding alone is not proof of a committed secret. Fail-closed username behavior, production-code tests, and the durable authenticated claim path must also be accepted before merge.
-- MoneyGram partner access has not been obtained. The documented non-custodial Stellar widget flow uses G-addresses, while Telya uses Smart Account Kit contract accounts; compatibility requires explicit provider confirmation. Do not simulate provider success, and do not let this external blocker interrupt direct Stellar or CCTP work.
-- Source confirmation never completes a cross-chain payment.
+## Codex execution ownership
+
+Codex is the primary engineering lead while Hammed owns product decisions and credentials. Do not wait for teammates to become available. Take over their assigned P0 tasks using existing PRs/branches, preserve contribution history, and keep them informed. Codex must maintain the execution tracker after each task.
 
 ## Resume rule
 
-Before doing work:
-- inspect open GitHub issues,
-- choose only issues assigned to your role,
-- create a focused branch,
-- link the issue in the PR,
-- include how-to-test evidence,
-- use the factual status labels and evidence requirements in `product/JUDGING-AND-GRANT-READINESS.md`,
-- do not infer completion from a PR description alone,
-- do not expand P0.
+At each new session:
+1. Read the entire source-of-truth list.
+2. Inspect current main, all open PRs/issues and latest checks.
+3. Compare GitHub reality with product/EXECUTION-TRACKER.md.
+4. Continue the highest-priority unblocked task from product/CODEX-MASTER-PLAYBOOK.md.
+5. Fix existing PRs directly where possible.
+6. Run required test/build/security checks and live Testnet/database checks where relevant.
+7. Update tracker, status, PR validation notes and issue state after verified progress.
 
+Do not invent a new feature, restart planning, widen scope or ask Hammed what to do next when the tracker and playbook already specify it.
 
-## Build Week continuation
+## Buildathon demo lesson
 
-When implementation begins on November 25, always follow `product/BUILD-WEEK-DAY1.md` before starting work. It contains the sponsor creation step, first issue order, cloud resources already prepared, and strict continuation rules for replacement agents.
-
-
-## Setlora feedback continuity
-
-Before judging/demo work, read `product/SETLORA-LESSONS.md`. The key lesson is to prove one complete user outcome with real evidence, failure/recovery handling, and a clear judge story rather than presenting Telya as a list of integrations. The frozen MVP remains unchanged.
+Prove one complete real user outcome with evidence, failure handling and a clear judge story. Do not present Telya as a list of integrations. Only include CCTP and MoneyGram in the primary demo after their real acceptance criteria have been met.
