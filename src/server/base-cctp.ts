@@ -57,24 +57,30 @@ function stellarContractAsBytes32(address: string): string {
   return `0x${Buffer.from(StrKey.decodeContract(address)).toString("hex")}`;
 }
 
+const CCTP_V2_MIN_MESSAGE_BYTES = 148 + 228;
+const CCTP_V2_EMPTY_NONCE = `0x${"0".repeat(64)}`;
+const CIRCLE_ATTESTATION_MUTABLE_RANGES = [
+  { start: 12, length: 32 }, // MessageV2.nonce
+  { start: 144, length: 4 }, // MessageV2.finalityThresholdExecuted
+  { start: 312, length: 32 }, // BurnMessageV2.feeExecuted
+  { start: 344, length: 32 }, // BurnMessageV2.expirationBlock
+] as const;
+
 /**
- * Iris fills these two fields when it prepares the attested v2 message. All
- * other bytes must still match the source MessageSent event exactly.
+ * Iris fills exactly four zero placeholders before signing a CCTP v2 message.
+ * Every other byte must remain identical to the source MessageSent event.
  */
 function circleAttestationMatchesSourceEvent(sourceMessage: string, attestedMessage: string): boolean {
   const source = sourceMessage.trim().replace(/^0x/i, "").toLowerCase();
   const attested = attestedMessage.trim().replace(/^0x/i, "").toLowerCase();
-  if (!source || source.length !== attested.length || source.length % 2 !== 0 ||
+  if (source.length < CCTP_V2_MIN_MESSAGE_BYTES * 2 ||
+      source.length !== attested.length || source.length % 2 !== 0 ||
       !/^[0-9a-f]+$/.test(source) || !/^[0-9a-f]+$/.test(attested)) {
     return false;
   }
 
-  const mutableRanges = [
-    { start: 144, length: 4 }, // finalityThresholdExecuted
-    { start: 148 + 196, length: 32 }, // BurnMessageV2.expirationBlock
-  ];
   let cursor = 0;
-  for (const range of mutableRanges) {
+  for (const range of CIRCLE_ATTESTATION_MUTABLE_RANGES) {
     const start = range.start * 2;
     const end = (range.start + range.length) * 2;
     if (source.slice(cursor, start) !== attested.slice(cursor, start) ||
@@ -93,6 +99,7 @@ export async function verifyBaseCctpSource(input: {
   readonly sourceAddress: string;
   readonly burnAmount: string;
   readonly maxFee: string;
+  readonly expectedRecipientAmount: string;
   readonly expectedMintRecipient: string;
   readonly expectedDestinationTokenMessenger: string;
   readonly destinationDomain?: number;
@@ -137,6 +144,7 @@ export async function verifyBaseCctpSource(input: {
   const parsed = parseCctpMessage(circle.message);
   const expectedAmount = normalizeBaseUsdcAmount(input.burnAmount);
   const expectedMaxFee = normalizeBaseUsdcFee(input.maxFee);
+  const expectedRecipientAmount = normalizeBaseUsdcAmount(input.expectedRecipientAmount);
   const destinationDomain = input.destinationDomain ?? CCTP_STELLAR_DOMAIN;
   let expectedMintRecipient: string;
   let expectedDestinationTokenMessenger: string;
@@ -158,10 +166,14 @@ export async function verifyBaseCctpSource(input: {
     parsed.burnToken.toLowerCase() === baseAddressAsBytes32(BASE_SEPOLIA_USDC) &&
     parsed.messageSender.toLowerCase() === baseAddressAsBytes32(input.sourceAddress) &&
     parsed.mintRecipient.toLowerCase() === expectedMintRecipient &&
+    parsed.nonce !== CCTP_V2_EMPTY_NONCE &&
     parsed.minFinalityThreshold === CCTP_STANDARD_FINALITY_THRESHOLD &&
     parsed.finalityThresholdExecuted >= CCTP_STANDARD_FINALITY_THRESHOLD &&
     parsed.amount === expectedAmount &&
-    parsed.maxFee === expectedMaxFee;
+    parsed.maxFee === expectedMaxFee &&
+    parsed.feeExecuted <= parsed.maxFee &&
+    parsed.feeExecuted < parsed.amount &&
+    parsed.amount - parsed.feeExecuted === expectedRecipientAmount;
   if (!matches) {
     return {
       status: "mismatch",
@@ -501,6 +513,7 @@ export async function reconcileBaseToStellarCctp(input: {
     sourceAddress: payment.source_address,
     burnAmount: atomicToDecimal(String(operation.burn_amount), 6),
     maxFee: atomicToDecimal(String(operation.max_fee), 6),
+    expectedRecipientAmount: String(payment.expected_amount),
     expectedMintRecipient: stellarConfig.forwarder,
     expectedDestinationTokenMessenger: stellarConfig.tokenMessenger,
   });

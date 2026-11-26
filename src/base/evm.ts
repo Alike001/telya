@@ -542,6 +542,7 @@ export function findBaseCctpMessage(input: {
 export interface ParsedCctpMessage {
   readonly sourceDomain: number;
   readonly destinationDomain: number;
+  readonly nonce: string;
   readonly sender: string;
   readonly recipient: string;
   readonly destinationCaller: string;
@@ -552,6 +553,8 @@ export interface ParsedCctpMessage {
   readonly amount: bigint;
   readonly messageSender: string;
   readonly maxFee: bigint;
+  readonly feeExecuted: bigint;
+  readonly expirationBlock: bigint;
 }
 
 export function parseCctpMessage(message: string): ParsedCctpMessage {
@@ -567,6 +570,7 @@ export function parseCctpMessage(message: string): ParsedCctpMessage {
   return {
     sourceDomain: uint32(4),
     destinationDomain: uint32(8),
+    nonce: bytes32(12),
     sender: bytes32(44),
     recipient: bytes32(76),
     destinationCaller: bytes32(108),
@@ -577,5 +581,7 @@ export function parseCctpMessage(message: string): ParsedCctpMessage {
     amount: BigInt(`0x${body.slice(68 * 2, 100 * 2)}`),
     messageSender: bodyBytes32(100),
     maxFee: BigInt(`0x${body.slice(132 * 2, 164 * 2)}`),
+    feeExecuted: BigInt(`0x${body.slice(164 * 2, 196 * 2)}`),
+    expirationBlock: BigInt(`0x${body.slice(196 * 2, 228 * 2)}`),
   };
 }

@@ -134,7 +134,7 @@ describe("Base Sepolia transaction encoding and verification", () => {
       u32(1),
       u32(6),
       u32(27),
-      `0x${"0".repeat(64)}`.slice(2),
+      `0x${"4".repeat(64)}`.slice(2),
       `0x${"1".repeat(64)}`.slice(2),
       `0x${"2".repeat(64)}`.slice(2),
       `0x${"0".repeat(64)}`.slice(2),
@@ -147,9 +147,9 @@ describe("Base Sepolia transaction encoding and verification", () => {
       RECIPIENT.slice(2).padStart(64, "0"),
       word(7_000_000n),
       `0x${"0".repeat(24)}${"3".repeat(40)}`.slice(2),
-      word(0n),
-      word(0n),
-      word(0n),
+      word(100_000n),
+      word(50_000n),
+      word(123_456n),
       word(0n),
     ].join("");
     const message = `${header}${body}`;
@@ -171,7 +171,11 @@ describe("Base Sepolia transaction encoding and verification", () => {
     expect(parseCctpMessage(extracted!)).toMatchObject({
       sourceDomain: 6,
       destinationDomain: 27,
+      nonce: `0x${"4".repeat(64)}`,
       amount: 7_000_000n,
+      maxFee: 100_000n,
+      feeExecuted: 50_000n,
+      expirationBlock: 123_456n,
     });
   });
 });
