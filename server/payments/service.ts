@@ -415,3 +415,46 @@ export async function getPaymentWithEvents(
   if (!row) throw new PaymentNotFoundError();
   return row as Record<string, unknown>;
 }
+
+/** List the user's persisted payments in stable newest-first order for activity. */
+export async function listPayments(
+  user: Pick<AuthenticatedUser, "id">,
+  options: { beforeId?: string; limit: number },
+): Promise<{ items: Record<string, unknown>[]; nextCursor: string | null }> {
+  const beforeId = options.beforeId ?? "";
+  if (beforeId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(beforeId)) {
+    throw new PaymentInputError("Invalid payment cursor");
+  }
+  if (!Number.isSafeInteger(options.limit) || options.limit < 1 || options.limit > 50) {
+    throw new PaymentInputError("Invalid page size");
+  }
+
+  const sql = getSqlClient();
+  const rows = await sql`
+    WITH cursor_payment AS (
+      SELECT id, created_at
+      FROM payments
+      WHERE id = NULLIF(${beforeId}, '')::uuid AND user_id = ${user.id}::uuid
+    )
+    SELECT
+      p.id, p.status, p.route_id, p.source_network, p.destination_network,
+      p.rail, p.recipient_address, p.expected_recipient_amount,
+      p.verified_recipient_address, p.verified_recipient_amount,
+      p.source_transaction_hash, p.destination_transaction_hash,
+      p.failure_code, p.fees, p.created_at, p.updated_at
+    FROM payments p
+    LEFT JOIN cursor_payment c ON true
+    WHERE p.user_id = ${user.id}::uuid
+      AND (${beforeId} = '' OR (
+        c.id IS NOT NULL AND (p.created_at, p.id) < (c.created_at, c.id)
+      ))
+    ORDER BY p.created_at DESC, p.id DESC
+    LIMIT ${options.limit + 1}
+  `;
+  const items = rows.slice(0, options.limit) as Record<string, unknown>[];
+  const last = items.at(-1);
+  return {
+    items,
+    nextCursor: rows.length > options.limit && last ? String(last.id) : null,
+  };
+}

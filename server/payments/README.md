@@ -6,9 +6,11 @@ The framework-neutral authenticated handlers exported from `server/api/index.ts`
 | --- | --- | --- |
 | `createContactsHandler` | `GET`, `POST`, `DELETE` | Lists, saves by active username, and removes the authenticated user's contacts |
 | `createConversationsHandler` | `GET`, `POST` | Creates a conversation with the first user message, appends user messages, and reads owned history |
-| `createPaymentHandler` | `GET`, `POST` | Reads a payment timeline or resolves recipient/route, obtains balance/fee quotes, and persists a reviewable payment and initial event |
+| `createPaymentHandler` | `GET`, `POST` | Reads a user's payment history or one persisted timeline; POST resolves recipient/route, obtains balance/fee quotes, and persists a reviewable payment and initial event |
 
 All handlers verify the Privy bearer session and scope database reads/writes to that user. Conversation history returns only user and assistant messages. Server-only assistant message persistence is available through `appendAssistantMessage`.
+
+`GET /api/payments` returns up to 20 newest payment summaries by default, with `limit` capped at 50 and an optional `before` payment ID cursor. `nextCursor` is the final ID of a page only when more records exist. `GET /api/payments?id=<paymentId>` returns that owned payment's persisted event timeline. History and detail expose only consumer-safe payment fields; they do not infer completion from a hash.
 
 ## Recipient resolution and routing
 

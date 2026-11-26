@@ -11,6 +11,7 @@ import {
   createPaymentRecord,
   getPaymentWithEvents,
   getVerifiedSourceWallets,
+  listPayments,
   PaymentConflictError,
   PaymentInputError,
   PaymentNotFoundError,
@@ -86,36 +87,56 @@ function parseJsonArray(value: unknown): readonly unknown[] {
   return [];
 }
 
+function paymentSummary(payment: Record<string, unknown>) {
+  return {
+    id: payment.id,
+    status: payment.status,
+    routeId: payment.route_id,
+    sourceNetwork: payment.source_network,
+    destinationNetwork: payment.destination_network,
+    rail: payment.rail,
+    recipientAddress: payment.recipient_address,
+    expectedRecipientAmount: String(payment.expected_recipient_amount),
+    verifiedRecipientAddress: payment.verified_recipient_address,
+    verifiedRecipientAmount: payment.verified_recipient_amount == null
+      ? null
+      : String(payment.verified_recipient_amount),
+    sourceTransactionHash: payment.source_transaction_hash,
+    destinationTransactionHash: payment.destination_transaction_hash,
+    failureCode: payment.failure_code,
+    fees: parseFeeJson(payment.fees),
+    createdAt: payment.created_at,
+    updatedAt: payment.updated_at,
+  };
+}
+
 export function createPaymentHandler(options: PaymentApiOptions = {}) {
   return createAuthenticatedHandler(
     options.authenticate ?? authenticateRequest,
     async (request, user) => {
       if (request.method === "GET") {
-        const paymentId = new URL(request.url).searchParams.get("id") ?? "";
-        const payment = await getPaymentWithEvents(user, paymentId);
-        return jsonResponse({
-          payment: {
-            id: payment.id,
-            status: payment.status,
-            routeId: payment.route_id,
-            sourceNetwork: payment.source_network,
-            destinationNetwork: payment.destination_network,
-            rail: payment.rail,
-            recipientAddress: payment.recipient_address,
-            expectedRecipientAmount: String(payment.expected_recipient_amount),
-            verifiedRecipientAddress: payment.verified_recipient_address,
-            verifiedRecipientAmount: payment.verified_recipient_amount === null
-              ? null
-              : String(payment.verified_recipient_amount),
-            sourceTransactionHash: payment.source_transaction_hash,
-            destinationTransactionHash: payment.destination_transaction_hash,
-            failureCode: payment.failure_code,
-            fees: parseFeeJson(payment.fees),
+        const url = new URL(request.url);
+        if (url.searchParams.has("id")) {
+          const payment = await getPaymentWithEvents(user, url.searchParams.get("id") ?? "");
+          return jsonResponse({ payment: {
+            ...paymentSummary(payment),
             reasons: parseJsonArray(payment.route_reasons),
             events: parseJsonArray(payment.events),
-            createdAt: payment.created_at,
-            updatedAt: payment.updated_at,
-          },
+          } });
+        }
+        const limitRaw = url.searchParams.get("limit") ?? "20";
+        if (!/^[1-9]\d?$/.test(limitRaw) || Number(limitRaw) > 50) {
+          return jsonResponse({ error: "invalid_page_size" }, 400);
+        }
+        const beforeId = url.searchParams.get("before");
+        if (beforeId === "") return jsonResponse({ error: "invalid_payment_cursor" }, 400);
+        const result = await listPayments(user, {
+          ...(beforeId !== null ? { beforeId } : {}),
+          limit: Number(limitRaw),
+        });
+        return jsonResponse({
+          payments: result.items.map(paymentSummary),
+          nextCursor: result.nextCursor,
         });
       }
       if (request.method !== "POST") return jsonResponse({ error: "method_not_allowed" }, 405);
