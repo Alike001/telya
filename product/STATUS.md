@@ -17,6 +17,8 @@
 
 The persistent [Codex Master Playbook](CODEX-MASTER-PLAYBOOK.md), [Execution Tracker](EXECUTION-TRACKER.md), agent rules and universal handoff were merged to main in PR #50 (merge commit ab8d4f51ef43754568e10cb99e89a7266fb0d87b). New Codex sessions must read these documents before changing code. The tracker is the live continuation ledger.
 
+PR #67 merged as `d87ae75`, recording the safety corrections on draft PRs #65/#66. The PR #48 migration checkout is now at `/home/ali/Desktop/stellar/telya-pr48-worktree`; its runner compiled, but Neon remains unreachable from this workspace and migrations 0006-0008 are not verified.
+
 ## Readiness verdict
 
 Telya has independently inspectable Stellar Testnet foundations, but the complete P0 consumer journey and bidirectional cross-chain demo are not yet proven. The final submission date recorded in decision D-017 is **November 30, 2026**; exact cutoff/timezone remains unconfirmed in Issue #22.
