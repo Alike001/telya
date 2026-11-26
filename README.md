@@ -169,8 +169,6 @@ If you are a developer or AI agent joining the project, start here:
 
 ## Development status
 
-Foundation planning is complete and stored in the repository so all three contributors and their coding agents work from the same source of truth.
+Build Week implementation is active. The latest verified capabilities, open pull requests, blockers, execution order, and submission checklist are tracked in [Current Project Status](product/STATUS.md) and the [Buildathon Execution Plan](product/BUILDATHON-EXECUTION-PLAN.md).
 
-Build Week begins November 25, 2026. Until then, keep work to preparation, accounts, documentation, deployment plumbing, and Testnet setup unless organizers explicitly permit earlier substantive feature implementation.
-
-Feature implementation begins from the shared contracts and acceptance criteria defined in this repository.
+Only real Stellar Testnet / Base Sepolia / approved provider data may drive financial UI states. Mock fixtures are for tests only and must never appear as real balances, quotes, wallet connections, or successful payments.
