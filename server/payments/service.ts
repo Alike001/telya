@@ -370,14 +370,6 @@ export async function createPaymentRecord(
               AND m.role = 'user'
               AND (m.structured_intent IS NULL OR m.structured_intent = ${parsedIntent}::jsonb)
           )
-          AND (
-            p.intent_message_id IS NULL
-            OR EXISTS (
-              SELECT 1 FROM messages m
-              WHERE m.id = p.intent_message_id
-                AND m.structured_intent->'selectedSourceWallet'->>'id' = ${route.sourceWallet.id}
-            )
-          )
       ), saved_intent AS (
         UPDATE messages m
         SET structured_intent = ${parsedIntent}::jsonb

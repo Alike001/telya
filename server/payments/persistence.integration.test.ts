@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   findPaymentReplay,
+  createPaymentRecord,
   getPaymentWithEvents,
   listPayments,
   PaymentConflictError,
@@ -14,28 +15,31 @@ import {
   type CreatePaymentInput,
 } from "./service.ts";
 
+function useNeonHttpsTransport(): void {
+  // Node's fetch times out on this workspace's Neon SQL endpoint although HTTPS succeeds.
+  neonConfig.fetchFunction = (url: string, options?: RequestInit) => new Promise<Response>((resolve, reject) => {
+    const request = httpsRequest(url, {
+      method: options?.method,
+      headers: options?.headers as Record<string, string>,
+    }, (response) => {
+      const chunks: Buffer[] = [];
+      response.on("data", (chunk: Buffer) => chunks.push(chunk));
+      response.on("end", () => resolve(new Response(Buffer.concat(chunks), {
+        status: response.statusCode ?? 502,
+        headers: response.headers as HeadersInit,
+      })));
+      response.on("error", reject);
+    });
+    request.on("error", reject);
+    request.end(options?.body as string);
+  });
+}
+
 describe("payment persistence on PostgreSQL", () => {
   it.skipIf(!process.env.DATABASE_URL)(
     "scopes replay and event history to the owner and rejects changed idempotent details",
     async () => {
-      // Node's fetch times out on this workspace's Neon SQL endpoint although
-      // HTTPS itself succeeds. Keep this transport override confined to tests.
-      neonConfig.fetchFunction = (url: string, options?: RequestInit) => new Promise<Response>((resolve, reject) => {
-        const request = httpsRequest(url, {
-          method: options?.method,
-          headers: options?.headers as Record<string, string>,
-        }, (response) => {
-          const chunks: Buffer[] = [];
-          response.on("data", (chunk: Buffer) => chunks.push(chunk));
-          response.on("end", () => resolve(new Response(Buffer.concat(chunks), {
-            status: response.statusCode ?? 502,
-            headers: response.headers as HeadersInit,
-          })));
-          response.on("error", reject);
-        });
-        request.on("error", reject);
-        request.end(options?.body as string);
-      });
+      useNeonHttpsTransport();
       const sql = neon(process.env.DATABASE_URL!);
       const ownerId = randomUUID();
       const otherId = randomUUID();
@@ -120,6 +124,87 @@ describe("payment persistence on PostgreSQL", () => {
           sql`DELETE FROM messages WHERE id = ${messageId}::uuid`,
           sql`DELETE FROM conversations WHERE id = ${conversationId}::uuid`,
           sql`DELETE FROM users WHERE id IN (${ownerId}::uuid, ${otherId}::uuid)`,
+        ]);
+      }
+    },
+    30_000,
+  );
+
+  it.skipIf(!process.env.DATABASE_URL)(
+    "creates one review payment and one route event under concurrent identical requests",
+    async () => {
+      useNeonHttpsTransport();
+      const sql = neon(process.env.DATABASE_URL!);
+      const ownerId = randomUUID();
+      const walletId = randomUUID();
+      const conversationId = randomUUID();
+      const messageId = randomUUID();
+      const idempotencyKey = `dbtest:${randomUUID()}`;
+      const sourceAddress = StrKey.encodeContract(randomBytes(32));
+      const recipientAddress = StrKey.encodeContract(randomBytes(32));
+      const input: CreatePaymentInput = {
+        idempotencyKey, conversationId, intentMessageId: messageId,
+        inputMode: "text", selectedSourceWalletId: walletId,
+        intent: {
+          amount: "1.25", asset: "USDC", recipientInput: recipientAddress,
+          requestedSourceNetwork: "stellar", requestedDestinationNetwork: "stellar",
+        },
+      };
+      const route = {
+        status: "resolved" as const,
+        route: { id: "stellar_to_stellar" as const, sourceNetwork: "stellar" as const,
+          destinationNetwork: "stellar" as const, rail: "stellar_usdc" as const },
+        sourceWallet: { id: walletId, network: "stellar" as const, address: sourceAddress },
+        destinationAddress: recipientAddress,
+        recipient: { kind: "address" as const, network: "stellar" as const, address: recipientAddress },
+        recipientUserId: null, recipientUsername: null,
+        reasons: ["explicit_user_instruction" as const, "selected_source_wallet" as const],
+      };
+      try {
+        await sql.transaction([
+          sql`INSERT INTO users (id, privy_did) VALUES
+            (${ownerId}::uuid, ${`did:privy:telya_payment_race_${ownerId}`})`,
+          sql`INSERT INTO wallets (id, user_id, network, address, normalized_address,
+              verification_status, verified_at) VALUES
+            (${walletId}::uuid, ${ownerId}::uuid, 'stellar', ${sourceAddress}, ${sourceAddress},
+              'verified', now())`,
+          sql`INSERT INTO conversations (id, user_id) VALUES
+            (${conversationId}::uuid, ${ownerId}::uuid)`,
+          sql`INSERT INTO messages (id, conversation_id, role, content) VALUES
+            (${messageId}::uuid, ${conversationId}::uuid, 'user',
+              ${`Send 1.25 USDC from Stellar to ${recipientAddress} on Stellar`})`,
+        ]);
+        const attempts = await Promise.allSettled([
+          createPaymentRecord({ id: ownerId }, input, route, []),
+          createPaymentRecord({ id: ownerId }, input, route, []),
+        ]);
+        for (const attempt of attempts) {
+          if (attempt.status === "rejected") throw attempt.reason;
+        }
+        const results = attempts.map((attempt) => attempt.status === "fulfilled" ? attempt.value : null);
+        expect(results.map((result) => result?.payment.id)).toEqual([results[0]?.payment.id, results[0]?.payment.id]);
+        expect(results.map((result) => result?.reused).sort()).toEqual([false, true]);
+        const payments = await sql`
+          SELECT id FROM payments WHERE user_id = ${ownerId}::uuid AND idempotency_key = ${idempotencyKey}
+        `;
+        expect(payments).toHaveLength(1);
+        const events = await sql`
+          SELECT event_key FROM payment_events WHERE payment_id = ${payments[0]!.id}::uuid
+        `;
+        expect(events.map((event) => event.event_key)).toEqual(["route_resolved"]);
+        const previews = await sql`
+          SELECT id FROM messages WHERE conversation_id = ${conversationId}::uuid AND role = 'assistant'
+        `;
+        expect(previews).toHaveLength(1);
+      } finally {
+        await sql.transaction([
+          sql`DELETE FROM payment_events WHERE payment_id IN
+            (SELECT id FROM payments WHERE user_id = ${ownerId}::uuid)`,
+          sql`DELETE FROM payments WHERE user_id = ${ownerId}::uuid`,
+          sql`DELETE FROM messages WHERE conversation_id = ${conversationId}::uuid`,
+          sql`DELETE FROM conversations WHERE id = ${conversationId}::uuid`,
+          sql`DELETE FROM wallets WHERE id = ${walletId}::uuid`,
+          sql`DELETE FROM users WHERE id = ${ownerId}::uuid`,
         ]);
       }
     },
