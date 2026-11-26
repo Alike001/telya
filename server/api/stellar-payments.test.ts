@@ -3,7 +3,10 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 
 import { PaymentNotFoundError } from "../payments/service.ts";
-import { createStellarPaymentReconciliationHandler } from "./stellar-payments.ts";
+import {
+  createStellarPaymentAuthorizationHandler,
+  createStellarPaymentReconciliationHandler,
+} from "./stellar-payments.ts";
 
 const user = {
   id: "11111111-1111-4111-8111-111111111111",
@@ -48,5 +51,43 @@ describe("Stellar payment reconciliation API", () => {
 
     expect(response.status).toBe(404);
     await expect(response.json()).resolves.toEqual({ error: "payment_not_found" });
+  });
+});
+
+describe("Stellar payment authorization handoff API", () => {
+  it("sets a protected one-time cookie without returning its token to JavaScript", async () => {
+    const createSession = vi.fn().mockResolvedValue({
+      token: "A".repeat(43),
+      expiresAt: "2030-01-01T00:05:00.000Z",
+    });
+    const handler = createStellarPaymentAuthorizationHandler({
+      authenticate: vi.fn().mockResolvedValue(user),
+      createSession,
+    });
+
+    const response = await handler(new Request(
+      "https://telya.test/api/payments/stellar/direct/authorize",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ paymentId: "22222222-2222-4222-8222-222222222222" }),
+      },
+    ));
+
+    expect(response.status).toBe(201);
+    const body = await response.json();
+    expect(body).toEqual({
+      status: "authorization_ready",
+      relayerUrl: "/api/stellar/relayer/payment",
+      expiresAt: "2030-01-01T00:05:00.000Z",
+    });
+    expect(JSON.stringify(body)).not.toContain("A".repeat(43));
+    const cookie = response.headers.get("set-cookie") ?? "";
+    expect(cookie).toContain("__Secure-telya_stellar_payment=");
+    expect(cookie).toContain("HttpOnly");
+    expect(cookie).toContain("Secure");
+    expect(cookie).toContain("SameSite=Strict");
+    expect(cookie).toContain("Path=/api/stellar/relayer/payment");
+    expect(createSession).toHaveBeenCalledWith(user, "22222222-2222-4222-8222-222222222222");
   });
 });
