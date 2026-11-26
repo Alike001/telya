@@ -151,3 +151,15 @@ Vercel authorization-required checks on the code PRs are not failed application 
 Codex is the primary implementation lead for all remaining P0 issues, even where GitHub still lists a teammate as assignee. Fix existing PRs directly where write access is available; do not create duplicate PRs. Teammates may join later to contribute or independently test. Do not wait for their availability.
 
 The MoneyGram Ramps enquiry was submitted on November 25; no reply had arrived at the last user report. Hammed plans to raise the blocker with the Buildathon admin during office hours. Continue the core journey and other P0 work while waiting. Never fake MoneyGram access or compromise the Stellar smart-account design to bypass the G-address/C-address compatibility question.
+
+
+### PR #50 documentation system merged
+
+PR #50 was merged to main as commit ab8d4f51ef43754568e10cb99e89a7266fb0d87b. The following persistent instructions are now on main and must be used by every Codex session:
+
+- product/CODEX-MASTER-PLAYBOOK.md
+- product/EXECUTION-TRACKER.md
+- AGENTS.md
+- handoffs/AGENT-HANDOFF.md
+
+The tracker is the live source for PR heads and current blockers. The master playbook defines the end-to-end implementation, review, testing, teammate-testing, demo and submission process. Do not treat PR #50 as still open.

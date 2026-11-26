@@ -1,5 +1,7 @@
 # Telya Judging and Grant Readiness Baseline
 
+> **Live continuation note — November 26, 2026:** This document is a point-in-time assessment based on November 25 repository state, not the live PR ledger. PR #16 now has implementation work in PR #48; PR #48's latest Circle attestation-field fix is commit 481cbba, while database/Testnet acceptance evidence remains outstanding. PRs #46 and #49 have received further updates and still have blocking identity/payment-flow findings. For current facts, read [product/EXECUTION-TRACKER.md](EXECUTION-TRACKER.md), [product/STATUS.md](STATUS.md), and [product/CODEX-MASTER-PLAYBOOK.md](CODEX-MASTER-PLAYBOOK.md). The current execution sequence supersedes the historical snapshot below.
+
 **Assessment date:** November 25, 2026
 
 **Repository baseline:** `origin/main` at `c04a1ec`

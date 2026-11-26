@@ -13,6 +13,10 @@
 - [Buildathon Execution Plan](BUILDATHON-EXECUTION-PLAN.md)
 - [Judging and Grant Readiness](JUDGING-AND-GRANT-READINESS.md)
 
+## Codex operating system
+
+The persistent [Codex Master Playbook](CODEX-MASTER-PLAYBOOK.md), [Execution Tracker](EXECUTION-TRACKER.md), agent rules and universal handoff were merged to main in PR #50 (merge commit ab8d4f51ef43754568e10cb99e89a7266fb0d87b). New Codex sessions must read these documents before changing code. The tracker is the live continuation ledger.
+
 ## Readiness verdict
 
 Telya has independently inspectable Stellar Testnet foundations, but the complete P0 consumer journey and bidirectional cross-chain demo are not yet proven. The final submission date recorded in decision D-017 is **November 30, 2026**; exact cutoff/timezone remains unconfirmed in Issue #22.
