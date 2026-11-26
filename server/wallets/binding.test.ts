@@ -52,6 +52,16 @@ describe("wallet ownership proof", () => {
     expect(() => createWalletBindingChallenge(user, contractId, credentialId)).toThrow("wallet_binding_unavailable");
   });
 
+  it("allows an explicit localhost WebAuthn test origin but rejects remote HTTP", () => {
+    configure();
+    vi.stubEnv("STELLAR_WEBAUTHN_RP_ID", "localhost");
+    vi.stubEnv("STELLAR_WEBAUTHN_ALLOWED_ORIGINS", "http://localhost:3000");
+    expect(createWalletBindingChallenge(user, contractId, credentialId).rpId).toBe("localhost");
+    vi.stubEnv("STELLAR_WEBAUTHN_RP_ID", "example.com");
+    vi.stubEnv("STELLAR_WEBAUTHN_ALLOWED_ORIGINS", "http://example.com");
+    expect(() => createWalletBindingChallenge(user, contractId, credentialId)).toThrow("wallet_binding_unavailable");
+  });
+
   it("verifies a WebAuthn assertion against the live-rule key material and rejects altered claims", () => {
     const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
     const jwk = publicKey.export({ format: "jwk" });
