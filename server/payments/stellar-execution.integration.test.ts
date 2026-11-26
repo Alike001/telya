@@ -13,6 +13,10 @@ import {
   validateStellarPaymentAuthorization,
 } from "../../src/server/stellar-relayer-requests.ts";
 import type { ValidatedStellarUsdcTransfer } from "../../src/stellar/relayer.ts";
+import {
+  consumeStellarPaymentExecutionSession,
+  createStellarPaymentExecutionSession,
+} from "./stellar-execution-session.ts";
 import { reconcileStellarDirectPayment } from "./stellar-reconciliation.ts";
 
 function useNeonHttpsTransport(): void {
@@ -42,6 +46,7 @@ describe("linked Stellar direct payment execution on PostgreSQL", () => {
       const sql = neon(process.env.DATABASE_URL!);
       const userId = randomUUID();
       const otherUserId = randomUUID();
+      const authSessionId = `telya-linked-${randomUUID()}`;
       const walletId = randomUUID();
       const conversationId = randomUUID();
       const messageId = randomUUID();
@@ -70,6 +75,11 @@ describe("linked Stellar direct payment execution on PostgreSQL", () => {
           sql`INSERT INTO users (id, privy_did) VALUES
             (${userId}::uuid, ${`did:privy:telya_linked_payment_${userId}`}),
             (${otherUserId}::uuid, ${`did:privy:telya_linked_payment_${otherUserId}`})`,
+          sql`INSERT INTO auth_sessions (
+              privy_session_id, user_id, verified_at, expires_at
+            ) VALUES (
+              ${authSessionId}, ${userId}::uuid, now(), now() + interval '1 hour'
+            )`,
           sql`INSERT INTO wallets (
               id, user_id, network, address, normalized_address,
               verification_status, verified_at
@@ -111,6 +121,41 @@ describe("linked Stellar direct payment execution on PostgreSQL", () => {
         await expect(validateStellarPaymentAuthorization(
           otherUserId, paymentId, transfer,
         )).rejects.toThrow("does not match the owned payment review");
+        await expect(createStellarPaymentExecutionSession({
+          id: otherUserId,
+          privyUserId: `did:privy:telya_linked_payment_${otherUserId}`,
+          sessionId: authSessionId,
+          expiresAt: new Date(Date.now() + 60 * 60 * 1_000),
+        }, paymentId)).rejects.toThrow("not ready for Stellar passkey authorization");
+        const handoff = await createStellarPaymentExecutionSession({
+          id: userId,
+          privyUserId: `did:privy:telya_linked_payment_${userId}`,
+          sessionId: authSessionId,
+          expiresAt: new Date(Date.now() + 60 * 60 * 1_000),
+        }, paymentId);
+        expect(handoff.token).toMatch(/^[A-Za-z0-9_-]{43}$/);
+        const storedSessions = await sql`
+          SELECT token_hash FROM stellar_payment_execution_sessions
+          WHERE payment_id = ${paymentId}::uuid
+        `;
+        expect(storedSessions).toHaveLength(1);
+        expect(storedSessions[0]?.token_hash).not.toBe(handoff.token);
+        await expect(consumeStellarPaymentExecutionSession(handoff.token)).resolves.toEqual({
+          userId,
+          paymentId,
+        });
+        await expect(consumeStellarPaymentExecutionSession(handoff.token)).resolves.toBeNull();
+        const revokedHandoff = await createStellarPaymentExecutionSession({
+          id: userId,
+          privyUserId: `did:privy:telya_linked_payment_${userId}`,
+          sessionId: authSessionId,
+          expiresAt: new Date(Date.now() + 60 * 60 * 1_000),
+        }, paymentId);
+        await sql`UPDATE auth_sessions SET revoked_at = now()
+          WHERE privy_session_id = ${authSessionId}`;
+        await expect(consumeStellarPaymentExecutionSession(revokedHandoff.token)).resolves.toBeNull();
+        await sql`UPDATE auth_sessions SET revoked_at = NULL
+          WHERE privy_session_id = ${authSessionId}`;
         await validateStellarPaymentAuthorization(userId, paymentId, transfer);
         await linkStellarPaymentAuthorization(userId, paymentId, requestHash, transfer);
         await recordStellarUsdcTransferSubmission(requestHash, {
@@ -172,10 +217,12 @@ describe("linked Stellar direct payment execution on PostgreSQL", () => {
           sql`DELETE FROM payment_events WHERE payment_id = ${paymentId}::uuid`,
           sql`DELETE FROM stellar_direct_payment_events WHERE request_hash = ${requestHash}`,
           sql`DELETE FROM stellar_relayer_requests WHERE request_hash = ${requestHash}`,
+          sql`DELETE FROM stellar_payment_execution_sessions WHERE payment_id = ${paymentId}::uuid`,
           sql`DELETE FROM payments WHERE id = ${paymentId}::uuid`,
           sql`DELETE FROM messages WHERE id = ${messageId}::uuid`,
           sql`DELETE FROM conversations WHERE id = ${conversationId}::uuid`,
           sql`DELETE FROM wallets WHERE id = ${walletId}::uuid`,
+          sql`DELETE FROM auth_sessions WHERE privy_session_id = ${authSessionId}`,
           sql`DELETE FROM users WHERE id IN (${userId}::uuid, ${otherUserId}::uuid)`,
         ]);
       }
