@@ -39,7 +39,9 @@ function configFromEnvironment(): BindingConfig {
       origins.some((origin) => {
         try {
           const url = new URL(origin);
-          return url.protocol !== "https:" || url.origin !== origin ||
+          const localHttp = url.protocol === "http:" &&
+            (url.hostname === "localhost" || url.hostname === "127.0.0.1");
+          return (url.protocol !== "https:" && !localHttp) || url.origin !== origin ||
             !(url.hostname === rpId || url.hostname.endsWith(`.${rpId}`));
         } catch { return true; }
       })) throw new WalletBindingError("wallet_binding_unavailable", 503);
