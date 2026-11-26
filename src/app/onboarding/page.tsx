@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { usePrivy } from "@privy-io/react-auth";
 import {
   ArrowRight,
   Check,
@@ -30,12 +31,39 @@ import {
   type SmartAccountPublicConfig,
 } from "../../stellar/smart-account";
 import { validateUsername } from "../../domain/username";
+import { authenticatedFetch } from "../authenticated-fetch";
 
 type OnboardingStep = "welcome" | "username" | "creating" | "ready" | "returning";
 
 type UsernameStatus = "idle" | "checking" | "available" | "taken" | "reserved" | "invalid";
 
+function decodeBase64Url(value: string): Uint8Array<ArrayBuffer> {
+  const raw = atob(value.replace(/-/g, "+").replace(/_/g, "/"));
+  return Uint8Array.from(raw, (character) => character.charCodeAt(0));
+}
+
+function encodeBase64Url(value: ArrayBuffer): string {
+  const raw = String.fromCharCode(...new Uint8Array(value));
+  return btoa(raw).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
 export default function OnboardingPage() {
+  if (!process.env.NEXT_PUBLIC_PRIVY_APP_ID) {
+    return (
+      <main className="onboarding-main">
+        <div className="onboarding-card welcome-card" role="alert">
+          <h1>Sign-in is temporarily unavailable.</h1>
+          <p className="card-subtitle">Telya cannot verify your identity until the Testnet sign-in service is configured.</p>
+          <Link href="/">Return to Telya</Link>
+        </div>
+      </main>
+    );
+  }
+  return <OnboardingFlow />;
+}
+
+function OnboardingFlow() {
+  const { ready: authReady, authenticated, login, getAccessToken } = usePrivy();
   const [step, setStep] = useState<OnboardingStep>("welcome");
   const [usernameInput, setUsernameInput] = useState("");
   const [debouncedUsername, setDebouncedUsername] = useState("");
@@ -47,9 +75,66 @@ export default function OnboardingPage() {
 
   const kitRef = useRef<SmartAccountKit | null>(null);
   const configRef = useRef<SmartAccountPublicConfig | null>(null);
+  const creationRef = useRef(false);
+
+  async function bindWalletToIdentity(connected: ConnectedSmartAccount): Promise<void> {
+    const challengeResponse = await authenticatedFetch(
+      "/api/wallets/stellar/challenge",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contractId: connected.contractId, credentialId: connected.credentialId }),
+      },
+      getAccessToken,
+    );
+    if (!challengeResponse.ok) throw new Error("Wallet verification is unavailable. Your account was not linked to your sign-in.");
+    const challenge = await challengeResponse.json() as {
+      challenge: string; proofToken: string; rpId: string;
+    };
+    const credential = await navigator.credentials.get({
+      publicKey: {
+        challenge: decodeBase64Url(challenge.challenge),
+        rpId: challenge.rpId,
+        allowCredentials: [{ id: decodeBase64Url(connected.credentialId), type: "public-key" }],
+        userVerification: "required",
+        timeout: 120_000,
+      },
+    });
+    if (!(credential instanceof PublicKeyCredential) ||
+        !(credential.response instanceof AuthenticatorAssertionResponse)) {
+      throw new Error("Passkey verification was not completed.");
+    }
+    const assertion = {
+      id: credential.id,
+      response: {
+        authenticatorData: encodeBase64Url(credential.response.authenticatorData),
+        clientDataJSON: encodeBase64Url(credential.response.clientDataJSON),
+        signature: encodeBase64Url(credential.response.signature),
+      },
+    };
+    const bindResponse = await authenticatedFetch(
+      "/api/wallets/stellar/bind",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ proofToken: challenge.proofToken, assertion }),
+      },
+      getAccessToken,
+    );
+    if (!bindResponse.ok) throw new Error("Passkey ownership could not be verified for this sign-in.");
+  }
+
+  useEffect(() => {
+    if (authReady && !authenticated) {
+      setAccount(null);
+      setClaimedUsername("");
+      setStep("welcome");
+    }
+  }, [authReady, authenticated]);
 
   // Initialize SmartAccountKit
   useEffect(() => {
+    if (!authReady || !authenticated) return;
     let active = true;
 
     async function init() {
@@ -64,14 +149,15 @@ export default function OnboardingPage() {
         // Check if there is an existing restored account with a durable claim on server
         const restored = await restoreSmartAccount(kit);
         if (active && restored) {
-          setAccount(restored);
           try {
-            const lookupRes = await fetch(
+            const lookupRes = await authenticatedFetch(
               `/api/usernames/lookup?account=${encodeURIComponent(restored.contractId)}`,
               { cache: "no-store" },
+              getAccessToken,
             );
             const lookupData = await lookupRes.json();
             if (active && lookupRes.ok && lookupData.found && lookupData.username) {
+              setAccount(restored);
               setClaimedUsername(lookupData.username);
               setStep("ready");
             }
@@ -88,7 +174,7 @@ export default function OnboardingPage() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [authReady, authenticated, getAccessToken]);
 
   // Debounce username input
   useEffect(() => {
@@ -167,6 +253,12 @@ export default function OnboardingPage() {
   // Handle Passkey smart account registration & atomic durable claim
   async function handleCreateAccount() {
     if (usernameStatus !== "available") return;
+    if (!authReady) return;
+    if (!authenticated) {
+      setErrorMessage("Sign in to Telya first, then confirm your username and passkey account.");
+      login();
+      return;
+    }
     setStep("creating");
     setErrorMessage(null);
 
@@ -198,20 +290,27 @@ export default function OnboardingPage() {
       return;
     }
 
+    if (creationRef.current) return;
+    creationRef.current = true;
     try {
       const normalized = validation.normalized;
-      // 1. Authorize and deploy Stellar Smart Account
-      const created = await createSmartAccount(kit, normalized);
+      // Reuse a deployed account after a claim/network failure; never deploy a
+      // second account just because the user retries the same onboarding flow.
+      const created = account ?? await createSmartAccount(kit, normalized);
+      setAccount(created);
 
-      // 2. Persist authenticated, atomic username claim in username_registry
-      const claimRes = await fetch("/api/usernames/claim", {
+      // 2. Bind the authenticated Privy user to the live on-chain passkey signer.
+      await bindWalletToIdentity(created);
+
+      // 3. Persist the atomic username claim only after wallet proof succeeds.
+      const claimRes = await authenticatedFetch("/api/usernames/claim", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           username: normalized,
           smartAccountAddress: created.contractId,
         }),
-      });
+      }, getAccessToken);
 
       const claimData = await claimRes.json();
       if (!claimRes.ok || !claimData.success) {
@@ -225,12 +324,19 @@ export default function OnboardingPage() {
       const msg = err instanceof Error ? err.message : "Passkey authorization or username claim failed.";
       setErrorMessage(msg);
       setStep("username");
+    } finally {
+      creationRef.current = false;
     }
   }
 
   // Handle returning user passkey sign-in with durable server restoration
   async function handleSignIn() {
     setErrorMessage(null);
+    if (!authReady) return;
+    if (!authenticated) {
+      login();
+      return;
+    }
     let kit = kitRef.current;
     if (!kit) {
       try {
@@ -254,23 +360,28 @@ export default function OnboardingPage() {
     try {
       setStep("creating");
       const connected = await connectSmartAccount(kit);
-      setAccount(connected);
 
       // Restore durable handle from server
-      const lookupRes = await fetch(
+      const lookupRes = await authenticatedFetch(
         `/api/usernames/lookup?account=${encodeURIComponent(connected.contractId)}`,
         { cache: "no-store" },
+        getAccessToken,
       );
       const lookupData = await lookupRes.json();
 
-      if (lookupRes.ok && lookupData.found && lookupData.username) {
+      if (!lookupRes.ok) {
+        throw new Error("Account identity lookup is temporarily unavailable. Please try again.");
+      }
+      if (lookupData.found && lookupData.username) {
+        setAccount(connected);
         setClaimedUsername(lookupData.username);
         setStep("ready");
       } else {
-        // Non-negotiable: Do not substitute fake "user" when no durable claim exists
+        await bindWalletToIdentity(connected);
+        setAccount(connected);
         setClaimedUsername("");
         setErrorMessage(
-          "No claimed handle found for this passkey account. Please claim a unique handle.",
+          "This passkey account is verified for your sign-in. Choose a unique handle to continue.",
         );
         setStep("username");
       }
@@ -301,8 +412,7 @@ export default function OnboardingPage() {
           <div className="onboarding-card welcome-card">
             <h1>Move digital dollars with a touch.</h1>
             <p className="card-subtitle">
-              Say goodbye to seed phrases and wallet addresses. Send and receive USDC on
-              Stellar with a simple handle and your fingerprint or Face ID.
+              Create a Stellar smart account with a device passkey, then use a verified handle to receive USDC.
             </p>
 
             {errorMessage && (
@@ -319,7 +429,7 @@ export default function OnboardingPage() {
                 onClick={() => setStep("username")}
               >
                 <Fingerprint className="btn-icon" />
-                <span>Create account with Passkey</span>
+                <span>Choose a handle and create an account</span>
               </button>
 
               <button
@@ -327,7 +437,7 @@ export default function OnboardingPage() {
                 className="cta-button secondary"
                 onClick={handleSignIn}
               >
-                <span>Already have a passkey? Sign in</span>
+                <span>Already have an account? Sign in</span>
                 <ChevronRight className="btn-icon-right" />
               </button>
             </div>
@@ -339,11 +449,11 @@ export default function OnboardingPage() {
               </div>
               <div className="guarantee-item">
                 <ShieldCheck className="guarantee-icon" />
-                <span>Sovereign passkey custody</span>
+                <span>Device passkey control</span>
               </div>
               <div className="guarantee-item">
                 <CheckCircle2 className="guarantee-icon" />
-                <span>Sponsored network fees</span>
+                <span>Testnet fee sponsorship when available</span>
               </div>
             </div>
           </div>
@@ -413,11 +523,11 @@ export default function OnboardingPage() {
               <button
                 type="button"
                 className="cta-button primary"
-                disabled={usernameStatus !== "available"}
+                disabled={usernameStatus !== "available" || !authReady}
                 onClick={handleCreateAccount}
               >
                 <Fingerprint className="btn-icon" />
-                <span>Confirm & Authorize Passkey</span>
+                <span>{authenticated ? "Confirm and authorize passkey" : "Sign in to continue"}</span>
               </button>
 
               <button
@@ -439,24 +549,15 @@ export default function OnboardingPage() {
               <Fingerprint className="creating-fingerprint" />
             </div>
 
-            <h2>Touch ID / Passkey prompt active</h2>
+            <h2>Account setup in progress</h2>
             <p className="card-subtitle">
-              Authenticate on your device to create your Stellar smart account. Telya
-              sponsors the deployment fee automatically.
+              Follow the passkey prompt on your device. Account setup will finish after the network confirms it.
             </p>
 
             <div className="creating-checklist">
-              <div className="check-item active">
-                <CheckCircle2 className="check-item-icon" />
-                <span>WebAuthn Biometric derivation</span>
-              </div>
-              <div className="check-item active">
-                <CheckCircle2 className="check-item-icon" />
-                <span>Stellar Smart Account Kit contract setup</span>
-              </div>
               <div className="check-item in-progress">
                 <Loader2 className="check-item-icon spinner" />
-                <span>Deploying account via Telya Sponsor Relayer...</span>
+                <span>Waiting for account setup...</span>
               </div>
             </div>
           </div>
@@ -469,7 +570,7 @@ export default function OnboardingPage() {
               <Check className="ready-success-icon" />
             </div>
 
-            <h2>You&apos;re ready to move money.</h2>
+            <h2>Your account is ready.</h2>
             <p className="card-subtitle">
               Your smart account is live on Stellar Testnet and secured by your device passkey.
             </p>
@@ -491,12 +592,12 @@ export default function OnboardingPage() {
                 <div>
                   <span className="detail-label">Security</span>
                   <span className="detail-val proof-text">
-                    <ShieldCheck className="mini-icon" /> Biometrics Active
+                    <ShieldCheck className="mini-icon" /> Passkey verified
                   </span>
                 </div>
                 <div>
-                  <span className="detail-label">Initial Balance</span>
-                  <span className="detail-val tabular">$0.00 USDC</span>
+                  <span className="detail-label">Balance</span>
+                  <span className="detail-val">Unavailable</span>
                 </div>
                 <div>
                   <span className="detail-label">Primary Chain</span>

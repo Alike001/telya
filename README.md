@@ -2,15 +2,15 @@
 
 **Conversational money movement on Stellar.**
 
-Telya lets people speak or type what they want to do with USDC, then safely routes payments across Stellar and Base, exposes real transaction progress until finality, supports fiat ramp flows, and enables limited, revocable AI-agent spending through Stellar smart accounts.
+Telya is building a conversational USDC experience across Stellar and Base. The current public Testnet app has verified passkey smart accounts, direct Stellar USDC payments with durable receipts, and limited, revocable Agent Pass spending. The conversational journey, Base routes, bidirectional Circle CCTP, usernames, and MoneyGram ramp are still being integrated or externally verified. [Current state](product/EXECUTION-TRACKER.md)
 
 > Team Bravo — Stellar Buildathon 2026
 
 ## How to Test
 
-Telya is now in Build Week implementation. The public shell is intentionally
-honest about its current state: it shows the frozen Testnet route matrix and a
-route preview, but never displays a fake completed transaction.
+Telya is in Build Week implementation. The public main deployment supports the
+direct Stellar and Agent Pass Testnet flows below. Draft PR features are not part
+of this walkthrough until their live acceptance gates pass.
 
 Local development:
 
@@ -106,7 +106,7 @@ Planned test environment:
 - Stellar Testnet
 - Base Sepolia
 - Circle CCTP test configuration
-- MoneyGram sandbox
+- MoneyGram sandbox, pending partner access and contract-wallet compatibility confirmation
 
 The final judge flow will include:
 1. Open the public Testnet app.
@@ -122,18 +122,15 @@ A simple stablecoin payment should not require users to understand wallets, netw
 
 AI agents also need safer wallet permissions than unrestricted access.
 
-## What Telya does
+## Planned P0 experience
 
-- Conversational text and voice payment intent.
-- Stellar passkey smart account.
-- Stellar USDC payments with fee sponsorship.
-- Base USDC payments.
-- Bidirectional Base <-> Stellar USDC through Circle CCTP Standard.
-- Visible money movement and finality.
-- Persistent history and receipts.
-- Unique human-readable usernames mapped to verified wallet records.
-- Agent Pass: limited, expiring, revocable Stellar agent spending.
-- MoneyGram sandbox cash-in/cash-out integration.
+- Conversational text and voice payment intent (draft integration).
+- Stellar passkey smart account, direct sponsored Stellar USDC and durable receipts (verified on Testnet).
+- Base USDC and bidirectional Base ↔ Stellar USDC through Circle CCTP Standard (draft; final settlement evidence pending).
+- Visible payment movement, history and receipts across supported routes (draft integration).
+- Unique human-readable usernames tied to verified wallet records (draft; live claim proof pending).
+- Agent Pass: limited, expiring, revocable Stellar agent spending (verified on Testnet).
+- MoneyGram sandbox cash-in/cash-out (pending provider access and contract-wallet compatibility).
 
 ## Required payment routes
 
@@ -155,6 +152,10 @@ Completion requires destination finality plus recipient and amount verification.
 If you are a developer or AI agent joining the project, start here:
 
 - [Current project status](product/STATUS.md)
+- [Codex master playbook](product/CODEX-MASTER-PLAYBOOK.md)
+- [Live execution tracker](product/EXECUTION-TRACKER.md)
+- [Buildathon execution plan](product/BUILDATHON-EXECUTION-PLAN.md)
+- [Judging and grant readiness baseline](product/JUDGING-AND-GRANT-READINESS.md)
 - [Universal agent handoff](handoffs/AGENT-HANDOFF.md)
 - [Product requirements](product/PRD.md)
 - [Architecture](product/ARCHITECTURE.md)
@@ -168,8 +169,6 @@ If you are a developer or AI agent joining the project, start here:
 
 ## Development status
 
-Foundation planning is complete and stored in the repository so all three contributors and their coding agents work from the same source of truth.
+Build Week implementation is active. Codex continues from the persistent [Master Playbook](product/CODEX-MASTER-PLAYBOOK.md), [Execution Tracker](product/EXECUTION-TRACKER.md) and [Current Project Status](product/STATUS.md). These documents record task order, PR dependencies, acceptance gates and external blockers across sessions.
 
-Build Week begins November 25, 2026. Until then, keep work to preparation, accounts, documentation, deployment plumbing, and Testnet setup unless organizers explicitly permit earlier substantive feature implementation.
-
-Feature implementation begins from the shared contracts and acceptance criteria defined in this repository.
+Only real Stellar Testnet / Base Sepolia / approved provider data may drive financial UI states. Mock fixtures are for tests only and must never appear as real balances, quotes, wallet connections, or successful payments.

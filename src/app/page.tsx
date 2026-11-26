@@ -3,6 +3,7 @@ import { ArrowRight } from "lucide-react";
 import { SiteHeader } from "./components/site-header";
 import { MobileBottomDock } from "./components/mobile-bottom-dock";
 import { ConversationalHome } from "./components/conversational-home";
+import { PaymentActivityPanel } from "./components/payment-activity-panel";
 import { StellarWalletPanel } from "./stellar-wallet-panel";
 
 const routes = [
@@ -47,7 +48,11 @@ export default function HomePage() {
         <StellarWalletPanel />
       </div>
 
-      <section className="trust-section shell" id="activity" aria-labelledby="trust-title">
+      <section className="activity-section shell" id="activity" aria-label="Authenticated payment activity">
+        <PaymentActivityPanel />
+      </section>
+
+      <section className="trust-section shell" aria-labelledby="trust-title">
         <p className="eyebrow">One rule at every stage</p>
         <div className="trust-grid">
           <h2 id="trust-title">Where is my money right now?</h2>

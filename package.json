@@ -26,6 +26,7 @@
   "dependencies": {
     "@neondatabase/serverless": "1.2.1",
     "@privy-io/node": "0.42.0",
+    "@privy-io/react-auth": "3.52.1",
     "@stellar/stellar-sdk": "^16.4.1",
     "lucide-react": "^1.79.0",
     "motion": "^14.14.0",

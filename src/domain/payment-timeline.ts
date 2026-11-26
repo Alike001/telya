@@ -1,12 +1,11 @@
 import type {
   Fee,
   Network,
-  Payment,
-  PaymentEvent,
   PaymentRoute,
   PaymentStatus,
   TransactionReference,
 } from "./contracts";
+import type { PersistedPayment, PersistedPaymentEvent } from "./payment-activity";
 
 export interface TimelineStep {
   readonly id: string;
@@ -40,18 +39,16 @@ export interface ComputedTimeline {
 
 export interface PaymentReceipt {
   readonly paymentId: string;
-  readonly idempotencyKey: string;
   readonly routeId: PaymentRoute["id"];
   readonly sourceNetwork: Network;
   readonly destinationNetwork: Network;
   readonly rail: PaymentRoute["rail"];
   readonly recipient: string;
-  readonly verifiedRecipient: string | null;
+  readonly verifiedRecipient: string;
   readonly expectedAmount: string;
-  readonly verifiedAmount: string | null;
+  readonly verifiedAmount: string;
   readonly asset: string;
   readonly fees: readonly Fee[];
-  readonly totalFee: string;
   readonly status: PaymentStatus;
   readonly isFullySettled: boolean;
   readonly sourceTransaction: TransactionReference | null;
@@ -73,7 +70,7 @@ const STELLAR_TO_STELLAR_STAGES: readonly StageBlueprint[] = [
   {
     stage: "authorized",
     title: "Passkey Authorization",
-    description: "Biometric signature validated and approved for exact recipient.",
+    description: "Device passkey signature validated for the exact payment.",
     network: "stellar",
   },
   {
@@ -91,7 +88,7 @@ const STELLAR_TO_STELLAR_STAGES: readonly StageBlueprint[] = [
   {
     stage: "recipient_verified",
     title: "Recipient & Amount Verified",
-    description: "Destination balance change and recipient identity verified on-chain.",
+    description: "Finalized transfer evidence matches the exact recipient and amount.",
     network: "stellar",
   },
   {
@@ -124,7 +121,7 @@ const BASE_TO_BASE_STAGES: readonly StageBlueprint[] = [
   {
     stage: "recipient_verified",
     title: "Recipient & Amount Verified",
-    description: "On-chain transfer event matches recipient address and exact amount.",
+    description: "Finalized transfer evidence matches the exact recipient and amount.",
     network: "base",
   },
   {
@@ -256,6 +253,18 @@ export function formatDuration(seconds: number): string {
   return `${mins}m ${remainingSecs}s`;
 }
 
+function equalDecimal(left: string, right: string): boolean {
+  const normalize = (value: string) => {
+    const [whole, fraction = ""] = value.split(".");
+    return `${whole}.${fraction.replace(/0+$/, "")}`;
+  };
+  return normalize(left) === normalize(right);
+}
+
+function equalAddress(network: Network, left: string, right: string): boolean {
+  return network === "base" ? left.toLowerCase() === right.toLowerCase() : left === right;
+}
+
 /** Returns the stage blueprint for a given route. */
 export function getRouteBlueprints(routeId: PaymentRoute["id"]): readonly StageBlueprint[] {
   switch (routeId) {
@@ -291,8 +300,8 @@ const STAGE_ORDER: Record<PaymentStatus, number> = {
  * Invariant: Never renders fake timers or fake progress bars.
  */
 export function computePaymentTimeline(
-  payment: Payment,
-  events: readonly PaymentEvent[],
+  payment: PersistedPayment,
+  events: readonly PersistedPaymentEvent[],
   nowMs = Date.now(),
 ): ComputedTimeline {
   const blueprints = getRouteBlueprints(payment.route.id);
@@ -308,7 +317,7 @@ export function computePaymentTimeline(
   const elapsedFormatted = formatDuration(elapsedSeconds);
 
   // Group events by stage for fast lookup
-  const eventsByStage = new Map<PaymentStatus, PaymentEvent>();
+  const eventsByStage = new Map<PaymentStatus, PersistedPaymentEvent>();
   for (const event of events) {
     eventsByStage.set(event.stage, event);
   }
@@ -322,7 +331,7 @@ export function computePaymentTimeline(
     ? "Payment completed and destination settlement verified."
     : isFailed
       ? (payment.failureCode
-          ? `Payment failed at ${payment.failureStage ?? "execution"}: ${payment.failureCode}`
+          ? `Payment failed during execution: ${payment.failureCode}`
           : "Payment failed during execution.")
       : "Payment processing...";
 
@@ -335,7 +344,7 @@ export function computePaymentTimeline(
 
   // A long payment is not stalled when a recent durable stage has progressed.
   const lastProgressMs = events.reduce((latest, event) => {
-    const eventTime = new Date(event.completedAt ?? event.startedAt).getTime();
+    const eventTime = new Date(event.completedAt ?? event.occurredAt).getTime();
     return Number.isFinite(eventTime) ? Math.max(latest, eventTime) : latest;
   }, startMs);
   const waitingOnNetwork = [
@@ -356,19 +365,6 @@ export function computePaymentTimeline(
     let completedAt: string | null = null;
     let errorMessage: string | null = null;
 
-    if (!txHash) {
-      if (blueprint.network === "stellar" && payment.sourceTransaction?.network === "stellar") {
-        txHash = payment.sourceTransaction.txHash;
-        explorerUrl = payment.sourceTransaction.explorerUrl;
-      } else if (
-        blueprint.network === "base" &&
-        payment.destinationTransaction?.network === "base"
-      ) {
-        txHash = payment.destinationTransaction.txHash;
-        explorerUrl = payment.destinationTransaction.explorerUrl;
-      }
-    }
-
     if (txHash && !explorerUrl && blueprint.network) {
       explorerUrl = getExplorerUrl(blueprint.network, txHash);
     }
@@ -377,11 +373,7 @@ export function computePaymentTimeline(
       status = "completed";
       completedAt = payment.completedAt;
     } else if (isFailed) {
-      if (payment.failureStage === blueprint.stage) {
-        status = "failed";
-        errorMessage = payment.failureCode ?? "Stage failed";
-        currentStepIdx = index;
-      } else if (stageRank < STAGE_ORDER[payment.failureStage ?? "created"]) {
+      if (event && event.stage !== "failed") {
         status = "completed";
       } else {
         status = "pending";
@@ -424,7 +416,7 @@ export function computePaymentTimeline(
     isCompleted,
     isFailed,
     isStalled,
-    failureStage: payment.failureStage,
+    failureStage: null,
     failureReason: payment.failureCode,
     elapsedSeconds,
     elapsedFormatted,
@@ -435,47 +427,46 @@ export function computePaymentTimeline(
 }
 
 /**
- * Builds a structured, consumer-safe receipt from domain Payment data.
+ * Builds a structured, consumer-safe receipt from persisted Payment/Event data.
  */
 export function buildPaymentReceipt(
-  payment: Payment,
-  events: readonly PaymentEvent[],
-): PaymentReceipt {
-  const isFullySettled = payment.status === "completed";
+  payment: PersistedPayment,
+  events: readonly PersistedPaymentEvent[],
+): PaymentReceipt | null {
+  const destinationHash = payment.destinationTransaction?.txHash ?? null;
+  const isFullySettled = payment.status === "completed" &&
+    payment.verifiedRecipient !== null &&
+    equalAddress(payment.route.destinationNetwork, payment.verifiedRecipient, payment.recipientAddress) &&
+    payment.verifiedAmount !== null && equalDecimal(payment.verifiedAmount, payment.expectedAmount) &&
+    destinationHash !== null &&
+    events.some((event) => event.stage === "recipient_verified" && event.txHash === destinationHash) &&
+    events.some((event) => event.stage === "completed" && event.txHash === destinationHash);
+  if (!isFullySettled || !payment.completedAt) return null;
   const startMs = new Date(payment.createdAt).getTime();
   const endMs = isFullySettled && payment.completedAt
     ? new Date(payment.completedAt).getTime()
     : Date.now();
   const durationSec = Math.max(0, Math.round((endMs - startMs) / 1000));
 
-  let verifiedRecipient: string | null = null;
-  let verifiedAmount: string | null = null;
-
-  if (isFullySettled) {
-    verifiedRecipient = payment.actualRecipient;
-    verifiedAmount = payment.actualAmount;
-  }
-
   return {
     paymentId: payment.id,
-    idempotencyKey: payment.idempotencyKey,
     routeId: payment.route.id,
     sourceNetwork: payment.route.sourceNetwork,
     destinationNetwork: payment.route.destinationNetwork,
     rail: payment.route.rail,
-    recipient: payment.expectedRecipient,
-    verifiedRecipient,
+    recipient: payment.recipientAddress,
+    verifiedRecipient: payment.verifiedRecipient,
     expectedAmount: payment.expectedAmount,
-    verifiedAmount,
+    verifiedAmount: payment.verifiedAmount,
     asset: payment.asset,
     fees: payment.fees,
-    totalFee: payment.feeAmount,
     status: payment.status,
     isFullySettled,
     sourceTransaction: payment.sourceTransaction,
     destinationTransaction: payment.destinationTransaction,
     createdAt: payment.createdAt,
-    completedAt: isFullySettled ? payment.completedAt : null,
+    completedAt: payment.completedAt,
     durationFormatted: formatDuration(durationSec),
   };
 }
+

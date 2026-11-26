@@ -4,6 +4,9 @@ import { GET as checkUsernameRoute } from "../app/api/usernames/check/route";
 import { POST as claimUsernameRoute } from "../app/api/usernames/claim/route";
 import { GET as lookupUsernameRoute } from "../app/api/usernames/lookup/route";
 import * as dbClient from "../../server/db/client";
+import * as auth from "../../server/auth/privy";
+
+const TEST_ACCOUNT = "CD4TKTI6AOYCMVE5U2G6HQNWPLAP36ND3SXM4OLQMTD47AR6CL2C62YM";
 
 describe("Production Username Validator", () => {
   it("normalizes case so Alice, alice, and ALICE resolve identically", () => {
@@ -139,6 +142,23 @@ describe("Username Availability Route (/api/usernames/check) - Fail Closed", () 
 describe("Atomic Username Claim Route (/api/usernames/claim)", () => {
   const originalEnv = process.env.DATABASE_URL;
 
+  function request(username = "Prudent", smartAccountAddress = TEST_ACCOUNT) {
+    return new Request("http://localhost:3000/api/usernames/claim", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, smartAccountAddress }),
+    });
+  }
+
+  function authenticated() {
+    vi.spyOn(auth, "authenticateRequest").mockResolvedValue({
+      id: "00000000-0000-0000-0000-000000000001",
+      privyUserId: "did:privy:real-user",
+      sessionId: "verified-session",
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+  }
+
   afterEach(() => {
     process.env.DATABASE_URL = originalEnv;
     vi.restoreAllMocks();
@@ -147,30 +167,41 @@ describe("Atomic Username Claim Route (/api/usernames/claim)", () => {
   it("fails closed with 503 when DATABASE_URL is missing", async () => {
     delete process.env.DATABASE_URL;
 
-    const request = new Request("http://localhost:3000/api/usernames/claim", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        username: "prudent",
-        smartAccountAddress: "CBXYZ123456789012345678901234567890123456789012345678901234",
-      }),
-    });
-    const response = await claimUsernameRoute(request);
+    const response = await claimUsernameRoute(request());
     expect(response.status).toBe(503);
   });
 
   it("rejects unauthorized / missing smart account address with 400", async () => {
     process.env.DATABASE_URL = "postgres://fake:5432/db";
 
-    const request = new Request("http://localhost:3000/api/usernames/claim", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        username: "prudent",
-      }),
-    });
-    const response = await claimUsernameRoute(request);
+    const response = await claimUsernameRoute(request("prudent", ""));
     expect(response.status).toBe(400);
+  });
+
+  it("rejects a missing or invalid session before changing the registry", async () => {
+    process.env.DATABASE_URL = "postgres://fake:5432/db";
+    const sql = vi.fn();
+    vi.spyOn(dbClient, "getSqlClient").mockReturnValue(sql as any);
+    vi.spyOn(auth, "authenticateRequest").mockRejectedValue(new auth.AuthenticationError());
+
+    const response = await claimUsernameRoute(request());
+    expect(response.status).toBe(401);
+    expect(sql).not.toHaveBeenCalled();
+  });
+
+  it("does not claim a name when the wallet is not verified for the session user", async () => {
+    process.env.DATABASE_URL = "postgres://fake:5432/db";
+    authenticated();
+    const sql = vi.fn().mockResolvedValue([]);
+    vi.spyOn(dbClient, "getSqlClient").mockReturnValue(sql as any);
+
+    const response = await claimUsernameRoute(request());
+    expect(response.status).toBe(403);
+    expect(sql).toHaveBeenCalledTimes(1);
+    const query = sql.mock.calls[0]?.[0]?.join(" ") ?? "";
+    expect(query).toContain("verification_status = 'verified'");
+    expect(query).toContain("user_id = ");
+    expect(query).not.toContain("INSERT INTO wallets");
   });
 
   it("rejects concurrent / duplicate claim race with 409 conflict", async () => {
@@ -179,23 +210,12 @@ describe("Atomic Username Claim Route (/api/usernames/claim)", () => {
     const errorWithCode = new Error("Unique constraint violation");
     (errorWithCode as any).code = "23505";
 
-    const mockSql: any = vi.fn()
-      .mockResolvedValueOnce([{ id: "00000000-0000-0000-0000-000000000001" }])
-      .mockResolvedValueOnce([])
-      .mockRejectedValueOnce(errorWithCode);
+    authenticated();
+    const mockSql: any = vi.fn().mockRejectedValue(errorWithCode);
 
     vi.spyOn(dbClient, "getSqlClient").mockReturnValue(mockSql);
 
-    const request = new Request("http://localhost:3000/api/usernames/claim", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        username: "concurrent_alex",
-        smartAccountAddress: "CBXYZ123456789012345678901234567890123456789012345678901234",
-      }),
-    });
-
-    const response = await claimUsernameRoute(request);
+    const response = await claimUsernameRoute(request("concurrent_alex"));
     const body = await response.json();
 
     expect(response.status).toBe(409);
@@ -206,23 +226,12 @@ describe("Atomic Username Claim Route (/api/usernames/claim)", () => {
   it("persists atomic claim and returns claimed handle", async () => {
     process.env.DATABASE_URL = "postgres://fake:5432/db";
 
-    const mockSql: any = vi.fn()
-      .mockResolvedValueOnce([{ id: "00000000-0000-0000-0000-000000000001" }])
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([{ username_normalized: "prudent" }]);
+    authenticated();
+    const mockSql: any = vi.fn().mockResolvedValue([{ username_normalized: "prudent" }]);
 
     vi.spyOn(dbClient, "getSqlClient").mockReturnValue(mockSql);
 
-    const request = new Request("http://localhost:3000/api/usernames/claim", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        username: "Prudent",
-        smartAccountAddress: "CBXYZ123456789012345678901234567890123456789012345678901234",
-      }),
-    });
-
-    const response = await claimUsernameRoute(request);
+    const response = await claimUsernameRoute(request());
     const body = await response.json();
 
     expect(response.status).toBe(200);
@@ -233,6 +242,15 @@ describe("Atomic Username Claim Route (/api/usernames/claim)", () => {
 
 describe("Username Server Lookup Route (/api/usernames/lookup)", () => {
   const originalEnv = process.env.DATABASE_URL;
+
+  function authenticated() {
+    vi.spyOn(auth, "authenticateRequest").mockResolvedValue({
+      id: "00000000-0000-0000-0000-000000000001",
+      privyUserId: "did:privy:real-user",
+      sessionId: "verified-session",
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+  }
 
   afterEach(() => {
     process.env.DATABASE_URL = originalEnv;
@@ -249,6 +267,7 @@ describe("Username Server Lookup Route (/api/usernames/lookup)", () => {
 
   it("returns found=false when account has no claimed username", async () => {
     process.env.DATABASE_URL = "postgres://fake:5432/db";
+    authenticated();
     const mockSql: any = vi.fn().mockResolvedValue([]);
     vi.spyOn(dbClient, "getSqlClient").mockReturnValue(mockSql);
 
@@ -262,6 +281,7 @@ describe("Username Server Lookup Route (/api/usernames/lookup)", () => {
 
   it("restores durable claimed username when account exists on server", async () => {
     process.env.DATABASE_URL = "postgres://fake:5432/db";
+    authenticated();
     const mockSql: any = vi.fn().mockResolvedValue([{
       username_normalized: "prudent",
       username_display: "@prudent",
@@ -275,5 +295,20 @@ describe("Username Server Lookup Route (/api/usernames/lookup)", () => {
     expect(response.status).toBe(200);
     expect(body.found).toBe(true);
     expect(body.username).toBe("prudent");
+    const query = mockSql.mock.calls[0]?.[0]?.join(" ") ?? "";
+    expect(query).toContain("w.user_id = ");
+    expect(query).toContain("verification_status = 'verified'");
+  });
+
+  it("does not reveal an account identity without a verified session", async () => {
+    process.env.DATABASE_URL = "postgres://fake:5432/db";
+    const sql = vi.fn();
+    vi.spyOn(dbClient, "getSqlClient").mockReturnValue(sql as any);
+    vi.spyOn(auth, "authenticateRequest").mockRejectedValue(new auth.AuthenticationError());
+
+    const request = new Request("http://localhost:3000/api/usernames/lookup?account=CBXYZ");
+    const response = await lookupUsernameRoute(request);
+    expect(response.status).toBe(401);
+    expect(sql).not.toHaveBeenCalled();
   });
 });

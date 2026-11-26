@@ -3417,6 +3417,30 @@ h2 {
 /* ==========================================================================
    Activity History
    ========================================================================== */
+.activity-section {
+  padding-block: 48px;
+}
+
+.activity-live-surface {
+  display: grid;
+  gap: 20px;
+}
+
+.activity-live-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.activity-live-header h2 {
+  margin: 4px 0 0;
+}
+
+.activity-load-more {
+  justify-self: center;
+}
+
 .activity-history-container {
   display: flex;
   flex-direction: column;

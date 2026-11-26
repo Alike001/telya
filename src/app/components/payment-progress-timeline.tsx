@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { Payment, PaymentEvent } from "../../domain/contracts";
+import type { PersistedPayment, PersistedPaymentEvent } from "../../domain/payment-activity";
 import {
   computePaymentTimeline,
   type ComputedTimeline,
@@ -24,8 +24,8 @@ import {
 } from "lucide-react";
 
 interface PaymentProgressTimelineProps {
-  readonly payment: Payment;
-  readonly events: readonly PaymentEvent[];
+  readonly payment: PersistedPayment;
+  readonly events: readonly PersistedPaymentEvent[];
   readonly onRefresh?: () => Promise<void>;
   readonly onViewReceipt?: () => void;
   readonly onClose?: () => void;
@@ -97,7 +97,7 @@ export function PaymentProgressTimeline({
           <h3 className="timeline-route-title">{routeLabel}</h3>
           <p className="timeline-amount-meta">
             Sending <strong>{payment.expectedAmount} USDC</strong> to{" "}
-            <strong>{payment.expectedRecipient}</strong>
+            <strong>{payment.recipientAddress}</strong>
           </p>
         </div>
 
@@ -303,11 +303,7 @@ export function PaymentProgressTimeline({
                     <div className="event-item-top">
                       <span className="event-stage-tag">{evt.stage}</span>
                       <span className="event-time">
-                        {evt.completedAt
-                          ? new Date(evt.completedAt).toLocaleTimeString()
-                          : evt.startedAt
-                            ? new Date(evt.startedAt).toLocaleTimeString()
-                            : "Recorded"}
+                        {new Date(evt.completedAt ?? evt.occurredAt).toLocaleTimeString()}
                       </span>
                     </div>
                     <p className="event-msg">{evt.publicMessage}</p>

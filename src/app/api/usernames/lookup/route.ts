@@ -1,4 +1,9 @@
 import { NextResponse } from "next/server";
+import {
+  authenticateRequest,
+  AuthenticationError,
+  AuthenticationUnavailableError,
+} from "../../../../../server/auth/privy";
 import { getSqlClient } from "../../../../../server/db/client";
 
 export const dynamic = "force-dynamic";
@@ -25,6 +30,20 @@ export async function GET(request: Request) {
     );
   }
 
+  let user;
+  try {
+    user = await authenticateRequest(request);
+  } catch (error) {
+    const unavailable = error instanceof AuthenticationUnavailableError ||
+      !(error instanceof AuthenticationError);
+    return NextResponse.json(
+      { found: false, error: unavailable
+        ? "Authentication is temporarily unavailable."
+        : "Sign in before restoring an account." },
+      { status: unavailable ? 503 : 401, headers: { "cache-control": "no-store" } },
+    );
+  }
+
   try {
     const sql = getSqlClient();
     const rows = await sql`
@@ -32,7 +51,9 @@ export async function GET(request: Request) {
       FROM wallets w
       JOIN username_registry ur ON ur.user_id = w.user_id AND ur.status = 'active'
       WHERE w.network = 'stellar'
+        AND w.user_id = ${user.id}::uuid
         AND w.normalized_address = ${account}
+        AND w.verification_status = 'verified'
       LIMIT 1
     `;
 
