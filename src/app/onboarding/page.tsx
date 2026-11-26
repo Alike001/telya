@@ -37,6 +37,16 @@ type OnboardingStep = "welcome" | "username" | "creating" | "ready" | "returning
 
 type UsernameStatus = "idle" | "checking" | "available" | "taken" | "reserved" | "invalid";
 
+function decodeBase64Url(value: string): Uint8Array<ArrayBuffer> {
+  const raw = atob(value.replace(/-/g, "+").replace(/_/g, "/"));
+  return Uint8Array.from(raw, (character) => character.charCodeAt(0));
+}
+
+function encodeBase64Url(value: ArrayBuffer): string {
+  const raw = String.fromCharCode(...new Uint8Array(value));
+  return btoa(raw).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
 export default function OnboardingPage() {
   if (!process.env.NEXT_PUBLIC_PRIVY_APP_ID) {
     return (
@@ -65,6 +75,54 @@ function OnboardingFlow() {
 
   const kitRef = useRef<SmartAccountKit | null>(null);
   const configRef = useRef<SmartAccountPublicConfig | null>(null);
+  const creationRef = useRef(false);
+
+  async function bindWalletToIdentity(connected: ConnectedSmartAccount): Promise<void> {
+    const challengeResponse = await authenticatedFetch(
+      "/api/wallets/stellar/challenge",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contractId: connected.contractId, credentialId: connected.credentialId }),
+      },
+      getAccessToken,
+    );
+    if (!challengeResponse.ok) throw new Error("Wallet verification is unavailable. Your account was not linked to your sign-in.");
+    const challenge = await challengeResponse.json() as {
+      challenge: string; proofToken: string; rpId: string;
+    };
+    const credential = await navigator.credentials.get({
+      publicKey: {
+        challenge: decodeBase64Url(challenge.challenge),
+        rpId: challenge.rpId,
+        allowCredentials: [{ id: decodeBase64Url(connected.credentialId), type: "public-key" }],
+        userVerification: "required",
+        timeout: 120_000,
+      },
+    });
+    if (!(credential instanceof PublicKeyCredential) ||
+        !(credential.response instanceof AuthenticatorAssertionResponse)) {
+      throw new Error("Passkey verification was not completed.");
+    }
+    const assertion = {
+      id: credential.id,
+      response: {
+        authenticatorData: encodeBase64Url(credential.response.authenticatorData),
+        clientDataJSON: encodeBase64Url(credential.response.clientDataJSON),
+        signature: encodeBase64Url(credential.response.signature),
+      },
+    };
+    const bindResponse = await authenticatedFetch(
+      "/api/wallets/stellar/bind",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ proofToken: challenge.proofToken, assertion }),
+      },
+      getAccessToken,
+    );
+    if (!bindResponse.ok) throw new Error("Passkey ownership could not be verified for this sign-in.");
+  }
 
   useEffect(() => {
     if (authReady && !authenticated) {
@@ -232,12 +290,19 @@ function OnboardingFlow() {
       return;
     }
 
+    if (creationRef.current) return;
+    creationRef.current = true;
     try {
       const normalized = validation.normalized;
-      // 1. Authorize and deploy Stellar Smart Account
-      const created = await createSmartAccount(kit, normalized);
+      // Reuse a deployed account after a claim/network failure; never deploy a
+      // second account just because the user retries the same onboarding flow.
+      const created = account ?? await createSmartAccount(kit, normalized);
+      setAccount(created);
 
-      // 2. Persist authenticated, atomic username claim in username_registry
+      // 2. Bind the authenticated Privy user to the live on-chain passkey signer.
+      await bindWalletToIdentity(created);
+
+      // 3. Persist the atomic username claim only after wallet proof succeeds.
       const claimRes = await authenticatedFetch("/api/usernames/claim", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -259,6 +324,8 @@ function OnboardingFlow() {
       const msg = err instanceof Error ? err.message : "Passkey authorization or username claim failed.";
       setErrorMessage(msg);
       setStep("username");
+    } finally {
+      creationRef.current = false;
     }
   }
 
@@ -310,10 +377,11 @@ function OnboardingFlow() {
         setClaimedUsername(lookupData.username);
         setStep("ready");
       } else {
-        // Non-negotiable: Do not substitute fake "user" when no durable claim exists
+        await bindWalletToIdentity(connected);
+        setAccount(connected);
         setClaimedUsername("");
         setErrorMessage(
-          "No claimed handle found for this passkey account. Please claim a unique handle.",
+          "This passkey account is verified for your sign-in. Choose a unique handle to continue.",
         );
         setStep("username");
       }
