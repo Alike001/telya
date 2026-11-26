@@ -5,7 +5,6 @@ import { usePrivy } from "@privy-io/react-auth";
 import { CheckCircle2 } from "lucide-react";
 
 import { authenticatedFetch } from "../authenticated-fetch";
-import { parseNaturalLanguageIntent } from "../../domain/intent-parser";
 import {
   createBrowserSmartAccountKit,
   restoreSmartAccount,
@@ -27,6 +26,7 @@ import {
   executeConversationPayment,
   reconcileConversationPayment,
 } from "./conversation-payment-execution";
+import { resolveConversationIntent } from "./conversation-intent";
 import { PaymentReviewCard } from "./payment-review-card";
 import { VoiceComposer } from "./voice-composer";
 
@@ -178,7 +178,11 @@ function AuthenticatedConversation() {
     setIsProcessing(true);
     try {
       const saved = await persistUserMessage(text);
-      const parsed = parseNaturalLanguageIntent(text, inputMode);
+      const parsed = await resolveConversationIntent(
+        text,
+        inputMode,
+        (input, init) => authenticatedFetch(input, init, getAccessToken),
+      );
       if (parsed.kind === "balance_check") {
         const stellar = balances.find((balance) => balance.network === "stellar" && balance.status === "verified");
         appendTelya(stellar?.amount
