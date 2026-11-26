@@ -33,6 +33,7 @@ export async function GET(request: Request) {
       JOIN username_registry ur ON ur.user_id = w.user_id AND ur.status = 'active'
       WHERE w.network = 'stellar'
         AND w.normalized_address = ${account}
+        AND w.verification_status = 'verified'
       LIMIT 1
     `;
 

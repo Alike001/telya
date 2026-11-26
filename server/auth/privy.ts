@@ -1,6 +1,6 @@
 import { InvalidAuthTokenError, PrivyClient } from "@privy-io/node";
 import type { VerifyAccessTokenResponse } from "@privy-io/node";
-import { getSqlClient } from "../db/client.js";
+import { getSqlClient } from "../db/client.ts";
 
 export type AuthenticatedUser = {
   id: string;
