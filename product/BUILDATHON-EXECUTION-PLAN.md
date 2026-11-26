@@ -127,3 +127,27 @@ Give the coding agent **one task from this plan at a time**. Every task prompt m
 ## 7. Definition of done
 
 A feature is done only when its implementation, negative/failure tests, Testnet evidence, durable refresh/retry behavior, security boundaries, and user-facing documentation all agree. A green unit-test suite alone is not proof of a working financial product.
+
+
+## Live repository update — November 26, 2026, 11:18 UTC+01:00
+
+This section supersedes any older PR snapshot or task-order statement earlier in this document. The detailed, continuously maintained sources are now:
+
+- [Codex Master Playbook](CODEX-MASTER-PLAYBOOK.md) — persistent instructions from a new Codex session through final submission.
+- [Execution Tracker](EXECUTION-TRACKER.md) — exact PR heads, current review blockers, issue queue, external dependencies and next actions.
+- [Current Status](STATUS.md) — concise project-level status.
+
+### Latest PR changes inspected
+
+- **PR #48:** Codex pushed commit 481cbba0f8dbda55fe06a05fe43ca0edf9c2c9a6 to Webghost's existing PR branch. It permits only Circle's four attestation-time changes (nonce, executed finality, executed fee, expiration), requires zero source placeholders, compares immutable bytes, checks fee ceiling and exact net recipient amount. The report says 104 tests pass and one DB-backed test is skipped without DATABASE_URL; TypeScript/build/server TypeScript/diff checks passed. Remaining: migrations 0007/0008, DB-backed constraint test, real bidirectional Testnet evidence and retry proof. Keep draft.
+- **PR #46:** Prudent's latest commit c04347cf6497eb1a1be593967454e831eb3c555c removes mock username availability fallback and adds claim/lookup handlers. Code audit found the claim endpoint still trusts a browser-supplied wallet address, manufactures a Privy DID from it, and marks the wallet verified without authenticating the caller or proving account ownership. This is a critical blocker; a review comment has been posted. Keep draft.
+- **PR #49:** Prudent's latest commit 56553d6312e3185a5c9410353e540e95124ecf7d removes the timer-based fake success and adds insufficient-funds behavior. Code audit found balances are still never loaded, the confirm request does not supply valid relayer XDR/passkey authorization, handles are not resolved to verified destination addresses, fees remain hardcoded, and a hash alone may not prove verification. A review comment has been posted. Keep draft and reconcile the branch after PR #46 is secured/merged.
+- **PR #50:** This documentation PR now carries the master playbook, execution tracker, refreshed status, handoff and README links. Vercel was green on the previous check; recheck after the latest commits.
+
+Vercel authorization-required checks on the code PRs are not failed application builds and are not successful previews. The Vercel team integration must be authorized before preview/deployment evidence can be collected.
+
+### Execution ownership update
+
+Codex is the primary implementation lead for all remaining P0 issues, even where GitHub still lists a teammate as assignee. Fix existing PRs directly where write access is available; do not create duplicate PRs. Teammates may join later to contribute or independently test. Do not wait for their availability.
+
+The MoneyGram Ramps enquiry was submitted on November 25; no reply had arrived at the last user report. Hammed plans to raise the blocker with the Buildathon admin during office hours. Continue the core journey and other P0 work while waiting. Never fake MoneyGram access or compromise the Stellar smart-account design to bypass the G-address/C-address compatibility question.
