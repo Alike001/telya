@@ -158,6 +158,9 @@ beforeEach(() => {
         destination_transaction_hash: DESTINATION_HASH,
       }];
     }
+    if (query.startsWith("SELECT circle_message, circle_attestation")) {
+      return [{ circle_message: cctpMessage(), circle_attestation: `0x${"c".repeat(130)}` }];
+    }
     if (query.startsWith("SELECT burn_amount_atomic")) {
       return [{
         burn_amount: "51000000",
@@ -254,9 +257,35 @@ describe("Stellar-to-Base CCTP destination reservation", () => {
     await expect(recordStellarToBaseDestinationSubmitted({
       paymentId: PAYMENT_ID,
       destinationTransactionHash: DESTINATION_HASH,
+      rpc: mintRpc(),
     })).rejects.toThrow("Base destination has no matching attestation reservation");
     expect(mocks.transitionQuery).toContain("FOR UPDATE OF p, o");
     expect(mocks.transitionQuery).toContain("FROM payment ON CONFLICT");
+  });
+
+  it("does not record destination submission from a hash absent on Base", async () => {
+    const rpc = { request: vi.fn().mockResolvedValue(null) } as unknown as BaseRpc;
+    await expect(recordStellarToBaseDestinationSubmitted({
+      paymentId: PAYMENT_ID,
+      destinationTransactionHash: DESTINATION_HASH,
+      rpc,
+    })).rejects.toThrow("not yet visible on the network");
+    expect(mocks.transitionQuery).toBe("");
+  });
+
+  it("does not record destination submission for another Circle mint calldata", async () => {
+    const rpc = { request: vi.fn().mockResolvedValue({
+      hash: DESTINATION_HASH,
+      from: BASE_SUBMITTER,
+      to: BASE_SEPOLIA_MESSAGE_TRANSMITTER,
+      input: "0x1234",
+    }) } as unknown as BaseRpc;
+    await expect(recordStellarToBaseDestinationSubmitted({
+      paymentId: PAYMENT_ID,
+      destinationTransactionHash: DESTINATION_HASH,
+      rpc,
+    })).rejects.toThrow("does not submit the reserved Circle mint");
+    expect(mocks.transitionQuery).toBe("");
   });
 
   it("writes completion events only in the guarded state transition and tolerates recipient casing", async () => {

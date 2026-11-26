@@ -215,14 +215,16 @@ export function createBaseCctpDestinationHandler(options: { authenticate?: Authe
       const transactionHash = isRecord(body) ? parseTransactionHash(body.transactionHash, true) : null;
       if (!transactionHash) return jsonResponse({ error: "invalid_transaction_hash" }, 400);
       const config = baseEvmConfigFromEnvironment();
+      const baseRpc = createBaseRpc(config);
       await recordStellarToBaseDestinationSubmitted({
         paymentId: id,
         destinationTransactionHash: transactionHash,
+        rpc: baseRpc,
       });
       const result = await reconcileStellarToBaseDestination({
         paymentId: id,
         destinationTransactionHash: transactionHash,
-        rpc: createBaseRpc(config),
+        rpc: baseRpc,
       });
       return jsonResponse(result, result.status === "pending" ? 202 : 200);
     },

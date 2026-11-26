@@ -23,6 +23,7 @@ import {
   verifyBaseCctpMint,
   verifyBaseUsdcTransfer,
   type BaseRpc,
+  type BaseTransaction,
 } from "../base/evm.ts";
 import { getCircleCctpStatus, type CircleCctpStatus } from "../base/circle.ts";
 import {
@@ -803,6 +804,7 @@ export async function prepareStellarToBaseCctpDestination(input: {
 export async function recordStellarToBaseDestinationSubmitted(input: {
   readonly paymentId: string;
   readonly destinationTransactionHash: string;
+  readonly rpc: BaseRpc;
 }): Promise<void> {
   const paymentId = requirePaymentId(input.paymentId);
   const hash = input.destinationTransactionHash.trim().toLowerCase();
@@ -821,6 +823,29 @@ export async function recordStellarToBaseDestinationSubmitted(input: {
   }
   if (payment.destination_transaction_hash && payment.destination_transaction_hash !== hash) {
     throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "A different Base destination transaction is already recorded");
+  }
+  const evidence = await sql`
+    SELECT circle_message, circle_attestation
+    FROM base_cctp_operations
+    WHERE payment_id = ${paymentId}::uuid AND route_id = 'stellar_to_base'
+      AND status IN ('destination_prepared', 'destination_submitted')
+  `;
+  const operationEvidence = evidence[0] as Record<string, unknown> | undefined;
+  if (typeof operationEvidence?.circle_message !== "string" ||
+      typeof operationEvidence.circle_attestation !== "string") {
+    throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "Base destination has no reserved Circle attestation");
+  }
+  const transaction = await input.rpc.request<BaseTransaction | null>("eth_getTransactionByHash", [hash]);
+  if (!transaction) {
+    throw new BaseCctpPersistenceError("SUBMISSION_FAILED", "Base destination transaction is not yet visible on the network");
+  }
+  if (transaction.hash.toLowerCase() !== hash ||
+      transaction.to?.toLowerCase() !== BASE_SEPOLIA_MESSAGE_TRANSMITTER.toLowerCase() ||
+      transaction.input.toLowerCase() !== encodeCctpReceiveMessage(
+        operationEvidence.circle_message,
+        operationEvidence.circle_attestation,
+      ).toLowerCase()) {
+    throw new BaseCctpPersistenceError("DESTINATION_MISMATCH", "Base destination transaction does not submit the reserved Circle mint");
   }
   const reserved = await sql`
     WITH eligible AS MATERIALIZED (
