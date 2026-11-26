@@ -69,7 +69,12 @@ CREATE TABLE base_cctp_operations (
   CHECK (
     verified_at IS NULL OR (
       destination_transaction_hash IS NOT NULL
-      AND verified_recipient_address = expected_recipient_address
+      AND verified_recipient_address IS NOT NULL
+      AND CASE
+        WHEN route_id IN ('base_to_base', 'stellar_to_base')
+          THEN lower(verified_recipient_address) = lower(expected_recipient_address)
+        ELSE verified_recipient_address = expected_recipient_address
+      END
       AND verified_amount_atomic = expected_amount_atomic
     )
   ),

@@ -85,10 +85,14 @@ function mintRpc(): BaseRpc {
   };
 }
 
-function cctpMessage(): string {
+function cctpMessage(options: {
+  readonly minFinalityThreshold?: number;
+  readonly finalityThresholdExecuted?: number;
+} = {}): string {
   const header = [
     u32(1), u32(27), u32(6), "0".repeat(64), "1".repeat(64), "2".repeat(64),
-    "0".repeat(64), u32(2_000), u32(2_000),
+    "0".repeat(64), u32(options.minFinalityThreshold ?? 2_000),
+    u32(options.finalityThresholdExecuted ?? 2_000),
   ].join("");
   const body = [
     u32(1), "3".repeat(64), BASE_RECIPIENT.slice(2).padStart(64, "0"),
@@ -212,5 +216,30 @@ describe("Stellar-to-Base CCTP destination reservation", () => {
       rpc: mintRpc(),
     })).rejects.toThrow("changed while destination verification was being recorded");
     expect(mocks.completionQuery).toContain("FROM payment CROSS JOIN (VALUES");
+  });
+
+  it.each([
+    { name: "Fast Transfer", minFinalityThreshold: 1_000, finalityThresholdExecuted: 1_000 },
+    { name: "non-Standard", minFinalityThreshold: 3_000, finalityThresholdExecuted: 3_000 },
+    { name: "below Standard execution", minFinalityThreshold: 2_000, finalityThresholdExecuted: 1_000 },
+  ])("rejects Stellar source attestations with $name finality", async ({
+    minFinalityThreshold,
+    finalityThresholdExecuted,
+  }) => {
+    mocks.getCircleCctpStatus.mockResolvedValue({
+      status: "complete",
+      sourceTransactionHash: STELLAR_SOURCE_HASH,
+      message: cctpMessage({ minFinalityThreshold, finalityThresholdExecuted }),
+      attestation: `0x${"c".repeat(130)}`,
+      messageHash: "1".repeat(64),
+      attestationHash: "2".repeat(64),
+    });
+
+    await expect(prepareStellarToBaseCctpDestination({
+      paymentId: PAYMENT_ID,
+      stellarSourceTransactionHash: STELLAR_SOURCE_HASH,
+      stellarRpc: { getTransaction: vi.fn() } as never,
+      config,
+    })).rejects.toThrow("Circle attestation does not match the persisted Stellar burn intent");
   });
 });

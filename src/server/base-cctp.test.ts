@@ -7,6 +7,7 @@ vi.mock("server-only", () => ({}));
 
 import {
   BASE_SEPOLIA_MESSAGE_TRANSMITTER,
+  BASE_SEPOLIA_TOKEN_MESSENGER,
   BASE_SEPOLIA_USDC,
   type BaseRpc,
   type BaseTransactionReceipt,
@@ -16,6 +17,7 @@ import { verifyBaseCctpSource } from "./base-cctp";
 const SOURCE_HASH = `0x${"a".repeat(64)}`;
 const SOURCE_WALLET = `0x${"b".repeat(40)}`;
 const STELLAR_FORWARDER = StrKey.encodeContract(Buffer.alloc(32, 0x44));
+const STELLAR_TOKEN_MESSENGER = StrKey.encodeContract(Buffer.alloc(32, 0x22));
 const MESSAGE_TOPIC =
   "0x8c5261668696ce22758910d05bab8f186d6eb247ceac2af2e82c7dc17669b036";
 
@@ -27,13 +29,29 @@ function word(value: bigint): string {
   return value.toString(16).padStart(64, "0");
 }
 
-function buildCctpMessage(amount: bigint, maxFee: bigint): string {
+function contractAddressAsBytes32(address: string): string {
+  return Buffer.from(StrKey.decodeContract(address)).toString("hex");
+}
+
+function buildCctpMessage(
+  amount: bigint,
+  maxFee: bigint,
+  options: {
+    readonly sender?: string;
+    readonly recipient?: string;
+    readonly minFinalityThreshold?: number;
+    readonly finalityThresholdExecuted?: number;
+    readonly expirationBlock?: bigint;
+  } = {},
+): string {
   const header = [
     uint32(1), uint32(6), uint32(27),
     "0".repeat(64),
-    "1".repeat(64),
-    "2".repeat(64),
-    "0".repeat(64), uint32(2_000), uint32(2_000),
+    options.sender ?? BASE_SEPOLIA_TOKEN_MESSENGER.slice(2).toLowerCase().padStart(64, "0"),
+    options.recipient ?? contractAddressAsBytes32(STELLAR_TOKEN_MESSENGER),
+    "0".repeat(64),
+    uint32(options.minFinalityThreshold ?? 2_000),
+    uint32(options.finalityThresholdExecuted ?? 0),
   ].join("");
   const body = [
     uint32(1),
@@ -41,9 +59,14 @@ function buildCctpMessage(amount: bigint, maxFee: bigint): string {
     Buffer.from(StrKey.decodeContract(STELLAR_FORWARDER)).toString("hex"),
     word(amount),
     `0x${SOURCE_WALLET.slice(2).padStart(64, "0")}`.slice(2),
-    word(maxFee), word(0n), word(0n), word(0n),
+    word(maxFee), word(0n), word(options.expirationBlock ?? 0n), word(0n),
   ].join("");
   return `0x${header}${body}`;
+}
+
+function attestCctpMessage(sourceMessage: string, executedFinality = 2_000): string {
+  const bytes = sourceMessage.slice(2);
+  return `0x${bytes.slice(0, 288)}${uint32(executedFinality)}${bytes.slice(296, 688)}${word(123_456n)}${bytes.slice(752)}`;
 }
 
 function sourceRpc(message: string): BaseRpc {
@@ -69,14 +92,16 @@ function sourceRpc(message: string): BaseRpc {
 
 describe("Base-to-Stellar CCTP source verification", () => {
   it("accepts only the finalized Base message Circle attested for the reserved intent", async () => {
-    const message = buildCctpMessage(5_100_000n, 100_000n);
+    const sourceMessage = buildCctpMessage(5_100_000n, 100_000n);
+    const message = attestCctpMessage(sourceMessage);
     const result = await verifyBaseCctpSource({
-      rpc: sourceRpc(message),
+      rpc: sourceRpc(sourceMessage),
       sourceTransactionHash: SOURCE_HASH,
       sourceAddress: SOURCE_WALLET,
       burnAmount: "5.1",
       maxFee: "0.1",
       expectedMintRecipient: STELLAR_FORWARDER,
+      expectedDestinationTokenMessenger: STELLAR_TOKEN_MESSENGER,
       fetchCircle: vi.fn().mockResolvedValue({
         status: "complete",
         sourceTransactionHash: SOURCE_HASH,
@@ -94,14 +119,120 @@ describe("Base-to-Stellar CCTP source verification", () => {
   });
 
   it("rejects a callback whose reserved max fee differs from Circle's attested message", async () => {
-    const message = buildCctpMessage(5_100_000n, 100_000n);
+    const sourceMessage = buildCctpMessage(5_100_000n, 100_000n);
+    const message = attestCctpMessage(sourceMessage);
     const result = await verifyBaseCctpSource({
-      rpc: sourceRpc(message),
+      rpc: sourceRpc(sourceMessage),
       sourceTransactionHash: SOURCE_HASH,
       sourceAddress: SOURCE_WALLET,
       burnAmount: "5.1",
       maxFee: "0.2",
       expectedMintRecipient: STELLAR_FORWARDER,
+      expectedDestinationTokenMessenger: STELLAR_TOKEN_MESSENGER,
+      fetchCircle: vi.fn().mockResolvedValue({
+        status: "complete",
+        sourceTransactionHash: SOURCE_HASH,
+        message,
+        attestation: `0x${"c".repeat(130)}`,
+        messageHash: "1".repeat(64),
+        attestationHash: "2".repeat(64),
+      }),
+    });
+    expect(result.status).toBe("mismatch");
+  });
+
+  it("rejects an arbitrary MessageTransmitter message not sent by Base TokenMessenger", async () => {
+    const sourceMessage = buildCctpMessage(5_100_000n, 100_000n, {
+      sender: `0x${"9".repeat(64)}`.slice(2),
+    });
+    const message = attestCctpMessage(sourceMessage);
+    const result = await verifyBaseCctpSource({
+      rpc: sourceRpc(sourceMessage),
+      sourceTransactionHash: SOURCE_HASH,
+      sourceAddress: SOURCE_WALLET,
+      burnAmount: "5.1",
+      maxFee: "0.1",
+      expectedMintRecipient: STELLAR_FORWARDER,
+      expectedDestinationTokenMessenger: STELLAR_TOKEN_MESSENGER,
+      fetchCircle: vi.fn().mockResolvedValue({
+        status: "complete",
+        sourceTransactionHash: SOURCE_HASH,
+        message,
+        attestation: `0x${"c".repeat(130)}`,
+        messageHash: "1".repeat(64),
+        attestationHash: "2".repeat(64),
+      }),
+    });
+    expect(result.status).toBe("mismatch");
+  });
+
+  it("rejects a source message with the wrong Base TokenMessenger header sender", async () => {
+    const sourceMessage = buildCctpMessage(5_100_000n, 100_000n, {
+      sender: `0x${"0".repeat(24)}${"3".repeat(40)}`.slice(2),
+    });
+    const message = attestCctpMessage(sourceMessage);
+    const result = await verifyBaseCctpSource({
+      rpc: sourceRpc(sourceMessage),
+      sourceTransactionHash: SOURCE_HASH,
+      sourceAddress: SOURCE_WALLET,
+      burnAmount: "5.1",
+      maxFee: "0.1",
+      expectedMintRecipient: STELLAR_FORWARDER,
+      expectedDestinationTokenMessenger: STELLAR_TOKEN_MESSENGER,
+      fetchCircle: vi.fn().mockResolvedValue({
+        status: "complete",
+        sourceTransactionHash: SOURCE_HASH,
+        message,
+        attestation: `0x${"c".repeat(130)}`,
+        messageHash: "1".repeat(64),
+        attestationHash: "2".repeat(64),
+      }),
+    });
+    expect(result.status).toBe("mismatch");
+  });
+
+  it("rejects a source message addressed to the wrong Stellar TokenMessenger", async () => {
+    const sourceMessage = buildCctpMessage(5_100_000n, 100_000n, {
+      recipient: "f".repeat(64),
+    });
+    const message = attestCctpMessage(sourceMessage);
+    const result = await verifyBaseCctpSource({
+      rpc: sourceRpc(sourceMessage),
+      sourceTransactionHash: SOURCE_HASH,
+      sourceAddress: SOURCE_WALLET,
+      burnAmount: "5.1",
+      maxFee: "0.1",
+      expectedMintRecipient: STELLAR_FORWARDER,
+      expectedDestinationTokenMessenger: STELLAR_TOKEN_MESSENGER,
+      fetchCircle: vi.fn().mockResolvedValue({
+        status: "complete",
+        sourceTransactionHash: SOURCE_HASH,
+        message,
+        attestation: `0x${"c".repeat(130)}`,
+        messageHash: "1".repeat(64),
+        attestationHash: "2".repeat(64),
+      }),
+    });
+    expect(result.status).toBe("mismatch");
+  });
+
+  it.each([
+    { name: "Fast Transfer minimum", minFinalityThreshold: 1_000, finalityThresholdExecuted: 1_000 },
+    { name: "non-Standard minimum", minFinalityThreshold: 3_000, finalityThresholdExecuted: 3_000 },
+    { name: "execution below Standard finality", minFinalityThreshold: 2_000, finalityThresholdExecuted: 1_000 },
+  ])("rejects $name finality", async ({ minFinalityThreshold, finalityThresholdExecuted }) => {
+    const sourceMessage = buildCctpMessage(5_100_000n, 100_000n, {
+      minFinalityThreshold,
+    });
+    const message = attestCctpMessage(sourceMessage, finalityThresholdExecuted);
+    const result = await verifyBaseCctpSource({
+      rpc: sourceRpc(sourceMessage),
+      sourceTransactionHash: SOURCE_HASH,
+      sourceAddress: SOURCE_WALLET,
+      burnAmount: "5.1",
+      maxFee: "0.1",
+      expectedMintRecipient: STELLAR_FORWARDER,
+      expectedDestinationTokenMessenger: STELLAR_TOKEN_MESSENGER,
       fetchCircle: vi.fn().mockResolvedValue({
         status: "complete",
         sourceTransactionHash: SOURCE_HASH,
