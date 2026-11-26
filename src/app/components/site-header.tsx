@@ -1,32 +1,27 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import {
-  ArrowLeftRight,
   CheckCircle2,
   ChevronDown,
-  Clock,
-  KeyRound,
-  LayoutDashboard,
   Menu,
   ShieldCheck,
   Terminal,
-  Users,
   X,
 } from "lucide-react";
 
 type NavItem = {
   readonly label: string;
   readonly href: string;
-  readonly icon: React.ComponentType<{ className?: string }>;
 };
 
 const NAV_ITEMS: readonly NavItem[] = [
-  { label: "Overview", href: "#top", icon: LayoutDashboard },
-  { label: "Send & Receive", href: "#route-preview", icon: ArrowLeftRight },
-  { label: "Agent Pass", href: "#agent-pass", icon: KeyRound },
-  { label: "Activity", href: "#activity", icon: Clock },
-  { label: "Contacts", href: "#contacts", icon: Users },
+  { label: "Overview", href: "#top" },
+  { label: "Send & Receive", href: "#route-preview" },
+  { label: "Agent Pass", href: "#agent-pass" },
+  { label: "Activity", href: "#activity" },
+  { label: "Contacts", href: "#contacts" },
 ];
 
 export function SiteHeader() {
@@ -99,6 +94,15 @@ export function SiteHeader() {
               System health
             </a>
 
+            {/* Direct Onboarding CTA */}
+            <Link
+              href="/onboarding"
+              className="header-onboard-link"
+              aria-label="Create Telya account"
+            >
+              Get Started
+            </Link>
+
             {/* Mobile Hamburger Toggle */}
             <button
               type="button"
@@ -121,7 +125,6 @@ export function SiteHeader() {
           <div className="mobile-drawer" role="dialog" aria-modal="true" aria-label="Mobile navigation">
             <nav className="mobile-nav-list" aria-label="Mobile navigation list">
               {NAV_ITEMS.map((item) => {
-                const Icon = item.icon;
                 const isActive = activeItem === item.label;
                 return (
                   <a
@@ -133,7 +136,6 @@ export function SiteHeader() {
                       setMobileMenuOpen(false);
                     }}
                   >
-                    <Icon className="nav-icon" />
                     <span>{item.label}</span>
                   </a>
                 );

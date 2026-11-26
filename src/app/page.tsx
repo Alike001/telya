@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { SiteHeader } from "./components/site-header";
 import { MobileBottomDock } from "./components/mobile-bottom-dock";
@@ -25,11 +26,13 @@ export default function HomePage() {
             outcome.
           </p>
           <div className="hero-actions">
-            <a className="primary-action" href="#route-preview">
-              <span>See the route preview</span>
+            <Link className="primary-action" href="/onboarding">
+              <span>Get started with Passkey</span>
               <ArrowRight className="inline-arrow" aria-hidden="true" />
+            </Link>
+            <a className="secondary-action" href="#route-preview">
+              <span>See the route preview</span>
             </a>
-            <span className="build-note">Public Build Week shell</span>
           </div>
         </div>
 
