@@ -496,7 +496,7 @@ export default function OnboardingPage() {
                 </div>
                 <div>
                   <span className="detail-label">Initial Balance</span>
-                  <span className="detail-val tabular">$0.00 USDC</span>
+                  <span className="detail-val tabular">Balance unavailable</span>
                 </div>
                 <div>
                   <span className="detail-label">Primary Chain</span>
