@@ -114,7 +114,7 @@ describe("Deterministic Route Resolver", () => {
   });
 
   it("returns unavailable status when explicitly chosen source wallet has insufficient balance", () => {
-    const decision = resolvePaymentRouteDecision({
+    const decisionStellar = resolvePaymentRouteDecision({
       paymentIntentId: "intent_insufficient_stellar",
       amount: "20.00",
       recipientInput: "@bob",
@@ -122,9 +122,36 @@ describe("Deterministic Route Resolver", () => {
       userBalances: { stellarUsdc: "5.00", baseUsdc: "100.00" },
     });
 
+    expect(decisionStellar.status).toBe("unavailable");
+    if (decisionStellar.status === "unavailable") {
+      expect(decisionStellar.unavailabilityReason).toContain("Insufficient Stellar balance");
+    }
+
+    const decisionBase = resolvePaymentRouteDecision({
+      paymentIntentId: "intent_insufficient_base",
+      amount: "30.00",
+      recipientInput: "@bob",
+      requestedSourceNetwork: "base",
+      userBalances: { stellarUsdc: "100.00", baseUsdc: "10.00" },
+    });
+
+    expect(decisionBase.status).toBe("unavailable");
+    if (decisionBase.status === "unavailable") {
+      expect(decisionBase.unavailabilityReason).toContain("Insufficient Base balance");
+    }
+  });
+
+  it("fails closed with 0 balances across both networks", () => {
+    const decision = resolvePaymentRouteDecision({
+      paymentIntentId: "intent_zero_balance",
+      amount: "1.00",
+      recipientInput: "@alice",
+      userBalances: { stellarUsdc: "0.00", baseUsdc: "0.00" },
+    });
+
     expect(decision.status).toBe("unavailable");
     if (decision.status === "unavailable") {
-      expect(decision.unavailabilityReason).toContain("Insufficient Stellar balance");
+      expect(decision.unavailabilityReason).toContain("Insufficient funds");
     }
   });
 });

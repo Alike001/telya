@@ -168,6 +168,18 @@ export function ConversationalHome() {
           const checkRes = await fetch(
             `/api/usernames/check?username=${encodeURIComponent(handle)}`,
           );
+          if (!checkRes.ok) {
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: `unresolved_${Date.now()}`,
+                sender: "telya",
+                text: `Could not verify recipient ${parsed.recipientInput} at this time. Please retry in a moment.`,
+                timestamp: now,
+              },
+            ]);
+            return;
+          }
           const checkData = await checkRes.json();
           // If available = true, the handle is unregistered / unknown
           if (checkData.available === true) {
@@ -184,6 +196,16 @@ export function ConversationalHome() {
           }
         } catch {
           // Fail closed if registry is unreachable
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: `unresolved_${Date.now()}`,
+              sender: "telya",
+              text: `Network error verifying recipient ${parsed.recipientInput}. Please check your connection and retry.`,
+              timestamp: now,
+            },
+          ]);
+          return;
         }
       }
 
