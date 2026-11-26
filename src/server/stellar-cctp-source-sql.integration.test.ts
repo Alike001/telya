@@ -6,7 +6,12 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-import { recordStellarCctpCompletion, recordStellarCctpSource } from "./stellar-cctp";
+import {
+  recordStellarCctpCompletion,
+  recordStellarCctpDestinationFailure,
+  recordStellarCctpDestinationSubmitted,
+  recordStellarCctpSource,
+} from "./stellar-cctp";
 
 function useNeonHttpsTransport(): void {
   // Keep the HTTPS transport workaround confined to database tests.
@@ -62,6 +67,33 @@ describe("Stellar CCTP guarded SQL on PostgreSQL", () => {
         recipientAmount: "5",
         recipientAmountAtomic: "50000000",
       })).rejects.toThrow("changed while destination completion was being recorded");
+    },
+    30_000,
+  );
+
+  it.skipIf(!process.env.DATABASE_URL)(
+    "parses guarded destination submission and failure without creating events",
+    async () => {
+      useNeonHttpsTransport();
+      const common = {
+        paymentId: randomUUID(),
+        sourceTransactionHash: "a".repeat(64),
+        messageHash: "b".repeat(64),
+        attestationHash: "c".repeat(64),
+        destinationTransactionHash: "d".repeat(64),
+        destinationLedger: 12345,
+        recipientAddress: "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+        recipientAmount: "5",
+        recipientAmountAtomic: "50000000",
+      };
+      await expect(recordStellarCctpDestinationSubmitted({
+        ...common,
+        submissionLeaseId: randomUUID(),
+      })).rejects.toThrow("changed while destination submission was being recorded");
+      await expect(recordStellarCctpDestinationFailure({
+        ...common,
+        reason: "destination_mismatch",
+      })).rejects.toThrow("changed while destination failure was being recorded");
     },
     30_000,
   );

@@ -79,6 +79,13 @@ function fakeSql(state: OperationState) {
       }];
     }
     if (query.startsWith("WITH eligible AS MATERIALIZED")) {
+      if (query.includes("o SET status = 'destination_submitted'")) {
+        state.status = "destination_submitted";
+        state.leaseExpired = false;
+      }
+      if (query.includes("o SET status = 'completed'")) {
+        state.status = "completed";
+      }
       return [{ id: PAYMENT_ID }];
     }
     if (

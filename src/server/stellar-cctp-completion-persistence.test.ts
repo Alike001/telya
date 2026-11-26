@@ -9,7 +9,11 @@ const mocks = vi.hoisted(() => ({
 vi.mock("server-only", () => ({}));
 vi.mock("../../server/db/client", () => ({ getSqlClient: mocks.getSqlClient }));
 
-import { recordStellarCctpCompletion } from "./stellar-cctp";
+import {
+  recordStellarCctpCompletion,
+  recordStellarCctpDestinationFailure,
+  recordStellarCctpDestinationSubmitted,
+} from "./stellar-cctp";
 
 const paymentId = "11111111-1111-4111-8111-111111111111";
 const input = {
@@ -23,6 +27,11 @@ const input = {
   recipientAmount: "5",
   recipientAmountAtomic: "50000000",
 };
+const submissionInput = {
+  ...input,
+  submissionLeaseId: "22222222-2222-4222-8222-222222222222",
+};
+const failureInput = { ...input, reason: "destination_mismatch" };
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -48,5 +57,27 @@ describe("Base-to-Stellar destination completion persistence", () => {
   it("reports completion only after both guarded rows were returned", async () => {
     mocks.rows = [{ id: paymentId }];
     await expect(recordStellarCctpCompletion(input)).resolves.toBeUndefined();
+  });
+});
+
+describe("Base-to-Stellar destination progress persistence", () => {
+  it("does not report submission after the lease or Payment changed", async () => {
+    await expect(recordStellarCctpDestinationSubmitted(submissionInput))
+      .rejects.toThrow("changed while destination submission was being recorded");
+    expect(mocks.query).toContain("o.submission_lease_id = ");
+    expect(mocks.query).toContain("FROM payment p JOIN operation o ON o.payment_id = p.id");
+  });
+
+  it("does not mark a concurrently completed Payment failed", async () => {
+    await expect(recordStellarCctpDestinationFailure(failureInput))
+      .rejects.toThrow("changed while destination failure was being recorded");
+    expect(mocks.query).toContain("p.status IN ('source_confirmed', 'awaiting_attestation', 'destination_submitted')");
+    expect(mocks.query).toContain("FROM payment p JOIN operation o ON o.payment_id = p.id");
+  });
+
+  it("accepts guarded submission and failure transitions", async () => {
+    mocks.rows = [{ id: paymentId }];
+    await expect(recordStellarCctpDestinationSubmitted(submissionInput)).resolves.toBeUndefined();
+    await expect(recordStellarCctpDestinationFailure(failureInput)).resolves.toBeUndefined();
   });
 });

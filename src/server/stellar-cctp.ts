@@ -333,6 +333,144 @@ export async function recordStellarCctpCompletion(input: {
   }
 }
 
+/** Record submission only when the leased operation and Payment still match. */
+export async function recordStellarCctpDestinationSubmitted(input: {
+  readonly paymentId: string;
+  readonly sourceTransactionHash: string;
+  readonly messageHash: string;
+  readonly attestationHash: string;
+  readonly destinationTransactionHash: string;
+  readonly destinationLedger: number;
+  readonly submissionLeaseId: string;
+  readonly recipientAddress: string;
+  readonly recipientAmount: string;
+  readonly recipientAmountAtomic: string;
+}): Promise<void> {
+  const sql = getSqlClient();
+  const rows = await sql`
+    WITH eligible AS MATERIALIZED (
+      SELECT p.id
+      FROM payments p
+      JOIN stellar_cctp_operations o ON o.payment_id = p.id
+      WHERE p.id = ${input.paymentId}::uuid AND p.route_id = 'base_to_stellar'
+        AND p.status IN ('source_confirmed', 'awaiting_attestation', 'destination_submitted')
+        AND p.recipient_address = ${input.recipientAddress}
+        AND p.expected_recipient_amount = ${input.recipientAmount}::numeric
+        AND (p.destination_transaction_hash IS NULL
+          OR p.destination_transaction_hash = ${input.destinationTransactionHash})
+        AND o.route_id = 'base_to_stellar'
+        AND o.status IN ('destination_prepared', 'destination_submitting')
+        AND o.submission_lease_id = ${input.submissionLeaseId}::uuid
+        AND o.source_transaction_hash = ${input.sourceTransactionHash}
+        AND o.circle_message_hash = ${input.messageHash}
+        AND o.circle_attestation_hash = ${input.attestationHash}
+        AND o.destination_transaction_hash = ${input.destinationTransactionHash}
+        AND o.expected_recipient_address = ${input.recipientAddress}
+        AND o.expected_amount_atomic = ${input.recipientAmountAtomic}::numeric
+      FOR UPDATE OF p, o
+    ), operation AS (
+      UPDATE stellar_cctp_operations o SET status = 'destination_submitted',
+        destination_ledger = ${input.destinationLedger},
+        submission_lease_id = NULL, submission_lease_expires_at = NULL,
+        updated_at = now()
+      FROM eligible e WHERE o.payment_id = e.id
+      RETURNING o.payment_id
+    ), payment AS (
+      UPDATE payments p SET status = 'destination_submitted',
+        source_transaction_hash = ${input.sourceTransactionHash},
+        destination_transaction_hash = ${input.destinationTransactionHash},
+        updated_at = now()
+      FROM operation o WHERE p.id = o.payment_id
+      RETURNING p.id
+    ), event AS (
+      INSERT INTO payment_events (
+        payment_id, event_key, stage, status, network, transaction_hash,
+        public_message, completed_at
+      )
+      SELECT p.id, 'stellar_cctp_destination_submitted', 'destination_submission',
+        'destination_submitted', 'stellar', ${input.destinationTransactionHash},
+        'Circle attestation was accepted and the Stellar delivery was submitted.', now()
+      FROM payment p JOIN operation o ON o.payment_id = p.id
+      ON CONFLICT (payment_id, event_key) DO NOTHING
+      RETURNING payment_id
+    )
+    SELECT p.id FROM payment p JOIN operation o ON o.payment_id = p.id
+  `;
+  if (rows.length === 0) {
+    throw new StellarCctpPersistenceError(
+      "DESTINATION_IN_PROGRESS",
+      "Stellar CCTP payment changed while destination submission was being recorded",
+    );
+  }
+}
+
+/** Persist a verified destination mismatch without changing completed money state. */
+export async function recordStellarCctpDestinationFailure(input: {
+  readonly paymentId: string;
+  readonly sourceTransactionHash: string;
+  readonly messageHash: string;
+  readonly attestationHash: string;
+  readonly destinationTransactionHash: string;
+  readonly recipientAddress: string;
+  readonly recipientAmount: string;
+  readonly recipientAmountAtomic: string;
+  readonly reason: string;
+}): Promise<void> {
+  const sql = getSqlClient();
+  const rows = await sql`
+    WITH eligible AS MATERIALIZED (
+      SELECT p.id
+      FROM payments p
+      JOIN stellar_cctp_operations o ON o.payment_id = p.id
+      WHERE p.id = ${input.paymentId}::uuid AND p.route_id = 'base_to_stellar'
+        AND p.status IN ('source_confirmed', 'awaiting_attestation', 'destination_submitted')
+        AND p.recipient_address = ${input.recipientAddress}
+        AND p.expected_recipient_amount = ${input.recipientAmount}::numeric
+        AND (p.destination_transaction_hash IS NULL
+          OR p.destination_transaction_hash = ${input.destinationTransactionHash})
+        AND o.route_id = 'base_to_stellar'
+        AND o.status IN ('destination_prepared', 'destination_submitted')
+        AND o.source_transaction_hash = ${input.sourceTransactionHash}
+        AND o.circle_message_hash = ${input.messageHash}
+        AND o.circle_attestation_hash = ${input.attestationHash}
+        AND o.destination_transaction_hash = ${input.destinationTransactionHash}
+        AND o.expected_recipient_address = ${input.recipientAddress}
+        AND o.expected_amount_atomic = ${input.recipientAmountAtomic}::numeric
+      FOR UPDATE OF p, o
+    ), operation AS (
+      UPDATE stellar_cctp_operations o SET status = 'failed',
+        failure_code = 'DESTINATION_MISMATCH', updated_at = now()
+      FROM eligible e WHERE o.payment_id = e.id
+      RETURNING o.payment_id
+    ), payment AS (
+      UPDATE payments p SET status = 'failed', failure_code = 'DESTINATION_MISMATCH',
+        failure_message = 'Stellar finalized without exact recipient and amount proof.',
+        updated_at = now()
+      FROM operation o WHERE p.id = o.payment_id
+      RETURNING p.id
+    ), event AS (
+      INSERT INTO payment_events (
+        payment_id, event_key, stage, status, network, transaction_hash,
+        public_message, debug_message, error_code, completed_at
+      )
+      SELECT p.id, 'stellar_cctp_destination_mismatch', 'failure',
+        'failed', 'stellar', ${input.destinationTransactionHash},
+        'The Stellar delivery could not be verified. The payment is not complete.',
+        ${input.reason}, 'DESTINATION_MISMATCH', now()
+      FROM payment p JOIN operation o ON o.payment_id = p.id
+      ON CONFLICT (payment_id, event_key) DO NOTHING
+      RETURNING payment_id
+    )
+    SELECT p.id FROM payment p JOIN operation o ON o.payment_id = p.id
+  `;
+  if (rows.length === 0) {
+    throw new StellarCctpPersistenceError(
+      "INVALID_PAYMENT_STATE",
+      "Stellar CCTP payment changed while destination failure was being recorded",
+    );
+  }
+}
+
 /**
  * Reconciles a Stellar->Base source burn into canonical PaymentEvents. The
  * resulting state is source_confirmed only; Circle/Base must still attest,
@@ -612,42 +750,18 @@ export async function settleBaseToStellarCctp(input: {
       );
     }
     destinationLedger = submitted.ledger;
-    await sql.transaction([
-      sql`
-        UPDATE stellar_cctp_operations
-        SET status = 'destination_submitted',
-          destination_ledger = ${destinationLedger},
-          submission_lease_id = NULL, submission_lease_expires_at = NULL,
-          updated_at = now()
-        WHERE payment_id = ${paymentId}::uuid
-          AND status IN ('destination_prepared', 'destination_submitting')
-          AND destination_transaction_hash = ${destinationTransactionHash}
-      `,
-      sql`
-        UPDATE payments
-        SET status = 'destination_submitted',
-          source_transaction_hash = ${sourceTransactionHash},
-          destination_transaction_hash = ${destinationTransactionHash},
-          updated_at = now()
-        WHERE id = ${paymentId}::uuid AND route_id = 'base_to_stellar'
-          AND status IN (
-            'authorized', 'submitted', 'source_confirmed',
-            'awaiting_attestation', 'destination_submitted'
-          )
-      `,
-      sql`
-        INSERT INTO payment_events (
-          payment_id, event_key, stage, status, network, transaction_hash,
-          public_message, completed_at
-        ) VALUES (
-          ${paymentId}::uuid, 'stellar_cctp_destination_submitted',
-          'destination_submission', 'destination_submitted', 'stellar',
-          ${destinationTransactionHash},
-          'Circle attestation was accepted and the Stellar delivery was submitted.',
-          now()
-        ) ON CONFLICT (payment_id, event_key) DO NOTHING
-      `,
-    ]);
+    await recordStellarCctpDestinationSubmitted({
+      paymentId,
+      sourceTransactionHash,
+      messageHash,
+      attestationHash,
+      destinationTransactionHash,
+      destinationLedger,
+      submissionLeaseId,
+      recipientAddress: expectedRecipient,
+      recipientAmount: String(payment.expected_amount),
+      recipientAmountAtomic: expectedAmountAtomic,
+    });
   }
 
   const expectedAmount = String(payment.expected_amount);
@@ -660,32 +774,17 @@ export async function settleBaseToStellarCctp(input: {
   });
   if (verification.status !== "verified") {
     if (verification.status === "pending") return { status: "in_progress" };
-    await sql.transaction([
-      sql`
-        UPDATE stellar_cctp_operations
-        SET status = 'failed', failure_code = 'DESTINATION_MISMATCH', updated_at = now()
-        WHERE payment_id = ${paymentId}::uuid
-      `,
-      sql`
-        UPDATE payments
-        SET status = 'failed', failure_code = 'DESTINATION_MISMATCH',
-          failure_message = 'Stellar finalized without exact recipient and amount proof.',
-          updated_at = now()
-        WHERE id = ${paymentId}::uuid
-      `,
-      sql`
-        INSERT INTO payment_events (
-          payment_id, event_key, stage, status, network, transaction_hash,
-          public_message, debug_message, error_code, completed_at
-        ) VALUES (
-          ${paymentId}::uuid, 'stellar_cctp_destination_mismatch', 'failure',
-          'failed', 'stellar', ${destinationTransactionHash},
-          'The Stellar delivery could not be verified. The payment is not complete.',
-          ${verification.status === "mismatch" ? verification.reason : "transaction_failed"},
-          'DESTINATION_MISMATCH', now()
-        ) ON CONFLICT (payment_id, event_key) DO NOTHING
-      `,
-    ]);
+    await recordStellarCctpDestinationFailure({
+      paymentId,
+      sourceTransactionHash,
+      messageHash,
+      attestationHash,
+      destinationTransactionHash,
+      recipientAddress: expectedRecipient,
+      recipientAmount: expectedAmount,
+      recipientAmountAtomic: expectedAmountAtomic,
+      reason: verification.status === "mismatch" ? verification.reason : "transaction_failed",
+    });
     throw new StellarCctpPersistenceError(
       "DESTINATION_MISMATCH",
       "Stellar destination recipient or amount verification failed",
