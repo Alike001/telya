@@ -13,6 +13,8 @@ const mocks = vi.hoisted(() => ({
   destinationHash: null as string | null,
   completionRows: true,
   completionQuery: "",
+  transitionRows: true,
+  transitionQuery: "",
 }));
 
 vi.mock("server-only", () => ({}));
@@ -28,6 +30,7 @@ vi.mock("../base/circle", async (importOriginal) => ({
 
 import {
   prepareStellarToBaseCctpDestination,
+  recordStellarToBaseDestinationSubmitted,
   reconcileStellarToBaseDestination,
 } from "./base-cctp";
 import {
@@ -109,6 +112,8 @@ beforeEach(() => {
   mocks.destinationHash = null;
   mocks.completionRows = true;
   mocks.completionQuery = "";
+  mocks.transitionRows = true;
+  mocks.transitionQuery = "";
   mocks.reconcileStellarCctpSource.mockResolvedValue({ status: "source_confirmed" });
   mocks.getCircleCctpStatus.mockResolvedValue({
     status: "complete",
@@ -155,10 +160,16 @@ beforeEach(() => {
       }];
     }
     if (query.includes("UPDATE base_cctp_operations SET status = 'destination_prepared'")) {
+      mocks.transitionQuery = query;
+      if (!mocks.transitionRows) return [];
       if (mocks.status === "destination_prepared" && mocks.leaseExpiresAt > Date.now()) return [];
       mocks.status = "destination_prepared";
       mocks.leaseExpiresAt = Date.now() + 60_000;
       return [{ payment_id: PAYMENT_ID }];
+    }
+    if (query.includes("UPDATE base_cctp_operations SET status = 'destination_submitted'")) {
+      mocks.transitionQuery = query;
+      return mocks.transitionRows ? [{ id: PAYMENT_ID }] : [];
     }
     if (query.startsWith("WITH eligible AS MATERIALIZED")) {
       mocks.completionQuery = query;
@@ -188,6 +199,29 @@ describe("Stellar-to-Base CCTP destination reservation", () => {
     expect(duplicate).toEqual({ status: "in_progress" });
     expect(first.transactionTo).toBe("0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275");
     expect(first.transactionData).toMatch(/^0x57ecfd28/);
+    expect(mocks.transitionQuery).toContain("FROM payment ON CONFLICT");
+  });
+
+  it("does not return a mint request when the guarded payment update loses a race", async () => {
+    mocks.transitionRows = false;
+    await expect(prepareStellarToBaseCctpDestination({
+      paymentId: PAYMENT_ID,
+      stellarSourceTransactionHash: STELLAR_SOURCE_HASH,
+      stellarRpc: { getTransaction: vi.fn() } as never,
+      config,
+    })).resolves.toEqual({ status: "in_progress" });
+    expect(mocks.transitionQuery).toContain("FOR UPDATE OF p, o");
+    expect(mocks.transitionQuery).toContain("FROM payment ON CONFLICT");
+  });
+
+  it("does not record a destination submission event when the guarded payment update loses a race", async () => {
+    mocks.transitionRows = false;
+    await expect(recordStellarToBaseDestinationSubmitted({
+      paymentId: PAYMENT_ID,
+      destinationTransactionHash: DESTINATION_HASH,
+    })).rejects.toThrow("Base destination has no matching attestation reservation");
+    expect(mocks.transitionQuery).toContain("FOR UPDATE OF p, o");
+    expect(mocks.transitionQuery).toContain("FROM payment ON CONFLICT");
   });
 
   it("writes completion events only in the guarded state transition and tolerates recipient casing", async () => {

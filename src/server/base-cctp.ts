@@ -728,42 +728,44 @@ export async function prepareStellarToBaseCctpDestination(input: {
   }
   const leaseId = randomUUID();
   const reserved = await sql`
-    UPDATE base_cctp_operations SET status = 'destination_prepared',
+    WITH eligible AS MATERIALIZED (
+      SELECT p.id FROM payments p
+      JOIN base_cctp_operations o ON o.payment_id = p.id
+      WHERE p.id = ${paymentId}::uuid AND p.route_id = 'stellar_to_base'
+        AND p.status IN ('source_confirmed', 'awaiting_attestation')
+        AND o.route_id = 'stellar_to_base'
+        AND o.status IN ('authorized', 'source_confirmed', 'awaiting_attestation', 'destination_prepared')
+        AND (o.status <> 'destination_prepared' OR o.submission_lease_expires_at IS NULL
+          OR o.submission_lease_expires_at <= now())
+        AND (o.source_transaction_hash IS NULL
+          OR o.source_transaction_hash = ${input.stellarSourceTransactionHash.trim().toLowerCase()})
+        AND (o.circle_message_hash IS NULL OR o.circle_message_hash = ${circle.messageHash})
+      FOR UPDATE OF p, o
+    ), operation AS (
+      UPDATE base_cctp_operations SET status = 'destination_prepared',
       source_transaction_hash = ${input.stellarSourceTransactionHash.trim().toLowerCase()},
       circle_message_hash = ${circle.messageHash}, circle_attestation_hash = ${circle.attestationHash},
       circle_message = ${circle.message}, circle_attestation = ${circle.attestation},
       submission_lease_id = ${leaseId}::uuid,
       submission_lease_expires_at = now() + interval '60 seconds', updated_at = now()
-    WHERE payment_id = ${paymentId}::uuid
-      AND status IN ('authorized', 'source_confirmed', 'awaiting_attestation', 'destination_prepared')
-      AND (
-        status <> 'destination_prepared'
-        OR submission_lease_expires_at IS NULL
-        OR submission_lease_expires_at <= now()
-      )
-      AND (source_transaction_hash IS NULL
-        OR source_transaction_hash = ${input.stellarSourceTransactionHash.trim().toLowerCase()})
-      AND (circle_message_hash IS NULL OR circle_message_hash = ${circle.messageHash})
-    RETURNING payment_id
-  `;
-  if (reserved.length === 0) return { status: "in_progress" };
-  await sql.transaction([
-    sql`
+      WHERE payment_id IN (SELECT id FROM eligible)
+      RETURNING payment_id
+    ), payment AS (
       UPDATE payments SET status = 'awaiting_attestation', updated_at = now()
-      WHERE id = ${paymentId}::uuid AND route_id = 'stellar_to_base'
-        AND status IN ('source_confirmed', 'awaiting_attestation')
-    `,
-    sql`
+      WHERE id IN (SELECT payment_id FROM operation)
+      RETURNING id
+    ), event AS (
       INSERT INTO payment_events (
         payment_id, event_key, stage, status, network, transaction_hash,
         public_message, completed_at
-      ) VALUES (
-        ${paymentId}::uuid, 'stellar_cctp_attestation_ready', 'attestation',
+      ) SELECT payment.id, 'stellar_cctp_attestation_ready', 'attestation',
         'awaiting_attestation', 'stellar', ${input.stellarSourceTransactionHash.trim().toLowerCase()},
         'Circle completed the Stellar burn attestation. The Base mint is ready for wallet approval.', now()
-      ) ON CONFLICT (payment_id, event_key) DO NOTHING
-    `,
-  ]);
+      FROM payment ON CONFLICT (payment_id, event_key) DO NOTHING
+    )
+    SELECT id FROM payment
+  `;
+  if (reserved.length === 0) return { status: "in_progress" };
   return {
     status: "ready",
     transactionTo: BASE_SEPOLIA_MESSAGE_TRANSMITTER,
@@ -795,37 +797,42 @@ export async function recordStellarToBaseDestinationSubmitted(input: {
     throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "A different Base destination transaction is already recorded");
   }
   const reserved = await sql`
-    UPDATE base_cctp_operations SET status = CASE WHEN status = 'completed'
-        THEN status ELSE 'destination_submitted' END,
+    WITH eligible AS MATERIALIZED (
+      SELECT p.id FROM payments p
+      JOIN base_cctp_operations o ON o.payment_id = p.id
+      WHERE p.id = ${paymentId}::uuid AND p.route_id = 'stellar_to_base'
+        AND p.status IN ('source_confirmed', 'awaiting_attestation', 'destination_submitted')
+        AND (p.destination_transaction_hash IS NULL OR p.destination_transaction_hash = ${hash})
+        AND o.route_id = 'stellar_to_base'
+        AND o.status IN ('destination_prepared', 'destination_submitted')
+        AND (o.destination_transaction_hash IS NULL OR o.destination_transaction_hash = ${hash})
+        AND o.circle_message IS NOT NULL AND o.circle_attestation IS NOT NULL
+      FOR UPDATE OF p, o
+    ), operation AS (
+      UPDATE base_cctp_operations SET status = 'destination_submitted',
       destination_transaction_hash = ${hash}, submission_lease_id = NULL,
       submission_lease_expires_at = NULL, updated_at = now()
-    WHERE payment_id = ${paymentId}::uuid
-      AND status IN ('destination_prepared', 'destination_submitted', 'destination_confirmed', 'recipient_verified', 'completed')
-      AND (destination_transaction_hash IS NULL OR destination_transaction_hash = ${hash})
-    RETURNING payment_id
+      WHERE payment_id IN (SELECT id FROM eligible)
+      RETURNING payment_id
+    ), payment AS (
+      UPDATE payments SET status = 'destination_submitted',
+        destination_transaction_hash = ${hash}, updated_at = now()
+      WHERE id IN (SELECT payment_id FROM operation)
+      RETURNING id
+    ), event AS (
+      INSERT INTO payment_events (
+        payment_id, event_key, stage, status, network, transaction_hash,
+        public_message, completed_at
+      ) SELECT payment.id, 'base_cctp_destination_submitted', 'destination_submission',
+        'destination_submitted', 'base', ${hash},
+        'The Base wallet submitted the Circle CCTP mint transaction.', now()
+      FROM payment ON CONFLICT (payment_id, event_key) DO NOTHING
+    )
+    SELECT id FROM payment
   `;
   if (reserved.length === 0) {
     throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "Base destination has no matching attestation reservation");
   }
-  await sql.transaction([
-    sql`
-      UPDATE payments SET status = 'destination_submitted',
-        destination_transaction_hash = ${hash}, updated_at = now()
-      WHERE id = ${paymentId}::uuid AND route_id = 'stellar_to_base'
-        AND status IN ('source_confirmed', 'awaiting_attestation', 'destination_submitted')
-        AND (destination_transaction_hash IS NULL OR destination_transaction_hash = ${hash})
-    `,
-    sql`
-      INSERT INTO payment_events (
-        payment_id, event_key, stage, status, network, transaction_hash,
-        public_message, completed_at
-      ) VALUES (
-        ${paymentId}::uuid, 'base_cctp_destination_submitted', 'destination_submission',
-        'destination_submitted', 'base', ${hash},
-        'The Base wallet submitted the Circle CCTP mint transaction.', now()
-      ) ON CONFLICT (payment_id, event_key) DO NOTHING
-    `,
-  ]);
 }
 
 /** Destination receipt is the only path that completes Stellar -> Base. */
