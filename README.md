@@ -155,6 +155,9 @@ Completion requires destination finality plus recipient and amount verification.
 If you are a developer or AI agent joining the project, start here:
 
 - [Current project status](product/STATUS.md)
+- [Codex master playbook](product/CODEX-MASTER-PLAYBOOK.md)
+- [Live execution tracker](product/EXECUTION-TRACKER.md)
+- [Buildathon execution plan](product/BUILDATHON-EXECUTION-PLAN.md)
 - [Judging and grant readiness baseline](product/JUDGING-AND-GRANT-READINESS.md)
 - [Universal agent handoff](handoffs/AGENT-HANDOFF.md)
 - [Product requirements](product/PRD.md)
@@ -169,6 +172,6 @@ If you are a developer or AI agent joining the project, start here:
 
 ## Development status
 
-Build Week implementation is active. The latest verified capabilities, open pull requests, blockers, execution order, and submission checklist are tracked in [Current Project Status](product/STATUS.md) and the [Buildathon Execution Plan](product/BUILDATHON-EXECUTION-PLAN.md).
+Build Week implementation is active. Codex continues from the persistent [Master Playbook](product/CODEX-MASTER-PLAYBOOK.md), [Execution Tracker](product/EXECUTION-TRACKER.md) and [Current Project Status](product/STATUS.md). These documents record task order, PR dependencies, acceptance gates and external blockers across sessions.
 
 Only real Stellar Testnet / Base Sepolia / approved provider data may drive financial UI states. Mock fixtures are for tests only and must never appear as real balances, quotes, wallet connections, or successful payments.
