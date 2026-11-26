@@ -21,7 +21,7 @@ describe("Base CCTP recipient address constraint", () => {
       const sql = neon(process.env.DATABASE_URL!);
       const results = await sql.transaction([
         sql`CREATE TEMP TABLE base_cctp_recipient_case_probe
-          (LIKE base_cctp_operations INCLUDING CONSTRAINTS) ON COMMIT DROP`,
+          (LIKE base_cctp_operations INCLUDING CONSTRAINTS INCLUDING DEFAULTS) ON COMMIT DROP`,
         sql`
           INSERT INTO base_cctp_recipient_case_probe (
             payment_id, route_id, status, destination_transaction_hash,
