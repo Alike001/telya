@@ -2,12 +2,13 @@ import "server-only";
 
 import { createHash } from "node:crypto";
 
-import { getSqlClient } from "../../server/db/client";
+import { getSqlClient } from "../../server/db/client.ts";
 import type {
   ValidatedStellarAgentPassCreate,
   ValidatedStellarAgentPassRevoke,
   ValidatedStellarUsdcTransfer,
-} from "../stellar/relayer";
+} from "../stellar/relayer.ts";
+import { StellarRelayerError } from "../stellar/relayer.ts";
 
 export type RelayerReservation =
   | { decision: "reserved" }
@@ -92,6 +93,25 @@ export async function completeStellarRelayerRequest(
       WHERE request_hash = ${requestHash} AND operation_kind = 'usdc_transfer'
       ON CONFLICT (request_hash, event_key) DO NOTHING
     `,
+    sql`
+      WITH payment AS (
+        UPDATE payments p SET status = 'failed', failure_code = ${result.failureCode},
+          failure_message = 'The Stellar payment failed before a transaction was submitted.',
+          updated_at = now()
+        FROM stellar_relayer_requests r
+        WHERE r.request_hash = ${requestHash} AND r.payment_id = p.id
+          AND r.submitted_transaction_hash IS NULL
+          AND p.status IN ('authorized', 'failed')
+        RETURNING p.id
+      )
+      INSERT INTO payment_events (
+        payment_id, event_key, stage, status, network, public_message,
+        error_code, completed_at
+      ) SELECT payment.id, 'stellar_submission_failed', 'failure', 'failed',
+        'stellar', 'The Stellar payment failed before submission.',
+        ${result.failureCode}, now()
+      FROM payment ON CONFLICT (payment_id, event_key) DO NOTHING
+    `,
   ]);
 }
 
@@ -136,6 +156,123 @@ export async function recordStellarUsdcTransferAuthorization(
   ]);
   if (!(eventRows as Record<string, unknown>[])[0]) {
     throw new Error("Stellar transfer reservation is no longer pending");
+  }
+}
+
+/** Verify an authenticated review still matches the exact signed transfer. */
+export async function validateStellarPaymentAuthorization(
+  userId: string,
+  paymentId: string,
+  transfer: ValidatedStellarUsdcTransfer,
+): Promise<void> {
+  if (transfer.authorizationKind !== "owner") {
+    throw new StellarRelayerError(
+      "PAYMENT_MISMATCH",
+      "Agent Pass transfers cannot authorize a consumer payment review",
+      409,
+    );
+  }
+  const sql = getSqlClient();
+  const rows = await sql`
+    SELECT p.id
+    FROM payments p
+    JOIN messages m ON m.id = p.intent_message_id
+      AND m.conversation_id = p.conversation_id
+    JOIN wallets w ON w.id::text =
+      m.structured_intent->'selectedSourceWallet'->>'id'
+    WHERE p.id = ${paymentId}::uuid AND p.user_id = ${userId}::uuid
+      AND p.route_id = 'stellar_to_stellar'
+      AND p.status IN ('awaiting_confirmation', 'authorized', 'submitted', 'completed')
+      AND p.recipient_address = ${transfer.recipient}
+      AND p.expected_recipient_amount * 10000000 = ${transfer.amountRaw.toString()}::numeric
+      AND w.user_id = p.user_id AND w.network = 'stellar'
+      AND w.address = ${transfer.sender} AND w.verification_status = 'verified'
+    LIMIT 1
+  `;
+  if (!rows[0]) {
+    throw new StellarRelayerError(
+      "PAYMENT_MISMATCH",
+      "Signed Stellar transfer does not match the owned payment review",
+      409,
+    );
+  }
+}
+
+/** Link the passkey-authorized relayer request and Payment in one guarded transition. */
+export async function linkStellarPaymentAuthorization(
+  userId: string,
+  paymentId: string,
+  requestHash: string,
+  transfer: ValidatedStellarUsdcTransfer,
+): Promise<void> {
+  const sql = getSqlClient();
+  const rows = await sql`
+    WITH eligible AS MATERIALIZED (
+      SELECT p.id
+      FROM payments p
+      JOIN messages m ON m.id = p.intent_message_id
+        AND m.conversation_id = p.conversation_id
+      JOIN wallets w ON w.id::text =
+        m.structured_intent->'selectedSourceWallet'->>'id'
+      JOIN stellar_relayer_requests r ON r.request_hash = ${requestHash}
+      WHERE p.id = ${paymentId}::uuid AND p.user_id = ${userId}::uuid
+        AND p.route_id = 'stellar_to_stellar'
+        AND p.status IN ('awaiting_confirmation', 'authorized')
+        AND p.recipient_address = ${transfer.recipient}
+        AND p.expected_recipient_amount * 10000000 = ${transfer.amountRaw.toString()}::numeric
+        AND w.user_id = p.user_id AND w.network = 'stellar'
+        AND w.address = ${transfer.sender} AND w.verification_status = 'verified'
+        AND r.status = 'pending' AND r.operation_kind = 'usdc_transfer'
+        AND (r.payment_id IS NULL OR r.payment_id = p.id)
+        AND r.sender_address = ${transfer.sender}
+        AND r.recipient_address = ${transfer.recipient}
+        AND r.expected_amount_atomic = ${transfer.amountRaw.toString()}::numeric
+      FOR UPDATE OF p, r
+    ), request AS (
+      UPDATE stellar_relayer_requests r SET payment_id = eligible.id, updated_at = now()
+      FROM eligible WHERE r.request_hash = ${requestHash}
+      RETURNING r.payment_id
+    ), payment AS (
+      UPDATE payments p SET status = 'authorized', updated_at = now()
+      FROM request WHERE p.id = request.payment_id
+      RETURNING p.id
+    ), event AS (
+      INSERT INTO payment_events (
+        payment_id, event_key, stage, status, network, public_message, completed_at
+      ) SELECT payment.id, 'stellar_owner_authorized', 'authorization', 'authorized',
+        'stellar', 'Your passkey authorized this exact USDC recipient and amount.', now()
+      FROM payment ON CONFLICT (payment_id, event_key) DO NOTHING
+    )
+    SELECT id FROM payment
+  `;
+  if (!rows[0]) {
+    throw new StellarRelayerError(
+      "PAYMENT_MISMATCH",
+      "Stellar payment authorization changed before it could be recorded",
+      409,
+    );
+  }
+}
+
+export async function assertStellarPaymentRequestLink(
+  userId: string,
+  paymentId: string,
+  requestHash: string,
+): Promise<void> {
+  const sql = getSqlClient();
+  const rows = await sql`
+    SELECT p.id FROM payments p
+    JOIN stellar_relayer_requests r ON r.payment_id = p.id
+    WHERE p.id = ${paymentId}::uuid AND p.user_id = ${userId}::uuid
+      AND r.request_hash = ${requestHash}
+    LIMIT 1
+  `;
+  if (!rows[0]) {
+    throw new StellarRelayerError(
+      "PAYMENT_MISMATCH",
+      "Relayer request belongs to a different payment",
+      409,
+    );
   }
 }
 
@@ -348,7 +485,7 @@ export async function completeStellarUsdcTransferRequest(
   },
 ): Promise<void> {
   const sql = getSqlClient();
-  const [, confirmationRows, verificationRows, completionRows] =
+  const [requestRows, confirmationRows, verificationRows, completionRows, paymentRows] =
     await sql.transaction([
       sql`
         UPDATE stellar_relayer_requests
@@ -363,7 +500,7 @@ export async function completeStellarUsdcTransferRequest(
           AND operation_kind = 'usdc_transfer'
           AND recipient_address = ${result.recipient}
           AND expected_amount_atomic = ${result.amountRaw.toString()}::numeric
-        RETURNING request_hash
+        RETURNING request_hash, payment_id
       `,
       sql`
         INSERT INTO stellar_direct_payment_events (
@@ -403,11 +540,49 @@ export async function completeStellarUsdcTransferRequest(
         ON CONFLICT (request_hash, event_key) DO NOTHING
         RETURNING id
       `,
+      sql`
+        WITH payment AS (
+          UPDATE payments p SET status = 'completed',
+            source_transaction_hash = ${result.transactionHash},
+            destination_transaction_hash = ${result.transactionHash},
+            verified_recipient_address = ${result.recipient},
+            verified_recipient_amount = expected_recipient_amount,
+            recipient_verified_at = now(), failure_code = NULL,
+            failure_message = NULL, updated_at = now()
+          FROM stellar_relayer_requests r
+          WHERE r.request_hash = ${requestHash} AND r.payment_id = p.id
+            AND p.route_id = 'stellar_to_stellar'
+            AND p.status IN ('submitted', 'completed')
+            AND p.recipient_address = ${result.recipient}
+            AND p.expected_recipient_amount * 10000000 = ${result.amountRaw.toString()}::numeric
+            AND r.status = 'succeeded' AND r.verified_at IS NOT NULL
+            AND r.transaction_hash = ${result.transactionHash}
+          RETURNING p.id
+        ), events AS (
+          INSERT INTO payment_events (
+            payment_id, event_key, stage, status, network, transaction_hash,
+            public_message, completed_at
+          ) SELECT payment.id, event.event_key, event.stage, event.status,
+            'stellar', ${result.transactionHash}, event.public_message, now()
+          FROM payment CROSS JOIN (VALUES
+            ('stellar_destination_confirmed', 'destination_confirmation', 'destination_confirmed',
+              'Stellar finalized the destination transaction.'),
+            ('stellar_recipient_verified', 'recipient_verification', 'recipient_verified',
+              'The finalized transfer matches the intended recipient and exact USDC amount.'),
+            ('stellar_payment_completed', 'completion', 'completed',
+              'The recipient received the verified USDC amount.')
+          ) AS event(event_key, stage, status, public_message)
+          ON CONFLICT (payment_id, event_key) DO NOTHING
+        )
+        SELECT id FROM payment
+      `,
     ]);
   if (
     !(confirmationRows as Record<string, unknown>[])[0] ||
     !(verificationRows as Record<string, unknown>[])[0] ||
-    !(completionRows as Record<string, unknown>[])[0]
+    !(completionRows as Record<string, unknown>[])[0] ||
+    ((requestRows as Record<string, unknown>[])[0]?.payment_id != null &&
+      !(paymentRows as Record<string, unknown>[])[0])
   ) {
     throw new Error("Stellar transfer completion evidence was not persisted");
   }
@@ -418,7 +593,7 @@ export async function recordStellarUsdcTransferSubmission(
   result: { readonly transactionHash: string; readonly ledger: number },
 ): Promise<void> {
   const sql = getSqlClient();
-  const [, eventRows] = await sql.transaction([
+  const [requestRows, eventRows, paymentRows] = await sql.transaction([
     sql`
       UPDATE stellar_relayer_requests
       SET submitted_transaction_hash = ${result.transactionHash},
@@ -426,7 +601,7 @@ export async function recordStellarUsdcTransferSubmission(
       WHERE request_hash = ${requestHash}
         AND status = 'pending'
         AND operation_kind = 'usdc_transfer'
-      RETURNING request_hash
+      RETURNING request_hash, payment_id
     `,
     sql`
       INSERT INTO stellar_direct_payment_events (
@@ -441,9 +616,91 @@ export async function recordStellarUsdcTransferSubmission(
       ON CONFLICT (request_hash, event_key) DO NOTHING
       RETURNING id
     `,
+    sql`
+      WITH payment AS (
+        UPDATE payments p SET status = 'submitted',
+          source_transaction_hash = ${result.transactionHash}, updated_at = now()
+        FROM stellar_relayer_requests r
+        WHERE r.request_hash = ${requestHash} AND r.payment_id = p.id
+          AND r.submitted_transaction_hash = ${result.transactionHash}
+          AND p.route_id = 'stellar_to_stellar'
+          AND p.status IN ('authorized', 'submitted')
+          AND (p.source_transaction_hash IS NULL
+            OR p.source_transaction_hash = ${result.transactionHash})
+        RETURNING p.id
+      ), event AS (
+        INSERT INTO payment_events (
+          payment_id, event_key, stage, status, network, transaction_hash,
+          public_message, completed_at
+        ) SELECT payment.id, 'stellar_submitted', 'source_submission', 'submitted',
+          'stellar', ${result.transactionHash},
+          'The sponsored USDC transfer was submitted to Stellar Testnet.', now()
+        FROM payment ON CONFLICT (payment_id, event_key) DO NOTHING
+      )
+      SELECT id FROM payment
+    `,
   ]);
-  if (!(eventRows as Record<string, unknown>[])[0]) {
+  if (
+    !(eventRows as Record<string, unknown>[])[0] ||
+    ((requestRows as Record<string, unknown>[])[0]?.payment_id != null &&
+      !(paymentRows as Record<string, unknown>[])[0])
+  ) {
     throw new Error("Stellar transfer submission evidence was not persisted");
+  }
+}
+
+/** Record a finalized failed or mismatched submitted transfer without replaying it. */
+export async function failLinkedStellarPayment(
+  requestHash: string,
+  transactionHash: string,
+  failureCode: string,
+): Promise<void> {
+  const sql = getSqlClient();
+  const rows = await sql`
+    WITH eligible AS MATERIALIZED (
+      SELECT p.id
+      FROM payments p
+      JOIN stellar_relayer_requests r ON r.payment_id = p.id
+      WHERE r.request_hash = ${requestHash}
+        AND r.status = 'pending'
+        AND r.submitted_transaction_hash = ${transactionHash}
+        AND p.status IN ('submitted', 'failed')
+        AND p.source_transaction_hash = ${transactionHash}
+      FOR UPDATE OF p, r
+    ), request AS (
+      UPDATE stellar_relayer_requests r SET status = 'failed',
+        failure_code = ${failureCode}, updated_at = now()
+      FROM eligible WHERE r.request_hash = ${requestHash}
+      RETURNING r.request_hash, r.payment_id
+    ), payment AS (
+      UPDATE payments p SET status = 'failed', failure_code = ${failureCode},
+        failure_message = 'The finalized Stellar transaction did not deliver the exact intended transfer.',
+        updated_at = now()
+      FROM request WHERE p.id = request.payment_id
+      RETURNING p.id
+    ), relayer_event AS (
+      INSERT INTO stellar_direct_payment_events (
+        request_hash, event_key, stage, status, transaction_hash,
+        public_message, error_code, completed_at
+      ) SELECT request.request_hash, 'failed', 'failure', 'failed',
+        ${transactionHash},
+        'The finalized Stellar transaction did not complete the intended payment.',
+        ${failureCode}, now()
+      FROM request ON CONFLICT (request_hash, event_key) DO NOTHING
+    ), payment_event AS (
+      INSERT INTO payment_events (
+        payment_id, event_key, stage, status, network, transaction_hash,
+        public_message, error_code, completed_at
+      ) SELECT payment.id, 'stellar_verification_failed', 'failure', 'failed',
+        'stellar', ${transactionHash},
+        'The finalized Stellar transaction did not match the intended recipient and amount.',
+        ${failureCode}, now()
+      FROM payment ON CONFLICT (payment_id, event_key) DO NOTHING
+    )
+    SELECT id FROM payment
+  `;
+  if (!rows[0]) {
+    throw new Error("Finalized Stellar payment failure conflicted with persisted state");
   }
 }
 

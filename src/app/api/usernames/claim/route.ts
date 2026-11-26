@@ -1,4 +1,10 @@
 import { NextResponse } from "next/server";
+import { StrKey } from "@stellar/stellar-sdk";
+import {
+  authenticateRequest,
+  AuthenticationError,
+  AuthenticationUnavailableError,
+} from "../../../../../server/auth/privy";
 import { getSqlClient } from "../../../../../server/db/client";
 import { validateUsername } from "../../../../domain/username";
 
@@ -37,7 +43,8 @@ export async function POST(request: Request) {
     );
   }
 
-  if (!smartAccountAddress || typeof smartAccountAddress !== "string") {
+  if (typeof smartAccountAddress !== "string" ||
+      !StrKey.isValidContract(smartAccountAddress.trim())) {
     return NextResponse.json(
       { success: false, error: "Stellar smart account address is required." },
       { status: 400, headers: { "cache-control": "no-store" } },
@@ -56,52 +63,47 @@ export async function POST(request: Request) {
   }
 
   const normalizedSmartAccount = smartAccountAddress.trim();
-  const did = `did:privy:stellar:${normalizedSmartAccount}`;
+
+  let user;
+  try {
+    user = await authenticateRequest(request);
+  } catch (error) {
+    const unavailable = error instanceof AuthenticationUnavailableError ||
+      !(error instanceof AuthenticationError);
+    return NextResponse.json(
+      { success: false, error: unavailable
+        ? "Authentication is temporarily unavailable."
+        : "Sign in before claiming a username." },
+      { status: unavailable ? 503 : 401, headers: { "cache-control": "no-store" } },
+    );
+  }
 
   try {
     const sql = getSqlClient();
 
-    // 1. Ensure user row exists for this verified smart account
-    const userRows = await sql`
-      INSERT INTO users (privy_did)
-      VALUES (${did})
-      ON CONFLICT (privy_did) DO UPDATE SET updated_at = now()
-      RETURNING id
-    `;
-
-    const userId = userRows[0]?.id;
-    if (!userId) {
-      throw new Error("Failed to record authenticated user account.");
-    }
-
-    // 2. Ensure wallet record is bound and verified
-    await sql`
-      INSERT INTO wallets (
-        user_id,
-        network,
-        address,
-        normalized_address,
-        verification_status,
-        verified_at
-      ) VALUES (
-        ${userId}::uuid,
-        'stellar',
-        ${normalizedSmartAccount},
-        ${normalizedSmartAccount},
-        'verified',
-        now()
-      )
-      ON CONFLICT (network, normalized_address) DO UPDATE
-      SET verification_status = 'verified',
-          verified_at = COALESCE(wallets.verified_at, now())
-    `;
-
-    // 3. Atomically claim username in username_registry
+    // The wallet must have been verified and bound to this authenticated user
+    // by a separate proof-of-control flow. A browser-supplied address never
+    // creates or upgrades a wallet record here.
     const claimRows = await sql`
-      SELECT claim_username(${userId}::uuid, ${validation.display}) AS username_normalized
+      WITH owned_wallet AS MATERIALIZED (
+        SELECT id FROM wallets
+        WHERE user_id = ${user.id}::uuid
+          AND network = 'stellar'
+          AND normalized_address = ${normalizedSmartAccount}
+          AND verification_status = 'verified'
+        FOR UPDATE
+      )
+      SELECT claim_username(${user.id}::uuid, ${validation.display}) AS username_normalized
+      FROM owned_wallet
     `;
 
     const claimed = claimRows[0]?.username_normalized;
+    if (typeof claimed !== "string") {
+      return NextResponse.json(
+        { success: false, error: "This Stellar account is not verified for your sign-in." },
+        { status: 403, headers: { "cache-control": "no-store" } },
+      );
+    }
     return NextResponse.json(
       {
         success: true,

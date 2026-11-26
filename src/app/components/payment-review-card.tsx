@@ -1,216 +1,183 @@
 "use client";
 
 import { useState } from "react";
-import type { RouteDecision } from "../../domain/contracts";
 import {
-  ArrowRight,
   CheckCircle2,
-  ChevronDown,
+  ExternalLink,
   Fingerprint,
-  Info,
   Loader2,
+  RefreshCw,
   ShieldCheck,
   X,
 } from "lucide-react";
 
-interface PaymentReviewCardProps {
-  readonly decision: RouteDecision & { status: "resolved" };
-  readonly amount: string;
-  readonly recipient: string;
-  readonly isConnected?: boolean;
-  readonly onConfirm: () => Promise<{ txHash?: string } | void>;
-  readonly onCancel: () => void;
-}
+import type { PaymentExecutionResult, PaymentReview } from "./conversation-payment";
 
 export function PaymentReviewCard({
-  decision,
-  amount,
-  recipient,
-  isConnected = false,
+  review,
+  recipientLabel,
+  canAuthorize,
   onConfirm,
+  onRefresh,
   onCancel,
-}: PaymentReviewCardProps) {
-  const [whyOpen, setWhyOpen] = useState(false);
-  const [isAuthorizing, setIsAuthorizing] = useState(false);
-  const [txHash, setTxHash] = useState<string | null>(null);
-  const [executionState, setExecutionState] = useState<
-    "idle" | "authorizing" | "broadcasting" | "success" | "error"
-  >("idle");
+}: {
+  readonly review: PaymentReview;
+  readonly recipientLabel: string;
+  readonly canAuthorize: boolean;
+  readonly onConfirm: () => Promise<PaymentExecutionResult>;
+  readonly onRefresh: (transactionHash: string) => Promise<PaymentExecutionResult>;
+  readonly onCancel: () => void;
+}) {
+  const [phase, setPhase] = useState<"idle" | "authorizing" | "refreshing" | "error">("idle");
+  const [execution, setExecution] = useState<PaymentExecutionResult | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const routeLabel = review.routeId === "stellar_to_stellar"
+    ? "Stellar Direct USDC"
+    : review.routeId.replaceAll("_", " ");
 
-  const routeLabel =
-    decision.route.id === "stellar_to_stellar"
-      ? "Stellar Direct USDC"
-      : decision.route.id === "base_to_stellar_cctp"
-        ? "Circle CCTP (Base → Stellar)"
-        : decision.route.id === "stellar_to_base_cctp"
-          ? "Circle CCTP (Stellar → Base)"
-          : "Base Direct USDC";
-
-  const isCrossChain =
-    decision.route.id === "base_to_stellar_cctp" ||
-    decision.route.id === "stellar_to_base_cctp";
-
-  async function handleConfirm() {
-    setIsAuthorizing(true);
-    setExecutionState("authorizing");
+  async function confirm() {
+    setPhase("authorizing");
     setErrorMessage(null);
     try {
-      const result = await onConfirm();
-      if (result && result.txHash) {
-        setTxHash(result.txHash);
-        setExecutionState("success");
-      }
-    } catch (err) {
-      setExecutionState("error");
-      setErrorMessage(
-        err instanceof Error ? err.message : "Payment authorization was cancelled or failed.",
-      );
-    } finally {
-      setIsAuthorizing(false);
+      setExecution(await onConfirm());
+      setPhase("idle");
+    } catch (error) {
+      setPhase("error");
+      setErrorMessage(error instanceof Error
+        ? error.message
+        : "Passkey authorization could not be verified. Check payment status before retrying.");
+    }
+  }
+
+  async function refresh() {
+    if (!execution?.transactionHash) return;
+    setPhase("refreshing");
+    setErrorMessage(null);
+    try {
+      setExecution(await onRefresh(execution.transactionHash));
+      setPhase("idle");
+    } catch (error) {
+      setPhase("error");
+      setErrorMessage(error instanceof Error
+        ? error.message
+        : "The persisted payment status is temporarily unavailable.");
     }
   }
 
   return (
-    <div className="payment-review-card" role="region" aria-label="Payment Review Card">
-      {/* Card Header (Family-Inspired) */}
+    <div className="payment-review-card" role="region" aria-label="Payment review">
       <div className="review-card-header">
         <div className="recipient-pill">
-          <div className="recipient-avatar">
-            <span>{recipient.replace(/^@/, "").slice(0, 2).toUpperCase()}</span>
-          </div>
+          <div className="recipient-avatar">{recipientLabel.replace(/^@/, "").slice(0, 2).toUpperCase()}</div>
           <div className="recipient-meta">
-            <strong>{recipient}</strong>
+            <strong>{recipientLabel}</strong>
             <span className="destination-network-tag">
-              {decision.route.destinationNetwork === "stellar"
-                ? "Stellar Testnet"
-                : "Base Sepolia"}
+              {review.destinationNetwork === "stellar" ? "Stellar Testnet" : "Base Sepolia"}
             </span>
           </div>
         </div>
         <span className="review-ready-pill">
-          <ShieldCheck className="mini-shield" /> Review
+          <ShieldCheck className="mini-shield" />
+          {execution?.status === "completed" ? "Verified" : "Review"}
         </span>
       </div>
-
-      {/* Wise-Standard Financial Breakdown */}
       <div className="breakdown-table">
         <div className="breakdown-row">
-          <span className="breakdown-label">You send</span>
-          <span className="breakdown-value tabular">{amount} USDC</span>
+          <span className="breakdown-label">Recipient gets</span>
+          <span className="breakdown-value tabular">{review.expectedRecipientAmount} USDC</span>
         </div>
-
         <div className="breakdown-row">
-          <span className="breakdown-label">Transfer fee</span>
-          <span className="breakdown-value proof-text">
-            {decision.fees[0]?.payer === "sponsor"
-              ? "Free (Sponsored by Telya)"
-              : `$${decision.fees[0]?.amount ?? "0.00"} USDC`}
-          </span>
-        </div>
-
-        <div className="breakdown-row route-row">
           <span className="breakdown-label">Chosen route</span>
-          <div className="route-badge-wrapper">
-            <span className="route-name-pill">{routeLabel}</span>
-            {isCrossChain && <span className="cctp-tag">Circle CCTP</span>}
-          </div>
+          <span className="route-name-pill">{routeLabel}</span>
         </div>
-
-        {/* "Why this route?" Accordion */}
-        <div className="why-route-section">
-          <button
-            type="button"
-            className="why-route-toggle"
-            onClick={() => setWhyOpen((prev) => !prev)}
-            aria-expanded={whyOpen}
-          >
-            <Info className="info-icon" />
-            <span>Why this route?</span>
-            <ChevronDown className={`chevron-icon ${whyOpen ? "open" : ""}`} />
-          </button>
-          {whyOpen && (
-            <div className="why-route-content">
-              <p>{decision.explanation}</p>
-            </div>
-          )}
-        </div>
-
-        <div className="breakdown-divider" />
-
-        <div className="breakdown-row total-row">
-          <span className="breakdown-label strong">Recipient gets</span>
-          <span className="breakdown-value strong tabular highlight-green">
-            {amount} USDC
+        <div className="breakdown-row">
+          <span className="breakdown-label">Verified destination</span>
+          <span className="breakdown-value tabular" title={review.recipientAddress}>
+            {review.recipientAddress.slice(0, 8)}…{review.recipientAddress.slice(-6)}
           </span>
         </div>
+        {review.fees.map((fee, index) => (
+          <div className="breakdown-row" key={`${fee.kind}:${fee.label}:${index}`}>
+            <span className="breakdown-label">{fee.label}</span>
+            <span className="breakdown-value tabular">{fee.amount} {fee.asset} · {fee.payer}</span>
+          </div>
+        ))}
       </div>
 
-      {/* Error Banner */}
-      {errorMessage && (
-        <div className="review-error-banner" role="alert">
-          <span>{errorMessage}</span>
+      {!execution && !errorMessage && (
+        <div className="review-error-banner" role="status">
+          Review the exact recipient, amount, route and fees. Nothing is submitted until your device passkey authorizes this payment.
         </div>
       )}
-
-      {/* Success State with Real Transaction Evidence */}
-      {executionState === "success" && txHash ? (
-        <div className="review-success-banner">
+      {execution?.status === "pending" && (
+        <div className="review-error-banner" role="status">
+          {execution.message} Do not submit again; refresh the persisted status.
+        </div>
+      )}
+      {execution?.status === "unverified" && (
+        <div className="review-error-banner" role="alert">
+          {execution.message} The hash alone is not proof of submission or completion.
+        </div>
+      )}
+      {execution?.status === "failed" && (
+        <div className="review-error-banner" role="alert">
+          {execution.message}
+        </div>
+      )}
+      {errorMessage && <div className="review-error-banner" role="alert">{errorMessage}</div>}
+      {execution?.status === "completed" && (
+        <div className="review-success-banner" role="status">
           <CheckCircle2 className="success-icon" />
           <div>
-            <strong>Payment authorized & submitted!</strong>
-            <p>
-              Transaction Hash:{" "}
-              <a
-                href={`https://stellar.expert/explorer/testnet/tx/${txHash}`}
-                target="_blank"
-                rel="noreferrer"
-                className="tx-hash-link"
-              >
-                {txHash.slice(0, 8)}...{txHash.slice(-6)} ↗
-              </a>
-            </p>
+            <strong>Payment completed and recipient verified</strong>
+            <p>{execution.verifiedAmount} USDC reached the exact saved Stellar recipient.</p>
+            <a
+              href={`https://stellar.expert/explorer/testnet/tx/${execution.transactionHash}`}
+              target="_blank"
+              rel="noreferrer"
+              className="tx-hash-link"
+            >
+              {execution.transactionHash.slice(0, 8)}…{execution.transactionHash.slice(-6)} <ExternalLink className="inline-check" />
+            </a>
           </div>
         </div>
-      ) : (
-        /* Action Buttons */
-        <div className="review-card-actions">
-          {isConnected ? (
-            <button
-              type="button"
-              className="cta-button primary review-submit-btn"
-              onClick={handleConfirm}
-              disabled={isAuthorizing}
-            >
-              {isAuthorizing ? (
-                <>
-                  <Loader2 className="btn-icon spinner" />
-                  <span>Authorizing Passkey...</span>
-                </>
-              ) : (
-                <>
-                  <Fingerprint className="btn-icon" />
-                  <span>Confirm with Passkey</span>
-                </>
-              )}
-            </button>
-          ) : (
-            <a href="/onboarding" className="cta-button primary review-submit-btn">
-              <Fingerprint className="btn-icon" />
-              <span>Connect Passkey to Authorize</span>
-            </a>
-          )}
+      )}
 
+      <div className="review-card-actions">
+        {!execution && canAuthorize && (
           <button
             type="button"
-            className="cancel-btn"
-            onClick={onCancel}
-            disabled={isAuthorizing}
+            className="cta-button primary review-submit-btn"
+            onClick={() => { void confirm(); }}
+            disabled={phase === "authorizing"}
           >
-            Cancel
+            {phase === "authorizing" ? (
+              <><Loader2 className="btn-icon spinner" /><span>Authorizing passkey…</span></>
+            ) : (
+              <><Fingerprint className="btn-icon" /><span>Confirm exact payment</span></>
+            )}
           </button>
-        </div>
-      )}
+        )}
+        {!execution && !canAuthorize && (
+          <a href="/onboarding" className="cta-button primary review-submit-btn">
+            <Fingerprint className="btn-icon" /> Connect verified passkey
+          </a>
+        )}
+        {(execution?.status === "pending" || execution?.status === "unverified") && (
+          <button
+            type="button"
+            className="cta-button primary review-submit-btn"
+            onClick={() => { void refresh(); }}
+            disabled={phase === "refreshing"}
+          >
+            <RefreshCw className={`btn-icon ${phase === "refreshing" ? "spinner" : ""}`} />
+            {phase === "refreshing" ? "Checking verified status…" : "Refresh verified status"}
+          </button>
+        )}
+        <button type="button" className="cancel-btn" onClick={onCancel} disabled={phase === "authorizing"}>
+          <X className="btn-icon" /> Dismiss
+        </button>
+      </div>
     </div>
   );
 }

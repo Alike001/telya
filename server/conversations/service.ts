@@ -1,5 +1,5 @@
-import type { AuthenticatedUser } from "../auth/privy.js";
-import { getSqlClient } from "../db/client.js";
+import type { AuthenticatedUser } from "../auth/privy.ts";
+import { getSqlClient } from "../db/client.ts";
 
 export type ConversationRecord = {
   readonly id: string;

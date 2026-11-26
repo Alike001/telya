@@ -189,6 +189,17 @@ describe("Stellar deployment relayer boundary", () => {
       "Invalid relayer request",
     );
   });
+
+  it("preserves a valid product payment ID without including it in the signed request identity", () => {
+    const paymentId = "11111111-1111-4111-8111-111111111111";
+    expect(parseStellarRelayerRequest({ ...deploymentSubmission(), paymentId })).toMatchObject({
+      paymentId,
+    });
+    expect(() => parseStellarRelayerRequest({
+      ...deploymentSubmission(),
+      paymentId: "not-a-payment",
+    })).toThrow("Invalid payment ID");
+  });
 });
 
 describe("Stellar USDC relayer boundary", () => {

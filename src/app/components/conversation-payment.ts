@@ -1,0 +1,231 @@
+export type VerifiedBalance = {
+  readonly walletId: string;
+  readonly network: "stellar" | "base";
+  readonly address: string;
+  readonly amount: string | null;
+  readonly status: "verified" | "unavailable";
+};
+
+export type PaymentReview = {
+  readonly id: string;
+  readonly status: "awaiting_confirmation";
+  readonly routeId: string;
+  readonly sourceNetwork: "stellar" | "base";
+  readonly destinationNetwork: "stellar" | "base";
+  readonly rail: string;
+  readonly recipientAddress: string;
+  readonly expectedRecipientAmount: string;
+  readonly fees: readonly {
+    readonly kind: "network" | "provider" | "sponsor";
+    readonly amount: string;
+    readonly asset: string;
+    readonly payer: "sender" | "recipient" | "sponsor";
+    readonly label: string;
+  }[];
+  readonly reasons: readonly unknown[];
+  readonly explanation: string;
+};
+
+export type PaymentExecutionResult =
+  | {
+      readonly status: "unverified";
+      readonly transactionHash: string;
+      readonly message: string;
+    }
+  | {
+      readonly status: "pending";
+      readonly transactionHash: string;
+      readonly message: string;
+    }
+  | {
+      readonly status: "completed";
+      readonly transactionHash: string;
+      readonly verifiedRecipient: string;
+      readonly verifiedAmount: string;
+    }
+  | {
+      readonly status: "failed";
+      readonly transactionHash: string | null;
+      readonly message: string;
+    };
+
+function record(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function network(value: unknown): value is "stellar" | "base" {
+  return value === "stellar" || value === "base";
+}
+
+function decimal(value: unknown): value is string {
+  return typeof value === "string" && /^(?:0|[1-9]\d{0,19})(?:\.\d{1,18})?$/.test(value);
+}
+
+function transactionHash(value: unknown): value is string {
+  return typeof value === "string" && /^[0-9a-f]{64}$/i.test(value);
+}
+
+function equalDecimal(left: string, right: string): boolean {
+  const normalize = (value: string) => {
+    const [whole, fraction = ""] = value.split(".");
+    return `${whole}.${fraction.replace(/0+$/, "")}`;
+  };
+  return normalize(left) === normalize(right);
+}
+
+export function parseVerifiedBalances(value: unknown): readonly VerifiedBalance[] {
+  const payload = record(value);
+  if (!Array.isArray(payload?.balances)) return [];
+  const parsed: VerifiedBalance[] = [];
+  for (const item of payload.balances) {
+    const balance = record(item);
+    if (
+      !balance ||
+      typeof balance.walletId !== "string" ||
+      typeof balance.address !== "string" ||
+      !network(balance.network) ||
+      (balance.status !== "verified" && balance.status !== "unavailable") ||
+      !(balance.amount === null || decimal(balance.amount)) ||
+      (balance.status === "verified" && balance.amount === null) ||
+      (balance.status === "unavailable" && balance.amount !== null)
+    ) return [];
+    parsed.push({
+      walletId: balance.walletId,
+      network: balance.network,
+      address: balance.address,
+      amount: balance.amount,
+      status: balance.status,
+    });
+  }
+  return parsed;
+}
+
+export function parsePaymentReview(value: unknown): PaymentReview | null {
+  const payload = record(value);
+  const payment = record(payload?.payment);
+  if (
+    payload?.status !== "awaiting_confirmation" ||
+    !payment ||
+    payment.status !== "awaiting_confirmation" ||
+    typeof payment.id !== "string" ||
+    typeof payment.routeId !== "string" ||
+    !network(payment.sourceNetwork) ||
+    !network(payment.destinationNetwork) ||
+    typeof payment.rail !== "string" ||
+    typeof payment.recipientAddress !== "string" ||
+    !decimal(payment.expectedRecipientAmount) ||
+    typeof payload.explanation !== "string" ||
+    !Array.isArray(payment.fees) ||
+    !Array.isArray(payment.reasons)
+  ) return null;
+  const fees: Array<PaymentReview["fees"][number]> = [];
+  for (const item of payment.fees) {
+    const fee = record(item);
+    if (
+      !fee ||
+      (fee.kind !== "network" && fee.kind !== "provider" && fee.kind !== "sponsor") ||
+      !decimal(fee.amount) ||
+      typeof fee.asset !== "string" ||
+      (fee.payer !== "sender" && fee.payer !== "recipient" && fee.payer !== "sponsor") ||
+      typeof fee.label !== "string"
+    ) return null;
+    fees.push({
+      kind: fee.kind,
+      amount: fee.amount,
+      asset: fee.asset,
+      payer: fee.payer,
+      label: fee.label,
+    });
+  }
+  return {
+    id: payment.id,
+    status: "awaiting_confirmation",
+    routeId: payment.routeId,
+    sourceNetwork: payment.sourceNetwork,
+    destinationNetwork: payment.destinationNetwork,
+    rail: payment.rail,
+    recipientAddress: payment.recipientAddress,
+    expectedRecipientAmount: payment.expectedRecipientAmount,
+    fees,
+    reasons: payment.reasons,
+    explanation: payload.explanation,
+  };
+}
+
+export function parseAuthorizationReady(value: unknown): {
+  readonly relayerUrl: "/api/stellar/relayer/payment";
+  readonly expiresAt: string;
+} | null {
+  const payload = record(value);
+  if (
+    payload?.status !== "authorization_ready" ||
+    payload.relayerUrl !== "/api/stellar/relayer/payment" ||
+    typeof payload.expiresAt !== "string" ||
+    !Number.isFinite(Date.parse(payload.expiresAt)) ||
+    Date.parse(payload.expiresAt) <= Date.now()
+  ) return null;
+  return { relayerUrl: payload.relayerUrl, expiresAt: payload.expiresAt };
+}
+
+export function parseReconciliation(value: unknown):
+  | { readonly status: "pending" | "completed"; readonly transactionHash: string }
+  | { readonly status: "failed"; readonly transactionHash: string; readonly reason: string }
+  | null {
+  const payload = record(value);
+  if (!transactionHash(payload?.transactionHash)) return null;
+  if (payload.status === "pending" || payload.status === "completed") {
+    return { status: payload.status, transactionHash: payload.transactionHash };
+  }
+  if (payload.status === "failed" && typeof payload.reason === "string") {
+    return { status: "failed", transactionHash: payload.transactionHash, reason: payload.reason };
+  }
+  return null;
+}
+
+/** A completed UI state requires canonical persisted recipient, amount, and hash evidence. */
+export function parseCompletedPaymentReceipt(
+  value: unknown,
+  review: PaymentReview,
+  expectedTransactionHash: string,
+): PaymentExecutionResult | null {
+  const payload = record(value);
+  const payment = record(payload?.payment);
+  const events = Array.isArray(payment?.events) ? payment.events : [];
+  const hasEvent = (stage: string, status: string) => events.some((value) => {
+    const event = record(value);
+    return event?.stage === stage && event.status === status &&
+      event.txHash === expectedTransactionHash;
+  });
+  if (
+    !payment ||
+    payment.id !== review.id ||
+    payment.status !== "completed" ||
+    payment.recipientAddress !== review.recipientAddress ||
+    payment.verifiedRecipientAddress !== review.recipientAddress ||
+    !decimal(payment.expectedRecipientAmount) ||
+    !decimal(payment.verifiedRecipientAmount) ||
+    !equalDecimal(payment.expectedRecipientAmount, review.expectedRecipientAmount) ||
+    !equalDecimal(payment.verifiedRecipientAmount, review.expectedRecipientAmount) ||
+    payment.destinationTransactionHash !== expectedTransactionHash ||
+    !transactionHash(payment.destinationTransactionHash) ||
+    !hasEvent("recipient_verification", "recipient_verified") ||
+    !hasEvent("completion", "completed")
+  ) return null;
+  return {
+    status: "completed",
+    transactionHash: payment.destinationTransactionHash,
+    verifiedRecipient: payment.verifiedRecipientAddress,
+    verifiedAmount: payment.verifiedRecipientAmount,
+  };
+}
+
+export function apiMessage(value: unknown, fallback: string): string {
+  const payload = record(value);
+  if (typeof payload?.question === "string" && payload.question.trim()) return payload.question;
+  if (typeof payload?.message === "string" && payload.message.trim()) return payload.message;
+  const message = record(payload?.message);
+  if (typeof message?.content === "string" && message.content.trim()) return message.content;
+  return fallback;
+}
