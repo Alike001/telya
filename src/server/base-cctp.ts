@@ -711,14 +711,38 @@ export async function prepareStellarToBaseCctpDestination(input: {
   const expectedRecipient = `0x${requireEvmAddress(payment.recipient_address, "recipient").slice(2).padStart(64, "0")}`;
   const burnAmount = BigInt(operation.burn_amount);
   const maxFee = BigInt(operation.max_fee);
+  if (typeof payment.source_address !== "string") {
+    throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "Stellar source wallet is missing");
+  }
+  let expectedSender: string;
+  let expectedBurnToken: string;
+  let expectedMessageSender: string;
+  try {
+    expectedSender = stellarContractAsBytes32(config.tokenMessenger);
+    expectedBurnToken = stellarContractAsBytes32(config.usdcContract);
+    expectedMessageSender = stellarContractAsBytes32(payment.source_address);
+  } catch {
+    throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "Stellar CCTP source contracts or wallet are invalid");
+  }
+  const expectedRecipientAmount = normalizeBaseUsdcAmount(String(payment.expected_amount));
+  const netStellarAtomic = parsed.amount - parsed.feeExecuted;
   if (
     parsed.sourceDomain !== CCTP_STELLAR_DOMAIN ||
     parsed.destinationDomain !== CCTP_BASE_DOMAIN ||
+    parsed.sender.toLowerCase() !== expectedSender ||
+    parsed.recipient.toLowerCase() !== baseAddressAsBytes32(BASE_SEPOLIA_TOKEN_MESSENGER) ||
+    parsed.burnToken.toLowerCase() !== expectedBurnToken ||
+    parsed.messageSender.toLowerCase() !== expectedMessageSender ||
+    parsed.nonce === CCTP_V2_EMPTY_NONCE ||
     parsed.minFinalityThreshold !== CCTP_STANDARD_FINALITY_THRESHOLD ||
     parsed.finalityThresholdExecuted < CCTP_STANDARD_FINALITY_THRESHOLD ||
     parsed.mintRecipient.toLowerCase() !== expectedRecipient ||
     parsed.amount !== burnAmount ||
     parsed.maxFee !== maxFee ||
+    parsed.feeExecuted > maxFee ||
+    netStellarAtomic <= 0n ||
+    netStellarAtomic % 10n !== 0n ||
+    netStellarAtomic / 10n !== expectedRecipientAmount ||
     parsed.destinationCaller !== `0x${"0".repeat(64)}`
   ) {
     throw new BaseCctpPersistenceError(

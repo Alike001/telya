@@ -35,6 +35,7 @@ import {
 } from "./base-cctp";
 import {
   BASE_SEPOLIA_MESSAGE_TRANSMITTER,
+  BASE_SEPOLIA_TOKEN_MESSENGER,
   BASE_SEPOLIA_USDC,
   encodeCctpReceiveMessage,
   type BaseRpc,
@@ -60,6 +61,7 @@ const config = {
 
 function u32(value: number): string { return value.toString(16).padStart(8, "0"); }
 function word(value: bigint): string { return value.toString(16).padStart(64, "0"); }
+function contractWord(address: string): string { return Buffer.from(StrKey.decodeContract(address)).toString("hex"); }
 
 function mintRpc(): BaseRpc {
   const attestation = `0x${"c".repeat(130)}`;
@@ -91,15 +93,24 @@ function mintRpc(): BaseRpc {
 function cctpMessage(options: {
   readonly minFinalityThreshold?: number;
   readonly finalityThresholdExecuted?: number;
+  readonly nonce?: string;
+  readonly sender?: string;
+  readonly recipient?: string;
+  readonly burnToken?: string;
+  readonly messageSender?: string;
+  readonly feeExecuted?: bigint;
 } = {}): string {
   const header = [
-    u32(1), u32(27), u32(6), "0".repeat(64), "1".repeat(64), "2".repeat(64),
+    u32(1), u32(27), u32(6), options.nonce ?? "f".repeat(64),
+    options.sender ?? contractWord(config.tokenMessenger),
+    options.recipient ?? BASE_SEPOLIA_TOKEN_MESSENGER.slice(2).padStart(64, "0").toLowerCase(),
     "0".repeat(64), u32(options.minFinalityThreshold ?? 2_000),
     u32(options.finalityThresholdExecuted ?? 2_000),
   ].join("");
   const body = [
-    u32(1), "3".repeat(64), BASE_RECIPIENT.slice(2).padStart(64, "0"),
-    word(51_000_000n), "4".repeat(64), word(1_000_000n), word(0n), word(0n), word(0n),
+    u32(1), options.burnToken ?? contractWord(config.usdcContract), BASE_RECIPIENT.slice(2).padStart(64, "0"),
+    word(51_000_000n), options.messageSender ?? contractWord(StrKey.encodeContract(Buffer.alloc(32, 5))),
+    word(1_000_000n), word(options.feeExecuted ?? 1_000_000n), word(0n), word(0n),
   ].join("");
   return `0x${header}${body}`;
 }
@@ -269,6 +280,32 @@ describe("Stellar-to-Base CCTP destination reservation", () => {
       attestationHash: "2".repeat(64),
     });
 
+    await expect(prepareStellarToBaseCctpDestination({
+      paymentId: PAYMENT_ID,
+      stellarSourceTransactionHash: STELLAR_SOURCE_HASH,
+      stellarRpc: { getTransaction: vi.fn() } as never,
+      config,
+    })).rejects.toThrow("Circle attestation does not match the persisted Stellar burn intent");
+  });
+
+  it.each([
+    { name: "zero nonce", change: { nonce: "0".repeat(64) } },
+    { name: "wrong source messenger", change: { sender: "1".repeat(64) } },
+    { name: "wrong Base messenger", change: { recipient: "2".repeat(64) } },
+    { name: "wrong burn token", change: { burnToken: "3".repeat(64) } },
+    { name: "wrong source smart account", change: { messageSender: "4".repeat(64) } },
+    { name: "excess executed fee", change: { feeExecuted: 1_000_001n } },
+    { name: "recipient shortfall", change: { feeExecuted: 500_000n } },
+    { name: "unrepresentable Base precision", change: { feeExecuted: 999_999n } },
+  ])("rejects $name in the Stellar burn attestation", async ({ change }) => {
+    mocks.getCircleCctpStatus.mockResolvedValue({
+      status: "complete",
+      sourceTransactionHash: STELLAR_SOURCE_HASH,
+      message: cctpMessage(change),
+      attestation: `0x${"c".repeat(130)}`,
+      messageHash: "1".repeat(64),
+      attestationHash: "2".repeat(64),
+    });
     await expect(prepareStellarToBaseCctpDestination({
       paymentId: PAYMENT_ID,
       stellarSourceTransactionHash: STELLAR_SOURCE_HASH,
