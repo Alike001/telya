@@ -8,12 +8,12 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 
 import {
-  completeStellarUsdcTransferRequest,
   linkStellarPaymentAuthorization,
   recordStellarUsdcTransferSubmission,
   validateStellarPaymentAuthorization,
 } from "../../src/server/stellar-relayer-requests.ts";
 import type { ValidatedStellarUsdcTransfer } from "../../src/stellar/relayer.ts";
+import { reconcileStellarDirectPayment } from "./stellar-reconciliation.ts";
 
 function useNeonHttpsTransport(): void {
   neonConfig.fetchFunction = (url: string, options?: RequestInit) => new Promise<Response>((resolve, reject) => {
@@ -117,12 +117,32 @@ describe("linked Stellar direct payment execution on PostgreSQL", () => {
           transactionHash,
           ledger: 100,
         });
-        await completeStellarUsdcTransferRequest(requestHash, {
-          transactionHash,
-          ledger: 100,
-          recipient,
-          amountRaw: transfer.amountRaw,
-        });
+        const verifyTransfer = vi.fn()
+          .mockResolvedValueOnce({ status: "pending" })
+          .mockResolvedValueOnce({
+            status: "verified",
+            ledger: 101,
+            recipient,
+            amountRaw: transfer.amountRaw,
+          });
+        const rpc = {} as never;
+        await expect(reconcileStellarDirectPayment(userId, paymentId, {
+          rpc,
+          verifyTransfer,
+        })).resolves.toEqual({ status: "pending", transactionHash });
+        const pending = await sql`
+          SELECT status FROM payments WHERE id = ${paymentId}::uuid
+        `;
+        expect(pending[0]?.status).toBe("submitted");
+        await expect(reconcileStellarDirectPayment(userId, paymentId, {
+          rpc,
+          verifyTransfer,
+        })).resolves.toEqual({ status: "completed", transactionHash });
+        await expect(reconcileStellarDirectPayment(userId, paymentId, {
+          rpc,
+          verifyTransfer,
+        })).resolves.toEqual({ status: "completed", transactionHash });
+        expect(verifyTransfer).toHaveBeenCalledTimes(2);
 
         const payments = await sql`
           SELECT status, source_transaction_hash, destination_transaction_hash,

@@ -649,6 +649,61 @@ export async function recordStellarUsdcTransferSubmission(
   }
 }
 
+/** Record a finalized failed or mismatched submitted transfer without replaying it. */
+export async function failLinkedStellarPayment(
+  requestHash: string,
+  transactionHash: string,
+  failureCode: string,
+): Promise<void> {
+  const sql = getSqlClient();
+  const rows = await sql`
+    WITH eligible AS MATERIALIZED (
+      SELECT p.id
+      FROM payments p
+      JOIN stellar_relayer_requests r ON r.payment_id = p.id
+      WHERE r.request_hash = ${requestHash}
+        AND r.status = 'pending'
+        AND r.submitted_transaction_hash = ${transactionHash}
+        AND p.status IN ('submitted', 'failed')
+        AND p.source_transaction_hash = ${transactionHash}
+      FOR UPDATE OF p, r
+    ), request AS (
+      UPDATE stellar_relayer_requests r SET status = 'failed',
+        failure_code = ${failureCode}, updated_at = now()
+      FROM eligible WHERE r.request_hash = ${requestHash}
+      RETURNING r.request_hash, r.payment_id
+    ), payment AS (
+      UPDATE payments p SET status = 'failed', failure_code = ${failureCode},
+        failure_message = 'The finalized Stellar transaction did not deliver the exact intended transfer.',
+        updated_at = now()
+      FROM request WHERE p.id = request.payment_id
+      RETURNING p.id
+    ), relayer_event AS (
+      INSERT INTO stellar_direct_payment_events (
+        request_hash, event_key, stage, status, transaction_hash,
+        public_message, error_code, completed_at
+      ) SELECT request.request_hash, 'failed', 'failure', 'failed',
+        ${transactionHash},
+        'The finalized Stellar transaction did not complete the intended payment.',
+        ${failureCode}, now()
+      FROM request ON CONFLICT (request_hash, event_key) DO NOTHING
+    ), payment_event AS (
+      INSERT INTO payment_events (
+        payment_id, event_key, stage, status, network, transaction_hash,
+        public_message, error_code, completed_at
+      ) SELECT payment.id, 'stellar_verification_failed', 'failure', 'failed',
+        'stellar', ${transactionHash},
+        'The finalized Stellar transaction did not match the intended recipient and amount.',
+        ${failureCode}, now()
+      FROM payment ON CONFLICT (payment_id, event_key) DO NOTHING
+    )
+    SELECT id FROM payment
+  `;
+  if (!rows[0]) {
+    throw new Error("Finalized Stellar payment failure conflicted with persisted state");
+  }
+}
+
 export async function getStellarUsdcTransferReceipt(
   transactionHash: string,
 ): Promise<Record<string, unknown> | null> {
