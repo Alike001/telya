@@ -172,6 +172,83 @@ export async function submitPreparedStellarCctpMintAndForward(input: {
   return { transactionHash, ledger: result.ledger };
 }
 
+/** Persist a verified Stellar burn only when the Payment can move with it. */
+export async function recordStellarCctpSource(input: {
+  readonly paymentId: string;
+  readonly transactionHash: string;
+  readonly sourceLedger: number;
+  readonly recipientAddress: string;
+  readonly expectedRecipientAmount: string;
+  readonly expectedAmountAtomic: string;
+}): Promise<void> {
+  const sql = getSqlClient();
+  const rows = await sql`
+    WITH eligible AS MATERIALIZED (
+      SELECT p.id
+      FROM payments p
+      WHERE p.id = ${input.paymentId}::uuid
+        AND p.route_id = 'stellar_to_base'
+        AND p.status IN ('authorized', 'submitted', 'source_confirmed')
+        AND lower(p.recipient_address) = lower(${input.recipientAddress})
+        AND p.expected_recipient_amount = ${input.expectedRecipientAmount}::numeric
+        AND (p.source_transaction_hash IS NULL
+          OR p.source_transaction_hash = ${input.transactionHash})
+      FOR UPDATE OF p
+    ), operation AS (
+      INSERT INTO stellar_cctp_operations (
+        payment_id, route_id, status, source_transaction_hash, source_ledger,
+        expected_recipient_address, expected_amount_atomic
+      )
+      SELECT e.id, 'stellar_to_base', 'source_confirmed',
+        ${input.transactionHash}, ${input.sourceLedger}, ${input.recipientAddress},
+        ${input.expectedAmountAtomic}::numeric
+      FROM eligible e WHERE true
+      ON CONFLICT (payment_id) DO UPDATE SET
+        source_transaction_hash = EXCLUDED.source_transaction_hash,
+        source_ledger = EXCLUDED.source_ledger,
+        status = CASE
+          WHEN stellar_cctp_operations.status = 'source_confirmed'
+            THEN 'source_confirmed'
+          ELSE stellar_cctp_operations.status
+        END,
+        updated_at = now()
+      WHERE stellar_cctp_operations.route_id = 'stellar_to_base'
+        AND lower(stellar_cctp_operations.expected_recipient_address) =
+          lower(EXCLUDED.expected_recipient_address)
+        AND stellar_cctp_operations.expected_amount_atomic = EXCLUDED.expected_amount_atomic
+        AND (stellar_cctp_operations.source_transaction_hash IS NULL
+          OR stellar_cctp_operations.source_transaction_hash = EXCLUDED.source_transaction_hash)
+        AND (stellar_cctp_operations.source_ledger IS NULL
+          OR stellar_cctp_operations.source_ledger = EXCLUDED.source_ledger)
+      RETURNING payment_id
+    ), payment AS (
+      UPDATE payments p SET status = 'source_confirmed',
+        source_transaction_hash = ${input.transactionHash}, updated_at = now()
+      WHERE p.id IN (SELECT payment_id FROM operation)
+      RETURNING p.id
+    ), events AS (
+      INSERT INTO payment_events (
+        payment_id, event_key, stage, status, network, transaction_hash,
+        public_message, completed_at
+      )
+      SELECT p.id, 'stellar_cctp_source_confirmed', 'source_confirmation',
+        'source_confirmed', 'stellar', ${input.transactionHash},
+        'Stellar finalized the USDC burn. The funds are waiting for Circle attestation.',
+        now()
+      FROM payment p JOIN operation o ON o.payment_id = p.id
+      ON CONFLICT (payment_id, event_key) DO NOTHING
+      RETURNING payment_id
+    )
+    SELECT p.id FROM payment p JOIN operation o ON o.payment_id = p.id
+  `;
+  if (rows.length === 0) {
+    throw new StellarCctpPersistenceError(
+      "INVALID_PAYMENT_STATE",
+      "Stellar CCTP payment changed while source evidence was being recorded",
+    );
+  }
+}
+
 /**
  * Reconciles a Stellar->Base source burn into canonical PaymentEvents. The
  * resulting state is source_confirmed only; Circle/Base must still attest,
@@ -233,48 +310,14 @@ export async function reconcileStellarCctpSource(input: {
     );
   }
   const expectedAtomic = normalizeStellarUsdcAmount(expectedAmount).raw.toString();
-  await sql.transaction([
-    sql`
-      INSERT INTO stellar_cctp_operations (
-        payment_id, route_id, status, source_transaction_hash, source_ledger,
-        expected_recipient_address, expected_amount_atomic
-      ) VALUES (
-        ${paymentId}::uuid, 'stellar_to_base', 'source_confirmed',
-        ${verification.txHash}, ${verification.ledger}, ${verification.recipient},
-        ${expectedAtomic}::numeric
-      )
-      ON CONFLICT (payment_id) DO UPDATE SET
-        source_transaction_hash = EXCLUDED.source_transaction_hash,
-        source_ledger = EXCLUDED.source_ledger,
-        status = CASE
-          WHEN stellar_cctp_operations.status = 'source_confirmed'
-            THEN 'source_confirmed'
-          ELSE stellar_cctp_operations.status
-        END,
-        updated_at = now()
-      WHERE stellar_cctp_operations.source_transaction_hash IS NULL
-         OR stellar_cctp_operations.source_transaction_hash = EXCLUDED.source_transaction_hash
-    `,
-    sql`
-      UPDATE payments
-      SET status = 'source_confirmed', source_transaction_hash = ${verification.txHash},
-        updated_at = now()
-      WHERE id = ${paymentId}::uuid
-        AND route_id = 'stellar_to_base'
-        AND status IN ('authorized', 'submitted', 'source_confirmed')
-    `,
-    sql`
-      INSERT INTO payment_events (
-        payment_id, event_key, stage, status, network, transaction_hash,
-        public_message, completed_at
-      ) VALUES (
-        ${paymentId}::uuid, 'stellar_cctp_source_confirmed', 'source_confirmation',
-        'source_confirmed', 'stellar', ${verification.txHash},
-        'Stellar finalized the USDC burn. The funds are waiting for Circle attestation.',
-        now()
-      ) ON CONFLICT (payment_id, event_key) DO NOTHING
-    `,
-  ]);
+  await recordStellarCctpSource({
+    paymentId,
+    transactionHash: verification.txHash,
+    sourceLedger: verification.ledger,
+    recipientAddress: verification.recipient,
+    expectedRecipientAmount: expectedAmount,
+    expectedAmountAtomic: expectedAtomic,
+  });
   return { status: "source_confirmed" };
 }
 
