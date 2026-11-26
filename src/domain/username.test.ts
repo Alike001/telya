@@ -243,6 +243,15 @@ describe("Atomic Username Claim Route (/api/usernames/claim)", () => {
 describe("Username Server Lookup Route (/api/usernames/lookup)", () => {
   const originalEnv = process.env.DATABASE_URL;
 
+  function authenticated() {
+    vi.spyOn(auth, "authenticateRequest").mockResolvedValue({
+      id: "00000000-0000-0000-0000-000000000001",
+      privyUserId: "did:privy:real-user",
+      sessionId: "verified-session",
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+  }
+
   afterEach(() => {
     process.env.DATABASE_URL = originalEnv;
     vi.restoreAllMocks();
@@ -258,6 +267,7 @@ describe("Username Server Lookup Route (/api/usernames/lookup)", () => {
 
   it("returns found=false when account has no claimed username", async () => {
     process.env.DATABASE_URL = "postgres://fake:5432/db";
+    authenticated();
     const mockSql: any = vi.fn().mockResolvedValue([]);
     vi.spyOn(dbClient, "getSqlClient").mockReturnValue(mockSql);
 
@@ -271,6 +281,7 @@ describe("Username Server Lookup Route (/api/usernames/lookup)", () => {
 
   it("restores durable claimed username when account exists on server", async () => {
     process.env.DATABASE_URL = "postgres://fake:5432/db";
+    authenticated();
     const mockSql: any = vi.fn().mockResolvedValue([{
       username_normalized: "prudent",
       username_display: "@prudent",
@@ -284,5 +295,20 @@ describe("Username Server Lookup Route (/api/usernames/lookup)", () => {
     expect(response.status).toBe(200);
     expect(body.found).toBe(true);
     expect(body.username).toBe("prudent");
+    const query = mockSql.mock.calls[0]?.[0]?.join(" ") ?? "";
+    expect(query).toContain("w.user_id = ");
+    expect(query).toContain("verification_status = 'verified'");
+  });
+
+  it("does not reveal an account identity without a verified session", async () => {
+    process.env.DATABASE_URL = "postgres://fake:5432/db";
+    const sql = vi.fn();
+    vi.spyOn(dbClient, "getSqlClient").mockReturnValue(sql as any);
+    vi.spyOn(auth, "authenticateRequest").mockRejectedValue(new auth.AuthenticationError());
+
+    const request = new Request("http://localhost:3000/api/usernames/lookup?account=CBXYZ");
+    const response = await lookupUsernameRoute(request);
+    expect(response.status).toBe(401);
+    expect(sql).not.toHaveBeenCalled();
   });
 });
