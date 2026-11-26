@@ -333,8 +333,16 @@ export function computePaymentTimeline(
     }
   }
 
-  // Detect stalled state if waiting for more than 90 seconds without completion/failure
-  if (!isCompleted && !isFailed && elapsedSeconds > 90) {
+  // A long payment is not stalled when a recent durable stage has progressed.
+  const lastProgressMs = events.reduce((latest, event) => {
+    const eventTime = new Date(event.completedAt ?? event.startedAt).getTime();
+    return Number.isFinite(eventTime) ? Math.max(latest, eventTime) : latest;
+  }, startMs);
+  const waitingOnNetwork = [
+    "submitted", "source_confirmed", "awaiting_attestation", "destination_submitted",
+    "destination_confirmed", "recipient_verified",
+  ].includes(payment.status);
+  if (waitingOnNetwork && !isCompleted && !isFailed && nowMs - lastProgressMs > 90_000) {
     isStalled = true;
   }
 

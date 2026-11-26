@@ -170,7 +170,7 @@ export function PaymentProgressTimeline({
           <div className="banner-text">
             <strong>Network Confirmation Taking Longer Than Usual</strong>
             <p>
-              The transaction is pending block finality. No funds are lost or unconfirmed.
+              The last recorded stage has not changed recently. Check the transaction reference before retrying.
             </p>
           </div>
         </div>
