@@ -249,6 +249,90 @@ export async function recordStellarCctpSource(input: {
   }
 }
 
+/** Complete only when verified destination evidence updates both durable records. */
+export async function recordStellarCctpCompletion(input: {
+  readonly paymentId: string;
+  readonly sourceTransactionHash: string;
+  readonly messageHash: string;
+  readonly attestationHash: string;
+  readonly destinationTransactionHash: string;
+  readonly destinationLedger: number;
+  readonly recipientAddress: string;
+  readonly recipientAmount: string;
+  readonly recipientAmountAtomic: string;
+}): Promise<void> {
+  const sql = getSqlClient();
+  const rows = await sql`
+    WITH eligible AS MATERIALIZED (
+      SELECT p.id
+      FROM payments p
+      JOIN stellar_cctp_operations o ON o.payment_id = p.id
+      WHERE p.id = ${input.paymentId}::uuid
+        AND p.route_id = 'base_to_stellar'
+        AND p.status IN ('source_confirmed', 'awaiting_attestation',
+          'destination_submitted', 'destination_confirmed', 'recipient_verified', 'completed')
+        AND p.recipient_address = ${input.recipientAddress}
+        AND p.expected_recipient_amount = ${input.recipientAmount}::numeric
+        AND (p.destination_transaction_hash IS NULL
+          OR p.destination_transaction_hash = ${input.destinationTransactionHash})
+        AND o.route_id = 'base_to_stellar'
+        AND o.status IN ('destination_prepared', 'destination_submitted',
+          'destination_confirmed', 'recipient_verified', 'completed')
+        AND o.source_transaction_hash = ${input.sourceTransactionHash}
+        AND o.circle_message_hash = ${input.messageHash}
+        AND o.circle_attestation_hash = ${input.attestationHash}
+        AND o.destination_transaction_hash = ${input.destinationTransactionHash}
+        AND o.expected_recipient_address = ${input.recipientAddress}
+        AND o.expected_amount_atomic = ${input.recipientAmountAtomic}::numeric
+      FOR UPDATE OF p, o
+    ), operation AS (
+      UPDATE stellar_cctp_operations o SET status = 'completed',
+        destination_ledger = ${input.destinationLedger},
+        verified_recipient_address = ${input.recipientAddress},
+        verified_amount_atomic = ${input.recipientAmountAtomic}::numeric,
+        verified_at = COALESCE(o.verified_at, now()),
+        failure_code = NULL, updated_at = now()
+      FROM eligible e WHERE o.payment_id = e.id
+      RETURNING o.payment_id
+    ), payment AS (
+      UPDATE payments p SET status = 'completed',
+        destination_transaction_hash = ${input.destinationTransactionHash},
+        verified_recipient_address = ${input.recipientAddress},
+        verified_recipient_amount = ${input.recipientAmount}::numeric,
+        recipient_verified_at = COALESCE(p.recipient_verified_at, now()),
+        failure_code = NULL, failure_message = NULL, updated_at = now()
+      FROM operation o WHERE p.id = o.payment_id
+      RETURNING p.id
+    ), events AS (
+      INSERT INTO payment_events (
+        payment_id, event_key, stage, status, network, transaction_hash,
+        public_message, completed_at
+      )
+      SELECT p.id, event.event_key, event.stage, event.status, 'stellar',
+        ${input.destinationTransactionHash}, event.public_message, now()
+      FROM payment p
+      JOIN operation o ON o.payment_id = p.id
+      CROSS JOIN (VALUES
+        ('stellar_cctp_destination_confirmed', 'destination_confirmation', 'destination_confirmed',
+          'Stellar finalized the destination transaction.'),
+        ('stellar_cctp_recipient_verified', 'recipient_verification', 'recipient_verified',
+          'The finalized transfer matches the exact recipient and USDC amount.'),
+        ('stellar_cctp_completed', 'completion', 'completed',
+          'The recipient received the verified USDC amount.')
+      ) AS event(event_key, stage, status, public_message)
+      ON CONFLICT (payment_id, event_key) DO NOTHING
+      RETURNING payment_id
+    )
+    SELECT p.id FROM payment p JOIN operation o ON o.payment_id = p.id
+  `;
+  if (rows.length === 0) {
+    throw new StellarCctpPersistenceError(
+      "INVALID_PAYMENT_STATE",
+      "Stellar CCTP payment changed while destination completion was being recorded",
+    );
+  }
+}
+
 /**
  * Reconciles a Stellar->Base source burn into canonical PaymentEvents. The
  * resulting state is source_confirmed only; Circle/Base must still attest,
@@ -608,42 +692,16 @@ export async function settleBaseToStellarCctp(input: {
     );
   }
   const verifiedAtomic = normalizeStellarUsdcAmount(verification.amount).raw.toString();
-  await sql.transaction([
-    sql`
-      UPDATE stellar_cctp_operations
-      SET status = 'completed', destination_ledger = ${verification.ledger},
-        verified_recipient_address = ${verification.recipient},
-        verified_amount_atomic = ${verifiedAtomic}::numeric,
-        verified_at = now(), failure_code = NULL, updated_at = now()
-      WHERE payment_id = ${paymentId}::uuid
-        AND destination_transaction_hash = ${destinationTransactionHash}
-        AND expected_recipient_address = ${verification.recipient}
-        AND expected_amount_atomic = ${verifiedAtomic}::numeric
-    `,
-    sql`
-      UPDATE payments
-      SET status = 'completed', destination_transaction_hash = ${destinationTransactionHash},
-        verified_recipient_address = ${verification.recipient},
-        verified_recipient_amount = ${verification.amount}::numeric,
-        recipient_verified_at = now(), failure_code = NULL,
-        failure_message = NULL, updated_at = now()
-      WHERE id = ${paymentId}::uuid AND route_id = 'base_to_stellar'
-        AND recipient_address = ${verification.recipient}
-        AND expected_recipient_amount = ${verification.amount}::numeric
-    `,
-    ...[
-      ["stellar_cctp_destination_confirmed", "destination_confirmation", "destination_confirmed", "Stellar finalized the destination transaction."],
-      ["stellar_cctp_recipient_verified", "recipient_verification", "recipient_verified", "The finalized transfer matches the exact recipient and USDC amount."],
-      ["stellar_cctp_completed", "completion", "completed", "The recipient received the verified USDC amount."],
-    ].map(([eventKey, stage, status, publicMessage]) => sql`
-      INSERT INTO payment_events (
-        payment_id, event_key, stage, status, network, transaction_hash,
-        public_message, completed_at
-      ) VALUES (
-        ${paymentId}::uuid, ${eventKey}, ${stage}, ${status}, 'stellar',
-        ${destinationTransactionHash}, ${publicMessage}, now()
-      ) ON CONFLICT (payment_id, event_key) DO NOTHING
-    `),
-  ]);
+  await recordStellarCctpCompletion({
+    paymentId,
+    sourceTransactionHash,
+    messageHash,
+    attestationHash,
+    destinationTransactionHash,
+    destinationLedger: verification.ledger,
+    recipientAddress: verification.recipient,
+    recipientAmount: verification.amount,
+    recipientAmountAtomic: verifiedAtomic,
+  });
   return { status: "completed", destinationTransactionHash };
 }
