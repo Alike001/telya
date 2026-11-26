@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   CheckCircle2,
   ExternalLink,
@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 
 import type { PaymentExecutionResult, PaymentReview } from "./conversation-payment";
+import { runPaymentActionOnce } from "./payment-action-guard";
 
 export function PaymentReviewCard({
   review,
@@ -31,6 +32,7 @@ export function PaymentReviewCard({
   const [phase, setPhase] = useState<"idle" | "authorizing" | "refreshing" | "error">("idle");
   const [execution, setExecution] = useState<PaymentExecutionResult | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const actionGuard = useRef<Promise<PaymentExecutionResult> | null>(null);
   const routeLabel = review.routeId === "stellar_to_stellar"
     ? "Stellar Direct USDC"
     : review.routeId.replaceAll("_", " ");
@@ -39,7 +41,7 @@ export function PaymentReviewCard({
     setPhase("authorizing");
     setErrorMessage(null);
     try {
-      setExecution(await onConfirm());
+      setExecution(await runPaymentActionOnce(actionGuard, onConfirm));
       setPhase("idle");
     } catch (error) {
       setPhase("error");
@@ -51,10 +53,14 @@ export function PaymentReviewCard({
 
   async function refresh() {
     if (!execution?.transactionHash) return;
+    const transactionHash = execution.transactionHash;
     setPhase("refreshing");
     setErrorMessage(null);
     try {
-      setExecution(await onRefresh(execution.transactionHash));
+      setExecution(await runPaymentActionOnce(
+        actionGuard,
+        () => onRefresh(transactionHash),
+      ));
       setPhase("idle");
     } catch (error) {
       setPhase("error");
