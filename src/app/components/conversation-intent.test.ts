@@ -68,6 +68,34 @@ describe("conversation intent boundary", () => {
     expect(request).toHaveBeenCalledWith("/api/intent", expect.objectContaining({ method: "POST" }));
   });
 
+  it("produces the same payment fields for typed and successful voice input", async () => {
+    const payload = {
+      status: "parsed",
+      intent: {
+        action: "send",
+        amount: "5",
+        asset: "USDC",
+        recipientInput: "@alice",
+        requestedSourceNetwork: null,
+        requestedDestinationNetwork: "stellar",
+      },
+    };
+    const typed = await resolveConversationIntent(
+      "Send 5 USDC to @alice on Stellar",
+      "text",
+      vi.fn().mockResolvedValue(json(payload)),
+    );
+    const voice = await resolveConversationIntent(
+      "Send 5 USDC to @alice on Stellar",
+      "voice",
+      vi.fn().mockResolvedValue(json(payload)),
+    );
+
+    expect({ ...typed, inputMode: undefined }).toEqual({ ...voice, inputMode: undefined });
+    expect(typed.inputMode).toBe("text");
+    expect(voice.inputMode).toBe("voice");
+  });
+
   it.each([
     ["provider fallback", json({ status: "manual_fallback", reason: "provider_unavailable" })],
     ["provider error", json({ error: "provider_unavailable" }, 503)],

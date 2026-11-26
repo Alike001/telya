@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowUp, Loader2, Mic, MicOff, Sparkles, Volume2 } from "lucide-react";
 
+import { finishVoiceCapture } from "./voice-fallback";
+
 export type VoiceState = "idle" | "listening" | "transcribing" | "error";
 
 interface VoiceComposerProps {
@@ -26,6 +28,7 @@ export function VoiceComposer({ onSend, isProcessing = false, disabled = false }
   const [speechSupported, setSpeechSupported] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<any>(null);
+  const voiceFailedRef = useRef(false);
 
   useEffect(() => {
     // Check Web Speech API support
@@ -40,6 +43,7 @@ export function VoiceComposer({ onSend, isProcessing = false, disabled = false }
       recognition.lang = "en-US";
 
       recognition.onstart = () => {
+        voiceFailedRef.current = false;
         setVoiceState("listening");
       };
 
@@ -51,18 +55,27 @@ export function VoiceComposer({ onSend, isProcessing = false, disabled = false }
       };
 
       recognition.onerror = () => {
+        voiceFailedRef.current = true;
         setVoiceState("error");
-        setTimeout(() => setVoiceState("idle"), 2500);
+        inputRef.current?.focus();
       };
 
       recognition.onend = () => {
+        const outcome = finishVoiceCapture({
+          failed: voiceFailedRef.current,
+          transcript: inputRef.current?.value ?? "",
+        });
+        if (outcome.status === "typed_fallback") {
+          setVoiceState("error");
+          inputRef.current?.focus();
+          setTimeout(() => setVoiceState("idle"), 2500);
+          return;
+        }
         setVoiceState("transcribing");
         setTimeout(() => {
           setVoiceState("idle");
-          if (inputRef.current?.value.trim()) {
-            onSend(inputRef.current.value.trim(), "voice");
-            setInput("");
-          }
+          onSend(outcome.text, "voice");
+          setInput("");
         }, 500);
       };
 
@@ -185,6 +198,12 @@ export function VoiceComposer({ onSend, isProcessing = false, disabled = false }
           <span className="wave-bar bar-3" />
           <span className="wave-bar bar-4" />
           <span className="wave-label">Listening... Speak now</span>
+        </div>
+      )}
+      {voiceState === "error" && (
+        <div className="voice-waveform-bar" role="status" aria-live="polite">
+          <MicOff className="mic-icon error" />
+          <span className="wave-label">Voice is unavailable. Type your payment request instead.</span>
         </div>
       )}
     </div>
