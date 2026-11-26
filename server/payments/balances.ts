@@ -1,6 +1,7 @@
 import { rpc, StrKey, Networks } from "@stellar/stellar-sdk";
 
 import { stellarUsdcAmountFromRawUnits } from "../../src/stellar/usdc.ts";
+import type { BalanceProvider } from "./service.ts";
 
 export interface TokenBalanceReader {
   queryContract<T>(
@@ -48,4 +49,22 @@ export async function readStellarUsdcBalance(input: {
     throw new Error("Stellar balance query was not a valid read-only result");
   }
   return stellarUsdcAmountFromRawUnits(result.result);
+}
+
+/** Read every verified Stellar source wallet; unsupported Base reads remain unavailable. */
+export async function readVerifiedWalletBalances(
+  _user: Parameters<BalanceProvider>[0],
+  wallets: Parameters<BalanceProvider>[1],
+  loadReader = stellarBalanceReaderFromEnvironment,
+): Promise<Awaited<ReturnType<BalanceProvider>>> {
+  const stellarWallets = wallets.filter((wallet) => wallet.network === "stellar");
+  const result: Record<string, string | null> = Object.fromEntries(wallets.map((wallet) => [wallet.id, null]));
+  if (stellarWallets.length === 0) return result;
+  const { reader, tokenContract } = loadReader();
+  const balances = await Promise.all(stellarWallets.map((wallet) =>
+    readStellarUsdcBalance({ reader, tokenContract, address: wallet.address })));
+  for (let index = 0; index < stellarWallets.length; index += 1) {
+    result[stellarWallets[index]!.id] = balances[index]!;
+  }
+  return result;
 }
