@@ -1,6 +1,6 @@
 # Telya Current Status
 
-**Date:** November 26, 2026  
+**Date:** November 27, 2026
 **Team:** Bravo  
 **Product:** Telya  
 **Repository:** Alike001/telya  
@@ -51,7 +51,9 @@ Open draft on Prudentdev-xyz/telya, now at `0a87405`. The existing PR stacks the
 
 ### PRs #65 and #66 — timeline, activity, Agent Pass and supporting UI, Issues #7/#8
 
-Both teammate PRs were returned to draft after code review found browser-stored payment state, a placeholder relayer request, simulated MoneyGram settlement/fees/reference, invented verified contact addresses and hardcoded green route indicators. Codex pushed safety fixes to the existing branches: [PR #65](https://github.com/Alike001/telya/pull/65) at `fcb6dc1` keeps the mounted payment path fail-closed and corrects stalled detection; [PR #66](https://github.com/Alike001/telya/pull/66) at `f4d2402` carries that fix, shows MoneyGram/contacts as unavailable until verified, removes unproven judge claims, and keeps the Agent Pass panel from retaining stale API status. On their latest heads, #65 passed 80 tests and #66 passed 90 tests; both passed typecheck, production build, diff check and GitGuardian. Vercel requires fork authorization on both. Their timeline/receipt components are not yet wired to persisted owner-scoped Payment/PaymentEvent data; authenticated refresh, live Testnet UI and real provider acceptance remain unverified. Do not merge or close Issues #7/#8.
+[PR #65](https://github.com/Alike001/telya/pull/65) is now at `6a3d512` and includes the protected PR #49 journey. It mounts authenticated owner-scoped payment history with stable pagination, persisted PaymentEvent timelines and canonical non-signing refresh for an already-submitted direct Stellar payment. Its parser rejects mismatched route/network/rail, decimal, timestamp and network-hash evidence. A receipt appears only when the completed Payment has the exact recipient, amount and destination hash plus matching recipient-verification and completion events; there is no browser-stored financial truth or amount fallback. With `DATABASE_URL`, 139 tests passed across 29 files; plain `pnpm test` passed 135 with four DB tests skipped. Client/server TypeScript, build and diff check passed. [PR evidence](https://github.com/Alike001/telya/pull/65#issuecomment-7204514936). Browser Privy pagination/refresh and a real Testnet timeline/receipt remain unverified; Vercel requires fork authorization. Keep draft.
+
+[PR #66](https://github.com/Alike001/telya/pull/66) is now at `b425102` and stacks the protected conversation plus persisted activity journeys. Contacts use owner-scoped verified APIs; Agent Pass uses exact persisted evidence and owner-passkey operations; MoneyGram remains unavailable. Confirm/Refresh are single-flight. An interrupted SDK response after authorization now reconciles the existing Payment without resubmission; if persistence is temporarily unavailable, the UI enters a truthful Refresh-only `status_unknown` state. With `DATABASE_URL`, 159 tests passed across 36 files; plain `pnpm test` passed 155 with four DB tests skipped. Client/server TypeScript, build and diff check passed. [PR evidence](https://github.com/Alike001/telya/pull/66#issuecomment-7205376040). This is automated Issue #18 evidence, not live Testnet interruption proof. Browser Privy contacts, real Agent Pass create/revoke, Vercel authorization and live user acceptance remain unverified. Keep draft and do not close Issue #8.
 
 ### PR #50 — execution documentation
 Merged as `ab8d4f5`; the playbook, tracker and execution plan are available on main. The latest tracker audit was merged in PR #52.
@@ -78,9 +80,9 @@ MoneyGram's documented non-custodial Stellar widget flow uses a G-address. Telya
 2. Complete PR #46 browser Privy authentication and proof-of-wallet-ownership; no fabricated Privy DID or client-trusted verification.
 3. Implement Issue #15 service/API contracts using actual balances, recipient resolution, quotes, payment state and idempotency.
 4. Reconcile PR #49's main-branch conflicts and prove its protected Smart Account Kit confirmation in a real Privy/passkey browser session and signed Testnet payment; its implementation now refuses hash-only success.
-5. Complete Issue #7 payment timeline/history/receipts on PR #65 using the canonical owner-scoped Payment/PaymentEvent APIs now available.
-6. Complete Issue #8 Agent Pass, contacts and Judge mode using real states.
-7. Run Issue #18 end-to-end route/recovery matrix.
+5. Prove PR #65 authenticated browser pagination/refresh and a real Testnet submitted-to-completed timeline/receipt; its owner-scoped persisted integration is implemented at `6a3d512`.
+6. Prove PR #66 authenticated contacts and owner-passkey Agent Pass create/revoke in a real browser/Testnet session; its real-state integration plus duplicate/interruption recovery are implemented at `b425102`, while MoneyGram remains externally blocked.
+7. Continue Issue #18 end-to-end route/recovery matrix. Automated duplicate and interrupted-response recovery are proven; live interruption and route evidence remain open.
 8. Complete Issue #19/#22, independent teammate testing, bug fixes, demo and submission.
 
 See the [Codex Master Playbook](CODEX-MASTER-PLAYBOOK.md) for the full start-to-finish instructions and the [Execution Tracker](EXECUTION-TRACKER.md) for current task status and human-controlled blockers.
@@ -88,4 +90,3 @@ See the [Codex Master Playbook](CODEX-MASTER-PLAYBOOK.md) for the full start-to-
 ## November 26 backend progress
 
 Draft [PR #53](https://github.com/Alike001/telya/pull/53) at `e2cd2ed` mounts authenticated contacts, conversations, intent, voice and payments, live Stellar USDC balances and owner-scoped history. Direct Stellar reviews are owner-bound and idempotent; exact passkey execution and saved-hash reconciliation advance canonical Payment/Event state only after verified finality, recipient and amount. Migration `0010` adds a five-minute one-time browser handoff: Privy-authenticated preparation sets a path-scoped HttpOnly/Secure/SameSite cookie, stores only its hash, and the dedicated relayer consumes it before reservation or broadcast. Originating Privy-session revocation invalidates it, and the SDK keeps its standard signed `func`/`auth` body while the server supplies the fixed payment context. Neon tests proved owner scope, hashed storage, one-time consumption, revocation, pending recovery, exact completion and replay. With `DATABASE_URL`, 82 tests passed across 19 files; plain `pnpm test` passed 79 with three DB tests skipped. Client/server TypeScript, build and diff check passed; fixtures were removed. A real browser Privy/passkey walkthrough and signed Testnet payment remain unverified. Base and CCTP previews remain unavailable without trusted providers.
-

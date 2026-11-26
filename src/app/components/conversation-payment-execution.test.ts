@@ -153,6 +153,58 @@ describe("conversation payment execution", () => {
     })).resolves.toMatchObject({ status: "unverified", transactionHash: txHash });
   });
 
+  it("reconciles persisted state instead of resubmitting after an interrupted SDK response", async () => {
+    const request = vi.fn()
+      .mockResolvedValueOnce(json({
+        status: "authorization_ready",
+        relayerUrl: "/api/stellar/relayer/payment",
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      }, 201))
+      .mockResolvedValueOnce(json({ status: "pending", transactionHash: txHash }));
+    const submitTransfer = vi.fn().mockRejectedValue(new Error("response lost"));
+
+    await expect(executeConversationPayment(review, {
+      config,
+      smartAccount,
+      request,
+      createKit: vi.fn().mockReturnValue({}),
+      restoreAccount: vi.fn().mockResolvedValue(smartAccount),
+      submitTransfer,
+    })).resolves.toEqual({
+      status: "pending",
+      transactionHash: txHash,
+      message: "Stellar submission is recorded, but final recipient and amount verification is still pending.",
+    });
+    expect(submitTransfer).toHaveBeenCalledTimes(1);
+    expect(request.mock.calls.map(([url]) => url)).toEqual([
+      "/api/payments/stellar/direct/authorize",
+      `/api/payments/stellar/direct/reconcile?id=${review.id}`,
+    ]);
+  });
+
+  it("blocks resubmission when an interrupted SDK response cannot yet be reconciled", async () => {
+    const request = vi.fn()
+      .mockResolvedValueOnce(json({
+        status: "authorization_ready",
+        relayerUrl: "/api/stellar/relayer/payment",
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      }, 201))
+      .mockResolvedValueOnce(json({ error: "payment_state_conflict" }, 409));
+
+    await expect(executeConversationPayment(review, {
+      config,
+      smartAccount,
+      request,
+      createKit: vi.fn().mockReturnValue({}),
+      restoreAccount: vi.fn().mockResolvedValue(smartAccount),
+      submitTransfer: vi.fn().mockRejectedValue(new Error("response lost")),
+    })).resolves.toEqual({
+      status: "status_unknown",
+      transactionHash: null,
+      message: "The authorization response was interrupted and persisted status is temporarily unavailable. Do not submit again; refresh the existing payment status.",
+    });
+  });
+
   it("never invokes signing when the restored passkey account differs", async () => {
     const submitTransfer = vi.fn();
     await expect(executeConversationPayment(review, {

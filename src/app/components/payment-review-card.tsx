@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   CheckCircle2,
   ExternalLink,
@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 
 import type { PaymentExecutionResult, PaymentReview } from "./conversation-payment";
+import { runPaymentActionOnce } from "./payment-action-guard";
 
 export function PaymentReviewCard({
   review,
@@ -25,12 +26,13 @@ export function PaymentReviewCard({
   readonly recipientLabel: string;
   readonly canAuthorize: boolean;
   readonly onConfirm: () => Promise<PaymentExecutionResult>;
-  readonly onRefresh: (transactionHash: string) => Promise<PaymentExecutionResult>;
+  readonly onRefresh: (transactionHash?: string) => Promise<PaymentExecutionResult>;
   readonly onCancel: () => void;
 }) {
   const [phase, setPhase] = useState<"idle" | "authorizing" | "refreshing" | "error">("idle");
   const [execution, setExecution] = useState<PaymentExecutionResult | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const actionGuard = useRef<Promise<PaymentExecutionResult> | null>(null);
   const routeLabel = review.routeId === "stellar_to_stellar"
     ? "Stellar Direct USDC"
     : review.routeId.replaceAll("_", " ");
@@ -39,7 +41,7 @@ export function PaymentReviewCard({
     setPhase("authorizing");
     setErrorMessage(null);
     try {
-      setExecution(await onConfirm());
+      setExecution(await runPaymentActionOnce(actionGuard, onConfirm));
       setPhase("idle");
     } catch (error) {
       setPhase("error");
@@ -50,11 +52,15 @@ export function PaymentReviewCard({
   }
 
   async function refresh() {
-    if (!execution?.transactionHash) return;
+    if (!execution) return;
+    const transactionHash = execution.transactionHash ?? undefined;
     setPhase("refreshing");
     setErrorMessage(null);
     try {
-      setExecution(await onRefresh(execution.transactionHash));
+      setExecution(await runPaymentActionOnce(
+        actionGuard,
+        () => onRefresh(transactionHash),
+      ));
       setPhase("idle");
     } catch (error) {
       setPhase("error");
@@ -119,6 +125,11 @@ export function PaymentReviewCard({
           {execution.message} The hash alone is not proof of submission or completion.
         </div>
       )}
+      {execution?.status === "status_unknown" && (
+        <div className="review-error-banner" role="alert">
+          {execution.message}
+        </div>
+      )}
       {execution?.status === "failed" && (
         <div className="review-error-banner" role="alert">
           {execution.message}
@@ -163,7 +174,9 @@ export function PaymentReviewCard({
             <Fingerprint className="btn-icon" /> Connect verified passkey
           </a>
         )}
-        {(execution?.status === "pending" || execution?.status === "unverified") && (
+        {(execution?.status === "pending" ||
+          execution?.status === "unverified" ||
+          execution?.status === "status_unknown") && (
           <button
             type="button"
             className="cta-button primary review-submit-btn"
