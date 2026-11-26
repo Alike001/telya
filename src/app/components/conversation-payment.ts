@@ -26,6 +26,29 @@ export type PaymentReview = {
   readonly explanation: string;
 };
 
+export type PaymentExecutionResult =
+  | {
+      readonly status: "unverified";
+      readonly transactionHash: string;
+      readonly message: string;
+    }
+  | {
+      readonly status: "pending";
+      readonly transactionHash: string;
+      readonly message: string;
+    }
+  | {
+      readonly status: "completed";
+      readonly transactionHash: string;
+      readonly verifiedRecipient: string;
+      readonly verifiedAmount: string;
+    }
+  | {
+      readonly status: "failed";
+      readonly transactionHash: string | null;
+      readonly message: string;
+    };
+
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -38,6 +61,18 @@ function network(value: unknown): value is "stellar" | "base" {
 
 function decimal(value: unknown): value is string {
   return typeof value === "string" && /^(?:0|[1-9]\d{0,19})(?:\.\d{1,18})?$/.test(value);
+}
+
+function transactionHash(value: unknown): value is string {
+  return typeof value === "string" && /^[0-9a-f]{64}$/i.test(value);
+}
+
+function equalDecimal(left: string, right: string): boolean {
+  const normalize = (value: string) => {
+    const [whole, fraction = ""] = value.split(".");
+    return `${whole}.${fraction.replace(/0+$/, "")}`;
+  };
+  return normalize(left) === normalize(right);
 }
 
 export function parseVerifiedBalances(value: unknown): readonly VerifiedBalance[] {
@@ -116,6 +151,73 @@ export function parsePaymentReview(value: unknown): PaymentReview | null {
     fees,
     reasons: payment.reasons,
     explanation: payload.explanation,
+  };
+}
+
+export function parseAuthorizationReady(value: unknown): {
+  readonly relayerUrl: "/api/stellar/relayer/payment";
+  readonly expiresAt: string;
+} | null {
+  const payload = record(value);
+  if (
+    payload?.status !== "authorization_ready" ||
+    payload.relayerUrl !== "/api/stellar/relayer/payment" ||
+    typeof payload.expiresAt !== "string" ||
+    !Number.isFinite(Date.parse(payload.expiresAt)) ||
+    Date.parse(payload.expiresAt) <= Date.now()
+  ) return null;
+  return { relayerUrl: payload.relayerUrl, expiresAt: payload.expiresAt };
+}
+
+export function parseReconciliation(value: unknown):
+  | { readonly status: "pending" | "completed"; readonly transactionHash: string }
+  | { readonly status: "failed"; readonly transactionHash: string; readonly reason: string }
+  | null {
+  const payload = record(value);
+  if (!transactionHash(payload?.transactionHash)) return null;
+  if (payload.status === "pending" || payload.status === "completed") {
+    return { status: payload.status, transactionHash: payload.transactionHash };
+  }
+  if (payload.status === "failed" && typeof payload.reason === "string") {
+    return { status: "failed", transactionHash: payload.transactionHash, reason: payload.reason };
+  }
+  return null;
+}
+
+/** A completed UI state requires canonical persisted recipient, amount, and hash evidence. */
+export function parseCompletedPaymentReceipt(
+  value: unknown,
+  review: PaymentReview,
+  expectedTransactionHash: string,
+): PaymentExecutionResult | null {
+  const payload = record(value);
+  const payment = record(payload?.payment);
+  const events = Array.isArray(payment?.events) ? payment.events : [];
+  const hasEvent = (stage: string, status: string) => events.some((value) => {
+    const event = record(value);
+    return event?.stage === stage && event.status === status &&
+      event.txHash === expectedTransactionHash;
+  });
+  if (
+    !payment ||
+    payment.id !== review.id ||
+    payment.status !== "completed" ||
+    payment.recipientAddress !== review.recipientAddress ||
+    payment.verifiedRecipientAddress !== review.recipientAddress ||
+    !decimal(payment.expectedRecipientAmount) ||
+    !decimal(payment.verifiedRecipientAmount) ||
+    !equalDecimal(payment.expectedRecipientAmount, review.expectedRecipientAmount) ||
+    !equalDecimal(payment.verifiedRecipientAmount, review.expectedRecipientAmount) ||
+    payment.destinationTransactionHash !== expectedTransactionHash ||
+    !transactionHash(payment.destinationTransactionHash) ||
+    !hasEvent("recipient_verification", "recipient_verified") ||
+    !hasEvent("completion", "completed")
+  ) return null;
+  return {
+    status: "completed",
+    transactionHash: payment.destinationTransactionHash,
+    verifiedRecipient: payment.verifiedRecipientAddress,
+    verifiedAmount: payment.verifiedRecipientAmount,
   };
 }
 

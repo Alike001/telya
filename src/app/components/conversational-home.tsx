@@ -12,8 +12,21 @@ import {
   type ConnectedSmartAccount,
   type SmartAccountPublicConfig,
 } from "../../stellar/smart-account";
-import { apiMessage, parsePaymentReview, parseVerifiedBalances } from "./conversation-payment";
-import type { PaymentReview, VerifiedBalance } from "./conversation-payment";
+import { submitStellarUsdcTransfer } from "../../stellar/usdc";
+import {
+  apiMessage,
+  parsePaymentReview,
+  parseVerifiedBalances,
+} from "./conversation-payment";
+import type {
+  PaymentExecutionResult,
+  PaymentReview,
+  VerifiedBalance,
+} from "./conversation-payment";
+import {
+  executeConversationPayment,
+  reconcileConversationPayment,
+} from "./conversation-payment-execution";
 import { PaymentReviewCard } from "./payment-review-card";
 import { VoiceComposer } from "./voice-composer";
 
@@ -58,6 +71,7 @@ function AuthenticatedConversation() {
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const streamEndRef = useRef<HTMLDivElement>(null);
+  const configRef = useRef<SmartAccountPublicConfig | null>(null);
 
   useEffect(() => {
     streamEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -72,15 +86,22 @@ function AuthenticatedConversation() {
     let active = true;
     async function restore() {
       try {
-        const [configResponse, balanceResponse] = await Promise.all([
-          fetch("/api/stellar/config", { cache: "no-store" }),
-          authenticatedFetch("/api/balances", { cache: "no-store" }, getAccessToken),
-        ]);
+        const configResponse = await fetch("/api/stellar/config", { cache: "no-store" });
         if (configResponse.ok) {
           const config = await configResponse.json() as SmartAccountPublicConfig;
+          configRef.current = config;
           const account = await restoreSmartAccount(createBrowserSmartAccountKit(config));
           if (active) setSmartAccount(account);
         }
+      } catch {
+        if (active) setSmartAccount(null);
+      }
+      try {
+        const balanceResponse = await authenticatedFetch(
+          "/api/balances",
+          { cache: "no-store" },
+          getAccessToken,
+        );
         if (balanceResponse.ok) {
           const parsed = parseVerifiedBalances(await balanceResponse.json());
           if (active) setBalances(parsed);
@@ -117,6 +138,32 @@ function AuthenticatedConversation() {
     }
     if (!conversationId) setConversationId(nextConversationId);
     return { conversationId: nextConversationId, messageId: payload.message.id };
+  }
+
+  async function reconcilePayment(
+    review: PaymentReview,
+    submittedTransactionHash?: string,
+  ): Promise<PaymentExecutionResult> {
+    return reconcileConversationPayment(
+      review,
+      submittedTransactionHash,
+      (input, init) => authenticatedFetch(input, init, getAccessToken),
+    );
+  }
+
+  async function confirmPayment(review: PaymentReview): Promise<PaymentExecutionResult> {
+    const config = configRef.current;
+    if (!smartAccount || !config) {
+      throw new Error("Connect and verify the same Stellar passkey account before authorizing.");
+    }
+    return executeConversationPayment(review, {
+      config,
+      smartAccount,
+      request: (input, init) => authenticatedFetch(input, init, getAccessToken),
+      createKit: createBrowserSmartAccountKit,
+      restoreAccount: restoreSmartAccount,
+      submitTransfer: submitStellarUsdcTransfer,
+    });
   }
 
   async function handleSendMessage(text: string, inputMode: "text" | "voice") {
@@ -228,6 +275,9 @@ function AuthenticatedConversation() {
               <PaymentReviewCard
                 review={message.review}
                 recipientLabel={message.recipientLabel}
+                canAuthorize={Boolean(smartAccount && authenticated)}
+                onConfirm={() => confirmPayment(message.review!)}
+                onRefresh={(transactionHash) => reconcilePayment(message.review!, transactionHash)}
                 onCancel={() => setMessages((previous) => previous.filter((item) => item.id !== message.id))}
               />
             )}

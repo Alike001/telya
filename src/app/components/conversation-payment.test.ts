@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { parsePaymentReview, parseVerifiedBalances } from "./conversation-payment.ts";
+import {
+  parseAuthorizationReady,
+  parseCompletedPaymentReceipt,
+  parsePaymentReview,
+  parseReconciliation,
+  parseVerifiedBalances,
+} from "./conversation-payment.ts";
 
 describe("conversation financial response parsing", () => {
   it("accepts only server-verified balances and preserves unavailable networks", () => {
@@ -34,5 +40,55 @@ describe("conversation financial response parsing", () => {
       ...review, status: "submitted",
       payment: { ...review.payment, status: "submitted", sourceTransactionHash: "a".repeat(64) },
     })).toBeNull();
+
+    const parsedReview = parsePaymentReview(review)!;
+    const txHash = "a".repeat(64);
+    const receipt = {
+      payment: {
+        id: "payment-1",
+        status: "completed",
+        recipientAddress: "CRECIPIENT",
+        expectedRecipientAmount: "1.250000000000000000",
+        verifiedRecipientAddress: "CRECIPIENT",
+        verifiedRecipientAmount: "1.250000000000000000",
+        destinationTransactionHash: txHash,
+        events: [
+          { stage: "recipient_verification", status: "recipient_verified", txHash },
+          { stage: "completion", status: "completed", txHash },
+        ],
+      },
+    };
+    expect(parseCompletedPaymentReceipt(receipt, parsedReview, txHash)).toMatchObject({
+      status: "completed",
+      transactionHash: txHash,
+      verifiedRecipient: "CRECIPIENT",
+    });
+    expect(parseCompletedPaymentReceipt({
+      payment: { ...receipt.payment, verifiedRecipientAddress: "CDIFFERENT" },
+    }, parsedReview, txHash)).toBeNull();
+    expect(parseCompletedPaymentReceipt({
+      payment: { ...receipt.payment, verifiedRecipientAmount: "1.24" },
+    }, parsedReview, txHash)).toBeNull();
+    expect(parseCompletedPaymentReceipt({
+      payment: { ...receipt.payment, destinationTransactionHash: "b".repeat(64) },
+    }, parsedReview, txHash)).toBeNull();
+  });
+
+  it("accepts only the fixed same-origin relayer and explicit reconciliation states", () => {
+    expect(parseAuthorizationReady({
+      status: "authorization_ready",
+      relayerUrl: "/api/stellar/relayer/payment",
+      expiresAt: "2030-01-01T00:00:00.000Z",
+    })).not.toBeNull();
+    expect(parseAuthorizationReady({
+      status: "authorization_ready",
+      relayerUrl: "https://attacker.test/relayer",
+      expiresAt: "2030-01-01T00:00:00.000Z",
+    })).toBeNull();
+    expect(parseReconciliation({ status: "pending", transactionHash: "a".repeat(64) })).toEqual({
+      status: "pending",
+      transactionHash: "a".repeat(64),
+    });
+    expect(parseReconciliation({ status: "completed", transactionHash: "not-a-hash" })).toBeNull();
   });
 });
