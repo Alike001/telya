@@ -13,6 +13,7 @@ import {
 } from "../../../../stellar/usdc";
 import {
   assertActiveAgentPassForTransfer,
+  assertStellarPaymentRequestLink,
   completeStellarAgentPassCreation,
   completeStellarAgentPassRevocation,
   completeStellarUsdcTransferRequest,
@@ -23,13 +24,32 @@ import {
   recordVerifiedAgentPassSpend,
   reserveStellarRelayerRequest,
   stellarRelayerRequestIdentity,
+  linkStellarPaymentAuthorization,
+  validateStellarPaymentAuthorization,
 } from "../../../../server/stellar-relayer-requests";
+import {
+  AuthenticationError,
+  AuthenticationUnavailableError,
+  authenticateRequest,
+} from "../../../../../server/auth/privy";
 import { rpc } from "@stellar/stellar-sdk";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 function errorResponse(error: unknown): Response {
+  if (error instanceof AuthenticationError) {
+    return Response.json(
+      { success: false, error: "Authentication is required", errorCode: "AUTHENTICATION_REQUIRED" },
+      { status: 401, headers: { "cache-control": "no-store" } },
+    );
+  }
+  if (error instanceof AuthenticationUnavailableError) {
+    return Response.json(
+      { success: false, error: "Authentication is temporarily unavailable", errorCode: "AUTHENTICATION_UNAVAILABLE" },
+      { status: 503, headers: { "cache-control": "no-store" } },
+    );
+  }
   if (error instanceof StellarRelayerError) {
     return Response.json(
       { success: false, error: error.message, errorCode: error.code },
@@ -90,6 +110,23 @@ export async function POST(request: Request): Promise<Response> {
         process.env.STELLAR_SPENDING_LIMIT_POLICY ?? "",
       usdcContract: process.env.STELLAR_USDC_SAC ?? "",
     });
+    if (submission.paymentId && validated.kind !== "usdc_transfer") {
+      throw new StellarRelayerError(
+        "INVALID_REQUEST",
+        "A payment ID is accepted only for a USDC transfer",
+        400,
+      );
+    }
+    const paymentUser = validated.kind === "usdc_transfer" && submission.paymentId
+      ? await authenticateRequest(request)
+      : null;
+    if (paymentUser && submission.paymentId && validated.kind === "usdc_transfer") {
+      await validateStellarPaymentAuthorization(
+        paymentUser.id,
+        submission.paymentId,
+        validated,
+      );
+    }
     const forwardedFor = request.headers
       .get("x-forwarded-for")
       ?.split(",")[0]
@@ -106,6 +143,13 @@ export async function POST(request: Request): Promise<Response> {
       identity.clientKeyHash,
     );
     if (reservation.decision === "succeeded") {
+      if (paymentUser && submission.paymentId) {
+        await assertStellarPaymentRequestLink(
+          paymentUser.id,
+          submission.paymentId,
+          identity.requestHash,
+        );
+      }
       return Response.json(
         { success: true, hash: reservation.transactionHash, status: "SUCCESS" },
         { headers: { "cache-control": "no-store" } },
@@ -129,6 +173,14 @@ export async function POST(request: Request): Promise<Response> {
     if (validated.kind === "usdc_transfer") {
       await assertActiveAgentPassForTransfer(validated);
       await recordStellarUsdcTransferAuthorization(identity.requestHash, validated);
+      if (paymentUser && submission.paymentId) {
+        await linkStellarPaymentAuthorization(
+          paymentUser.id,
+          submission.paymentId,
+          identity.requestHash,
+          validated,
+        );
+      }
     }
     if (
       validated.kind === "agent_pass_create" ||

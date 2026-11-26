@@ -27,7 +27,8 @@ export class StellarRelayerError extends Error {
       | "FORBIDDEN_DEPLOYMENT"
       | "FEE_LIMIT_EXCEEDED"
       | "RELAYER_UNAVAILABLE"
-      | "SUBMISSION_FAILED",
+      | "SUBMISSION_FAILED"
+      | "PAYMENT_MISMATCH",
     message: string,
     readonly status: number,
     options?: ErrorOptions,
@@ -40,6 +41,7 @@ export class StellarRelayerError extends Error {
 export interface StellarDeploymentSubmission {
   readonly func: string;
   readonly auth: readonly string[];
+  readonly paymentId?: string;
 }
 
 export interface ValidatedStellarDeployment {
@@ -974,5 +976,14 @@ export function parseStellarRelayerRequest(body: unknown): StellarDeploymentSubm
   ) {
     throw new StellarRelayerError("INVALID_REQUEST", "Invalid relayer request", 400);
   }
-  return { func: value.func, auth: value.auth as string[] };
+  if (value.paymentId !== undefined &&
+      (typeof value.paymentId !== "string" ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value.paymentId))) {
+    throw new StellarRelayerError("INVALID_REQUEST", "Invalid payment ID", 400);
+  }
+  return {
+    func: value.func,
+    auth: value.auth as string[],
+    ...(typeof value.paymentId === "string" ? { paymentId: value.paymentId.toLowerCase() } : {}),
+  };
 }
