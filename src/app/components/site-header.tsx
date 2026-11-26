@@ -3,7 +3,6 @@
 import { useState } from "react";
 import Link from "next/link";
 import {
-  CheckCircle2,
   ChevronDown,
   Menu,
   ShieldCheck,
@@ -185,9 +184,7 @@ export function SiteHeader() {
               </div>
               <div>
                 <dt>Fee Policy</dt>
-                <dd className="proof-text">
-                  <CheckCircle2 className="inline-check" /> Sponsored / Free
-                </dd>
+                <dd>Stellar direct network fees are sponsored when the relayer is available. Other route fees require a live quote.</dd>
               </div>
               <div>
                 <dt>Completion Rule</dt>

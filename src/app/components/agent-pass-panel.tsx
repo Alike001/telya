@@ -67,11 +67,14 @@ export function AgentPassPanel({
       if (res.ok) {
         const data = await res.json();
         setPass(data);
-      } else {
+      } else if (res.status === 404) {
         setPass(null);
+      } else {
+        throw new Error("Agent Pass status is unavailable. Please retry.");
       }
     } catch {
-      // Offline or network error
+      setPass(null);
+      setError("Agent Pass status could not be verified. Please retry.");
     } finally {
       setIsLoading(false);
     }
@@ -106,9 +109,7 @@ export function AgentPassPanel({
         durationLedgers,
       });
 
-      setSuccessNotice(
-        `Agent Pass active! Biometrically signed and bound to Rule #${created.ruleId}.`,
-      );
+      setSuccessNotice(`Agent Pass creation submitted for Rule #${created.ruleId}. Checking its recorded status.`);
       setShowCreateModal(false);
       await fetchPass();
     } catch (err) {
@@ -135,7 +136,7 @@ export function AgentPassPanel({
         pass: { ruleId: pass.ruleId },
       });
 
-      setSuccessNotice(`Agent Pass revoked. On-chain transaction: ${result.transactionHash.slice(0, 10)}...`);
+      setSuccessNotice(`Revocation submitted. Check the recorded status before assuming the pass is inactive. Transaction: ${result.transactionHash.slice(0, 10)}...`);
       await fetchPass();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to revoke Agent Pass.");
