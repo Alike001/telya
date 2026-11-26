@@ -38,10 +38,12 @@ function paymentId(request: Request): string {
   return new URL(request.url).searchParams.get("id") ?? "";
 }
 
-function parseTransactionHash(value: unknown, base: boolean): string | null {
+export function parseTransactionHash(value: unknown, base: boolean): string | null {
   if (typeof value !== "string") return null;
   const pattern = base ? /^0x[0-9a-fA-F]{64}$/ : /^(?:0x)?[0-9a-fA-F]{64}$/;
-  return pattern.test(value) ? value.toLowerCase() : null;
+  if (!pattern.test(value)) return null;
+  const normalized = value.toLowerCase();
+  return base ? normalized : normalized.replace(/^0x/, "");
 }
 
 function mapBasePaymentError(error: unknown): Response | null {
