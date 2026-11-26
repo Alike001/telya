@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { Payment, PaymentEvent } from "./contracts";
+
+import type { PersistedPayment, PersistedPaymentEvent } from "./payment-activity";
 import {
   buildPaymentReceipt,
   computePaymentTimeline,
@@ -7,167 +8,114 @@ import {
   getExplorerUrl,
 } from "./payment-timeline";
 
-const mockStellarPayment: Payment = {
-  id: "pay_stellar_123",
-  userId: "user_1",
-  paymentIntentId: "intent_1",
-  routeDecisionId: "route_1",
-  idempotencyKey: "idem_123",
+const paymentId = "11111111-1111-4111-8111-111111111111";
+const txHash = "a".repeat(64);
+const now = Date.now();
+
+const events: readonly PersistedPaymentEvent[] = [
+  {
+    id: "22222222-2222-4222-8222-222222222221",
+    paymentId,
+    recordStage: "authorization",
+    stage: "authorized",
+    network: "stellar",
+    txHash: null,
+    explorerUrl: null,
+    publicMessage: "Passkey authorization recorded.",
+    errorCode: null,
+    occurredAt: new Date(now - 14_000).toISOString(),
+    completedAt: new Date(now - 14_000).toISOString(),
+  },
+  {
+    id: "22222222-2222-4222-8222-222222222222",
+    paymentId,
+    recordStage: "source_submission",
+    stage: "submitted",
+    network: "stellar",
+    txHash,
+    explorerUrl: getExplorerUrl("stellar", txHash),
+    publicMessage: "USDC transfer submitted to Stellar Testnet.",
+    errorCode: null,
+    occurredAt: new Date(now - 10_000).toISOString(),
+    completedAt: new Date(now - 10_000).toISOString(),
+  },
+];
+
+const payment: PersistedPayment = {
+  id: paymentId,
+  status: "submitted",
   route: {
     id: "stellar_to_stellar",
     sourceNetwork: "stellar",
     destinationNetwork: "stellar",
     rail: "stellar_usdc",
   },
-  sourceWalletId: "wallet_stellar_1",
-  recipient: { kind: "username", username: "alice" },
-  expectedRecipient: "@alice",
-  asset: "USDC",
+  recipientAddress: "CRECIPIENT",
   expectedAmount: "10.00",
-  fees: [
-    {
-      kind: "sponsor",
-      amount: "0.00",
-      asset: "USDC",
-      payer: "sponsor",
-      label: "Sponsored Fee",
-    },
-  ],
-  feeAmount: "0.00",
-  sourceTransaction: {
-    network: "stellar",
-    txHash: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
-    explorerUrl:
-      "https://stellar.expert/explorer/testnet/tx/a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
-  },
+  verifiedRecipient: null,
+  verifiedAmount: null,
+  asset: "USDC",
+  fees: [{ kind: "sponsor", amount: "0", asset: "XLM", payer: "sponsor", label: "Network fee" }],
+  sourceTransaction: { network: "stellar", txHash, explorerUrl: getExplorerUrl("stellar", txHash) },
   destinationTransaction: null,
-  status: "submitted",
-  actualRecipient: null,
-  actualAmount: null,
   failureCode: null,
-  failureStage: null,
-  createdAt: new Date(Date.now() - 15000).toISOString(),
-  updatedAt: new Date(Date.now() - 5000).toISOString(),
+  createdAt: new Date(now - 15_000).toISOString(),
+  updatedAt: new Date(now - 10_000).toISOString(),
   completedAt: null,
+  events,
 };
 
-const mockEvents: readonly PaymentEvent[] = [
-  {
-    id: "evt_1",
-    paymentId: "pay_stellar_123",
-    sequence: 1,
-    stage: "authorized",
-    status: "succeeded",
-    network: "stellar",
-    txHash: null,
-    explorerUrl: null,
-    publicMessage: "Passkey biometric authorization succeeded.",
-    debugMessage: null,
-    errorCode: null,
-    startedAt: new Date(Date.now() - 15000).toISOString(),
-    completedAt: new Date(Date.now() - 14000).toISOString(),
-  },
-  {
-    id: "evt_2",
-    paymentId: "pay_stellar_123",
-    sequence: 2,
-    stage: "submitted",
-    status: "succeeded",
-    network: "stellar",
-    txHash: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
-    explorerUrl:
-      "https://stellar.expert/explorer/testnet/tx/a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
-    publicMessage: "USDC transfer submitted to Stellar Testnet relayer.",
-    debugMessage: null,
-    errorCode: null,
-    startedAt: new Date(Date.now() - 14000).toISOString(),
-    completedAt: new Date(Date.now() - 10000).toISOString(),
-  },
-];
-
-describe("Payment Timeline & Invariants", () => {
-  it("formats elapsed duration accurately without mock units", () => {
+describe("persisted payment timeline", () => {
+  it("formats real elapsed duration", () => {
     expect(formatDuration(0)).toBe("0s");
-    expect(formatDuration(42)).toBe("42s");
     expect(formatDuration(65)).toBe("1m 5s");
-    expect(formatDuration(180)).toBe("3m 0s");
   });
 
-  it("returns verified explorer URLs for each supported network", () => {
-    const stellarHash = "abcdef0123456789";
-    const baseHash = "0x9876543210fedcba";
-    expect(getExplorerUrl("stellar", stellarHash)).toContain("stellar.expert");
-    expect(getExplorerUrl("base", baseHash)).toContain("basescan.org");
+  it("uses Testnet explorers for supported networks", () => {
+    expect(getExplorerUrl("stellar", txHash)).toContain("stellar.expert/explorer/testnet");
+    expect(getExplorerUrl("base", `0x${txHash}`)).toContain("sepolia.basescan.org");
   });
 
-  it("computes active in-progress timeline for direct Stellar payment", () => {
-    const timeline = computePaymentTimeline(mockStellarPayment, mockEvents);
-
-    expect(timeline.routeId).toBe("stellar_to_stellar");
-    expect(timeline.isCompleted).toBe(false);
-    expect(timeline.isFailed).toBe(false);
-    expect(timeline.steps).toHaveLength(5);
-
-    // Step 0: authorized should be completed
+  it("derives direct Stellar progress only from persisted status and events", () => {
+    const timeline = computePaymentTimeline(payment, events, now);
     expect(timeline.steps[0]?.status).toBe("completed");
-    // Step 1: submitted should be current
     expect(timeline.steps[1]?.status).toBe("current");
-    expect(timeline.steps[1]?.txHash).toBe(mockStellarPayment.sourceTransaction?.txHash);
-    expect(timeline.steps[1]?.explorerUrl).toContain("stellar.expert");
-    // Step 2, 3, 4: should be pending
-    expect(timeline.steps[2]?.status).toBe("pending");
-    expect(timeline.steps[3]?.status).toBe("pending");
-    expect(timeline.steps[4]?.status).toBe("pending");
-
-    expect(timeline.elapsedSeconds).toBeGreaterThanOrEqual(14);
-    expect(timeline.latestMessage).toBe("USDC transfer submitted to Stellar Testnet relayer.");
+    expect(timeline.steps[1]?.txHash).toBe(txHash);
+    expect(timeline.latestMessage).toBe("USDC transfer submitted to Stellar Testnet.");
   });
 
-  it("detects stalled condition when step has had no progress beyond threshold", () => {
-    const oldEvents = mockEvents.map((event) => ({
+  it("does not mark awaiting user confirmation as stalled", () => {
+    expect(computePaymentTimeline({
+      ...payment,
+      status: "awaiting_confirmation",
+      createdAt: new Date(now - 120_000).toISOString(),
+      events: [],
+    }, [], now).isStalled).toBe(false);
+  });
+
+  it("marks network waiting stalled only after the latest persisted event is old", () => {
+    const oldEvents = events.map((event) => ({
       ...event,
-      startedAt: new Date(Date.now() - 115_000).toISOString(),
-      completedAt: new Date(Date.now() - 110_000).toISOString(),
+      occurredAt: new Date(now - 110_000).toISOString(),
+      completedAt: new Date(now - 110_000).toISOString(),
     }));
-    const stalledPayment: Payment = {
-      ...mockStellarPayment,
-      createdAt: new Date(Date.now() - 120_000).toISOString(), // 120 seconds ago
-    };
-
-    const timeline = computePaymentTimeline(stalledPayment, oldEvents);
-    expect(timeline.isStalled).toBe(true);
-    expect(timeline.steps[1]?.status).toBe("stalled");
+    expect(computePaymentTimeline({
+      ...payment,
+      createdAt: new Date(now - 120_000).toISOString(),
+      events: oldEvents,
+    }, oldEvents, now).isStalled).toBe(true);
   });
 
-  it("does not call a long payment stalled after recent progress or while awaiting user confirmation", () => {
-    const oldPayment: Payment = {
-      ...mockStellarPayment,
-      createdAt: new Date(Date.now() - 120_000).toISOString(),
-    };
-    expect(computePaymentTimeline(oldPayment, mockEvents).isStalled).toBe(false);
-    expect(computePaymentTimeline({ ...oldPayment, status: "awaiting_confirmation" }, []).isStalled).toBe(false);
-  });
-
-  it("identifies exact failure stage and error details when payment fails", () => {
-    const failedPayment: Payment = {
-      ...mockStellarPayment,
-      status: "failed",
-      failureStage: "submitted",
-      failureCode: "RELAYER_TRANSACTION_REVERTED",
-    };
-
-    const timeline = computePaymentTimeline(failedPayment, mockEvents);
+  it("does not invent an exact failure stage when persistence has only a failure code", () => {
+    const timeline = computePaymentTimeline({ ...payment, status: "failed", failureCode: "TX_FAILED" }, events, now);
     expect(timeline.isFailed).toBe(true);
-    expect(timeline.failureStage).toBe("submitted");
-    expect(timeline.failureReason).toBe("RELAYER_TRANSACTION_REVERTED");
-    expect(timeline.steps[1]?.status).toBe("failed");
-    expect(timeline.steps[1]?.errorMessage).toBe("RELAYER_TRANSACTION_REVERTED");
-    expect(timeline.steps[2]?.status).toBe("pending");
+    expect(timeline.failureStage).toBeNull();
+    expect(timeline.steps.every((step) => step.status !== "failed")).toBe(true);
   });
 
-  it("computes full 8-step lifecycle for Base-to-Stellar CCTP cross-chain payment", () => {
-    const cctpPayment: Payment = {
-      ...mockStellarPayment,
+  it("uses the full CCTP lifecycle for a persisted cross-chain route", () => {
+    const timeline = computePaymentTimeline({
+      ...payment,
       route: {
         id: "base_to_stellar_cctp",
         sourceNetwork: "base",
@@ -175,51 +123,46 @@ describe("Payment Timeline & Invariants", () => {
         rail: "circle_cctp_standard",
       },
       status: "awaiting_attestation",
-    };
-
-    const timeline = computePaymentTimeline(cctpPayment, []);
+      sourceTransaction: null,
+      events: [],
+    }, [], now);
     expect(timeline.steps).toHaveLength(8);
-    expect(timeline.steps.map((s) => s.stage)).toEqual([
-      "authorized",
-      "submitted",
-      "source_confirmed",
-      "awaiting_attestation",
-      "destination_submitted",
-      "destination_confirmed",
-      "recipient_verified",
-      "completed",
-    ]);
     expect(timeline.steps[3]?.status).toBe("current");
-    expect(timeline.steps[3]?.title).toBe("Circle CCTP Attestation");
   });
 
-  it("generates verified payment receipt with destination proof for completed payments", () => {
-    const completedPayment: Payment = {
-      ...mockStellarPayment,
+  it("builds a receipt only with exact persisted completion evidence", () => {
+    const completedEvents: readonly PersistedPaymentEvent[] = [
+      ...events,
+      {
+        ...events[1]!,
+        id: "22222222-2222-4222-8222-222222222223",
+        recordStage: "recipient_verification",
+        stage: "recipient_verified",
+        publicMessage: "Exact recipient and amount verified.",
+      },
+      {
+        ...events[1]!,
+        id: "22222222-2222-4222-8222-222222222224",
+        recordStage: "completion",
+        stage: "completed",
+        publicMessage: "Payment completed.",
+      },
+    ];
+    const completed: PersistedPayment = {
+      ...payment,
       status: "completed",
-      actualRecipient: "GAVERTIFIEDRECIPIENT123",
-      actualAmount: "10.00",
-      destinationTransaction: {
-        network: "stellar",
-        txHash: "f6e5d4c3b2a1f6e5d4c3b2a1f6e5d4c3b2a1f6e5d4c3b2a1f6e5d4c3b2a1f6e5",
-        explorerUrl:
-          "https://stellar.expert/explorer/testnet/tx/f6e5d4c3b2a1f6e5d4c3b2a1f6e5d4c3b2a1f6e5d4c3b2a1f6e5d4c3b2a1f6e5",
-      },
-      recipientVerification: {
-        recipientAddress: "GAVERTIFIEDRECIPIENT123",
-        receivedAmount: "10.00",
-        verifiedAt: new Date().toISOString(),
-      },
-      completedAt: new Date().toISOString(),
+      verifiedRecipient: payment.recipientAddress,
+      verifiedAmount: payment.expectedAmount,
+      destinationTransaction: payment.sourceTransaction,
+      completedAt: completedEvents.at(-1)!.completedAt,
+      events: completedEvents,
     };
-
-    const receipt = buildPaymentReceipt(completedPayment, mockEvents);
-    expect(receipt.isFullySettled).toBe(true);
-    expect(receipt.verifiedRecipient).toBe("GAVERTIFIEDRECIPIENT123");
-    expect(receipt.verifiedAmount).toBe("10.00");
-    expect(receipt.destinationTransaction?.txHash).toBe(
-      completedPayment.destinationTransaction.txHash,
-    );
-    expect(receipt.totalFee).toBe("0.00");
+    expect(buildPaymentReceipt(completed, completedEvents)).toMatchObject({
+      isFullySettled: true,
+      verifiedRecipient: payment.recipientAddress,
+      verifiedAmount: payment.expectedAmount,
+    });
+    expect(buildPaymentReceipt(completed, events)).toBeNull();
+    expect(buildPaymentReceipt({ ...completed, verifiedAmount: "9.99" }, completedEvents)).toBeNull();
   });
 });

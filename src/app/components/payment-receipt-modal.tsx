@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { Payment, PaymentEvent } from "../../domain/contracts";
+import type { PersistedPayment, PersistedPaymentEvent } from "../../domain/payment-activity";
 import {
   buildPaymentReceipt,
   type PaymentReceipt,
@@ -18,8 +18,8 @@ import {
 } from "lucide-react";
 
 interface PaymentReceiptModalProps {
-  readonly payment: Payment;
-  readonly events: readonly PaymentEvent[];
+  readonly payment: PersistedPayment;
+  readonly events: readonly PersistedPaymentEvent[];
   readonly onClose: () => void;
 }
 
@@ -29,7 +29,8 @@ export function PaymentReceiptModal({
   onClose,
 }: PaymentReceiptModalProps) {
   const [copiedField, setCopiedField] = useState<string | null>(null);
-  const receipt: PaymentReceipt = buildPaymentReceipt(payment, events);
+  const receipt: PaymentReceipt | null = buildPaymentReceipt(payment, events);
+  if (!receipt) return null;
 
   function handleCopy(text: string, fieldName: string) {
     navigator.clipboard?.writeText(text);
@@ -65,7 +66,7 @@ export function PaymentReceiptModal({
               <ShieldCheck className="mini-shield" /> Verified Payment Receipt
             </span>
             <h2 className="receipt-amount-display">
-              ${receipt.expectedAmount} <span className="receipt-asset">{receipt.asset}</span>
+              {receipt.expectedAmount} <span className="receipt-asset">{receipt.asset}</span>
             </h2>
             <p className="receipt-date-text">
               {receipt.completedAt
@@ -100,22 +101,22 @@ export function PaymentReceiptModal({
         <div className="receipt-breakdown">
           <div className="receipt-row">
             <span className="row-label">Sent Amount</span>
-            <span className="row-value tabular">${receipt.expectedAmount} USDC</span>
+            <span className="row-value tabular">{receipt.expectedAmount} USDC</span>
           </div>
 
-          <div className="receipt-row">
-            <span className="row-label">Transfer Fee</span>
-            <span className="row-value proof-text">
-              {receipt.fees[0]?.payer === "sponsor"
-                ? "Free (Sponsored by Telya)"
-                : `$${receipt.totalFee} USDC`}
-            </span>
-          </div>
+          {receipt.fees.map((fee, index) => (
+            <div className="receipt-row" key={`${fee.kind}-${index}`}>
+              <span className="row-label">{fee.label}</span>
+              <span className="row-value proof-text">
+                {fee.amount} {fee.asset} · {fee.payer === "sponsor" ? "Sponsor paid" : `${fee.payer} paid`}
+              </span>
+            </div>
+          ))}
 
           <div className="receipt-row highlight">
             <span className="row-label strong">Recipient Gets</span>
             <span className="row-value highlight-amount tabular">
-              ${receipt.verifiedAmount ?? receipt.expectedAmount} USDC
+              {receipt.verifiedAmount} USDC
             </span>
           </div>
 
@@ -166,11 +167,6 @@ export function PaymentReceiptModal({
           <div className="receipt-row">
             <span className="row-label">Settlement Duration</span>
             <span className="row-value">{receipt.durationFormatted}</span>
-          </div>
-
-          <div className="receipt-row">
-            <span className="row-label">Idempotency Key</span>
-            <code className="monospace-sm">{receipt.idempotencyKey.slice(0, 16)}...</code>
           </div>
 
           {/* On-Chain Evidence References */}

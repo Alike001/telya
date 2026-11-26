@@ -1,0 +1,190 @@
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+import { usePrivy } from "@privy-io/react-auth";
+import { Loader2, RefreshCw } from "lucide-react";
+
+import {
+  parsePaymentActivityDetail,
+  parsePaymentActivityPage,
+  type PersistedPayment,
+} from "../../domain/payment-activity";
+import { buildPaymentReceipt } from "../../domain/payment-timeline";
+import { authenticatedFetch } from "../authenticated-fetch";
+import { ActivityHistory } from "./activity-history";
+import { PaymentProgressTimeline } from "./payment-progress-timeline";
+import { PaymentReceiptModal } from "./payment-receipt-modal";
+
+export function PaymentActivityPanel() {
+  if (!process.env.NEXT_PUBLIC_PRIVY_APP_ID) {
+    return <ActivityUnavailable message="Sign-in is not configured, so authenticated payment history is unavailable." />;
+  }
+  return <AuthenticatedPaymentActivity />;
+}
+
+function ActivityUnavailable({ message }: { readonly message: string }) {
+  return (
+    <div className="activity-empty-state" role="status">
+      <p className="empty-title">Payment activity unavailable</p>
+      <p className="empty-sub">{message}</p>
+    </div>
+  );
+}
+
+function AuthenticatedPaymentActivity() {
+  const { ready, authenticated, login, getAccessToken } = usePrivy();
+  const [payments, setPayments] = useState<readonly PersistedPayment[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [selected, setSelected] = useState<PersistedPayment | null>(null);
+  const [showReceipt, setShowReceipt] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const request = useCallback(
+    (input: string, init: RequestInit = {}) => authenticatedFetch(input, init, getAccessToken),
+    [getAccessToken],
+  );
+
+  const loadPage = useCallback(async (cursor?: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const query = cursor
+        ? `/api/payments?limit=20&before=${encodeURIComponent(cursor)}`
+        : "/api/payments?limit=20";
+      const response = await request(query, { cache: "no-store" });
+      const payload: unknown = await response.json();
+      const page = response.ok ? parsePaymentActivityPage(payload) : null;
+      if (!page) throw new Error("The persisted payment history response could not be verified.");
+      setPayments((previous) => cursor ? [...previous, ...page.payments] : page.payments);
+      setNextCursor(page.nextCursor);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Payment history is temporarily unavailable.");
+    } finally {
+      setLoading(false);
+    }
+  }, [request]);
+
+  useEffect(() => {
+    if (!ready || !authenticated) {
+      setPayments([]);
+      setNextCursor(null);
+      setSelected(null);
+      return;
+    }
+    void loadPage();
+  }, [authenticated, loadPage, ready]);
+
+  async function fetchDetail(paymentId: string): Promise<PersistedPayment> {
+    const response = await request(`/api/payments?id=${encodeURIComponent(paymentId)}`, {
+      cache: "no-store",
+    });
+    const payload: unknown = await response.json();
+    const payment = response.ok ? parsePaymentActivityDetail(payload) : null;
+    if (!payment) throw new Error("The persisted payment timeline could not be verified.");
+    setSelected(payment);
+    setPayments((previous) => previous.map((item) => item.id === payment.id ? payment : item));
+    return payment;
+  }
+
+  async function openTimeline(payment: PersistedPayment) {
+    setError(null);
+    setShowReceipt(false);
+    try {
+      await fetchDetail(payment.id);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Payment details are temporarily unavailable.");
+    }
+  }
+
+  async function refreshSelected() {
+    if (!selected) return;
+    setError(null);
+    try {
+      if (selected.route.id === "stellar_to_stellar" && selected.status === "submitted") {
+        await request(
+          `/api/payments/stellar/direct/reconcile?id=${encodeURIComponent(selected.id)}`,
+          { method: "POST", credentials: "same-origin" },
+        );
+      }
+      await fetchDetail(selected.id);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Payment refresh is temporarily unavailable.");
+    }
+  }
+
+  if (!ready) return <ActivityUnavailable message="Checking the authenticated session…" />;
+  if (!authenticated) {
+    return (
+      <div className="activity-empty-state">
+        <p className="empty-title">Sign in to view persisted activity</p>
+        <p className="empty-sub">Telya never restores financial history from browser storage.</p>
+        <button type="button" className="cta-button primary" onClick={login}>Sign in</button>
+      </div>
+    );
+  }
+
+  const receipt = selected ? buildPaymentReceipt(selected, selected.events) : null;
+  return (
+    <div className="activity-live-surface">
+      <div className="activity-live-header">
+        <div>
+          <p className="eyebrow">Persisted payment evidence</p>
+          <h2>Activity and verified receipts</h2>
+        </div>
+        <button
+          type="button"
+          className="refresh-btn"
+          onClick={() => { void loadPage(); }}
+          disabled={loading}
+          aria-label="Refresh payment history"
+        >
+          <RefreshCw className={`refresh-icon ${loading ? "spin" : ""}`} />
+        </button>
+      </div>
+
+      {error && <div className="review-error-banner" role="alert">{error}</div>}
+      {loading && payments.length === 0 ? (
+        <div className="activity-empty-state" role="status">
+          <Loader2 className="empty-icon spinner" />
+          <p className="empty-title">Loading persisted activity…</p>
+        </div>
+      ) : selected ? (
+        <PaymentProgressTimeline
+          payment={selected}
+          events={selected.events}
+          onRefresh={refreshSelected}
+          {...(receipt ? { onViewReceipt: () => setShowReceipt(true) } : {})}
+          onClose={() => { setSelected(null); setShowReceipt(false); }}
+        />
+      ) : (
+        <>
+          <ActivityHistory
+            payments={payments}
+            activePaymentId={null}
+            onSelectPayment={(payment) => { void openTimeline(payment); }}
+            onOpenTimeline={(payment) => { void openTimeline(payment); }}
+          />
+          {nextCursor && (
+            <button
+              type="button"
+              className="timeline-done-btn activity-load-more"
+              onClick={() => { void loadPage(nextCursor); }}
+              disabled={loading}
+            >
+              {loading ? "Loading…" : "Load older payments"}
+            </button>
+          )}
+        </>
+      )}
+
+      {showReceipt && selected && receipt && (
+        <PaymentReceiptModal
+          payment={selected}
+          events={selected.events}
+          onClose={() => setShowReceipt(false)}
+        />
+      )}
+    </div>
+  );
+}

@@ -56,7 +56,7 @@ function UnavailableConversation() {
     <div className="conversational-home-wrapper shell">
       <div className="conversation-stream" role="log" aria-label="Conversation stream">
         <div className="stream-item telya">
-          <div className="stream-bubble"><p className="bubble-text">Sign-in is not configured, so balances and payment review are unavailable. No payment can be submitted.</p></div>
+          <div className="stream-bubble"><p className="bubble-text">Unavailable: sign-in is not configured, so balances and payment review cannot be verified. No payment can be submitted.</p></div>
         </div>
       </div>
     </div>
@@ -184,6 +184,10 @@ function AuthenticatedConversation() {
         appendTelya(stellar?.amount
           ? `Your server-verified Stellar Testnet balance is ${stellar.amount} USDC. Base balance is unavailable.`
           : "A verified USDC balance is unavailable right now. No zero balance is being assumed.");
+        return;
+      }
+      if (parsed.kind === "activity_check") {
+        appendTelya("Your authenticated payment history and persisted event timelines are available in Activity below. Refresh there to reconcile a submitted Stellar payment without resubmitting it.");
         return;
       }
       if (parsed.kind === "agent_pass_check") {

@@ -1,15 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import type { Payment, PaymentEvent } from "../../domain/contracts";
+import { useState } from "react";
+import type { PersistedPayment } from "../../domain/payment-activity";
 import {
-  ArrowDownLeft,
-  ArrowUpRight,
   CheckCircle2,
-  Clock,
-  ExternalLink,
-  FileText,
-  Filter,
   History,
   Loader2,
   Search,
@@ -17,10 +11,10 @@ import {
 } from "lucide-react";
 
 interface ActivityHistoryProps {
-  readonly payments: readonly Payment[];
+  readonly payments: readonly PersistedPayment[];
   readonly activePaymentId?: string | null;
-  readonly onSelectPayment: (payment: Payment) => void;
-  readonly onOpenTimeline: (payment: Payment) => void;
+  readonly onSelectPayment: (payment: PersistedPayment) => void;
+  readonly onOpenTimeline: (payment: PersistedPayment) => void;
 }
 
 export function ActivityHistory({
@@ -46,7 +40,7 @@ export function ActivityHistory({
     // Filter by search query (handle, amount, or id)
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
-      const matchRecipient = payment.expectedRecipient.toLowerCase().includes(q);
+      const matchRecipient = payment.recipientAddress.toLowerCase().includes(q);
       const matchAmount = payment.expectedAmount.includes(q);
       const matchId = payment.id.toLowerCase().includes(q);
       return matchRecipient || matchAmount || matchId;
@@ -145,13 +139,15 @@ export function ActivityHistory({
                 <div className="activity-card-left">
                   <div className={`activity-avatar ${isInProgress ? "pulsing" : ""}`}>
                     <span>
-                      {payment.expectedRecipient.replace(/^@/, "").slice(0, 2).toUpperCase()}
+                      {payment.recipientAddress.slice(0, 2).toUpperCase()}
                     </span>
                   </div>
 
                   <div className="activity-meta">
                     <div className="recipient-row">
-                      <strong className="recipient-handle">{payment.expectedRecipient}</strong>
+                      <strong className="recipient-handle">
+                        {payment.recipientAddress.slice(0, 10)}…{payment.recipientAddress.slice(-6)}
+                      </strong>
                       <span className="route-tag">{routeLabel}</span>
                     </div>
                     <span className="activity-date">
