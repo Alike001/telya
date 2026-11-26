@@ -469,7 +469,7 @@ export default function OnboardingPage() {
               <Check className="ready-success-icon" />
             </div>
 
-            <h2>You&apos;re ready to move money.</h2>
+            <h2>Your account is ready.</h2>
             <p className="card-subtitle">
               Your smart account is live on Stellar Testnet and secured by your device passkey.
             </p>
@@ -491,12 +491,12 @@ export default function OnboardingPage() {
                 <div>
                   <span className="detail-label">Security</span>
                   <span className="detail-val proof-text">
-                    <ShieldCheck className="mini-icon" /> Biometrics Active
+                    <ShieldCheck className="mini-icon" /> Passkey verified
                   </span>
                 </div>
                 <div>
-                  <span className="detail-label">Initial Balance</span>
-                  <span className="detail-val tabular">$0.00 USDC</span>
+                  <span className="detail-label">Balance</span>
+                  <span className="detail-val">Unavailable</span>
                 </div>
                 <div>
                   <span className="detail-label">Primary Chain</span>
