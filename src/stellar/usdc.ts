@@ -11,7 +11,7 @@ import {
   type xdr,
 } from "@stellar/stellar-sdk";
 
-import type { DecimalAmount } from "../domain";
+import type { DecimalAmount } from "../domain/contracts.ts";
 
 export const STELLAR_USDC_DECIMALS = 7;
 
