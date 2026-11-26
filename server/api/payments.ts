@@ -8,7 +8,6 @@ import {
 import { appendAssistantMessage } from "../conversations/service.ts";
 import type { Fee, Network } from "../../src/domain/contracts.ts";
 import {
-  confirmPayment,
   createPaymentRecord,
   getPaymentWithEvents,
   getVerifiedSourceWallets,
@@ -237,28 +236,6 @@ export function createPaymentHandler(options: PaymentApiOptions = {}) {
       if (error instanceof PaymentNotFoundError) return jsonResponse({ error: "payment_not_found" }, 404);
       if (error instanceof PaymentConflictError) return jsonResponse({ error: "payment_conflict", message: error.message }, 409);
       if (error instanceof PaymentProviderUnavailableError) return jsonResponse({ error: "payment_provider_unavailable" }, 503);
-      return null;
-    },
-  );
-}
-
-export function createPaymentConfirmationHandler(options: { authenticate?: AuthenticateRequest } = {}) {
-  return createAuthenticatedHandler(
-    options.authenticate ?? authenticateRequest,
-    async (request, user) => {
-      if (request.method !== "POST") return jsonResponse({ error: "method_not_allowed" }, 405);
-      const paymentId = new URL(request.url).searchParams.get("id") ?? "";
-      const payment = await confirmPayment(user, paymentId);
-      return jsonResponse({
-        paymentId: payment.id,
-        status: payment.status,
-        message: "You confirmed this payment. It has not been submitted yet.",
-      });
-    },
-    (error) => {
-      if (error instanceof PaymentInputError) return jsonResponse({ error: "invalid_payment", message: error.message }, 400);
-      if (error instanceof PaymentNotFoundError) return jsonResponse({ error: "payment_not_found" }, 404);
-      if (error instanceof PaymentConflictError) return jsonResponse({ error: "payment_conflict", message: error.message }, 409);
       return null;
     },
   );

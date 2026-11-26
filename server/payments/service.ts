@@ -364,60 +364,6 @@ export async function createPaymentRecord(
   return { payment: row, reused: !inserted };
 }
 
-export async function confirmPayment(
-  user: Pick<AuthenticatedUser, "id">,
-  paymentId: string,
-): Promise<Record<string, unknown>> {
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(paymentId)) {
-    throw new PaymentInputError("Invalid payment ID");
-  }
-  const sql = getSqlClient();
-  const [, eventRows, recordRows] = await sql.transaction([
-    sql`
-      UPDATE payments
-      SET status = 'authorized', updated_at = now()
-      WHERE id = ${paymentId}::uuid AND user_id = ${user.id}::uuid
-        AND status = 'awaiting_confirmation'
-      RETURNING id
-    `,
-    sql`
-      WITH payment AS MATERIALIZED (
-        SELECT id, status, source_network, conversation_id
-        FROM payments
-        WHERE id = ${paymentId}::uuid AND user_id = ${user.id}::uuid
-        FOR UPDATE
-      ), event AS (
-        INSERT INTO payment_events (payment_id, event_key, stage, status, network, public_message)
-        SELECT id, 'user_authorized', 'authorization', 'authorized', source_network,
-          'You confirmed this payment. It has not been submitted yet.'
-        FROM payment
-        WHERE status = 'authorized'
-        ON CONFLICT (payment_id, event_key) DO NOTHING
-        RETURNING payment_id
-      )
-      INSERT INTO messages (conversation_id, role, content, structured_intent)
-      SELECT payment.conversation_id, 'assistant',
-        'You confirmed this payment. Wallet authorization and transaction submission are still pending.',
-        jsonb_build_object('paymentId', payment.id, 'status', 'authorized')
-      FROM payment
-      JOIN event ON event.payment_id = payment.id
-      RETURNING id
-    `,
-    sql`
-      SELECT id, status, route_id, source_network, destination_network, rail,
-        recipient_address, expected_recipient_amount, fees, route_reasons,
-        created_at, updated_at
-      FROM payments
-      WHERE id = ${paymentId}::uuid AND user_id = ${user.id}::uuid
-    `,
-  ]);
-  void eventRows;
-  const row = (recordRows as Record<string, unknown>[])[0];
-  if (!row) throw new PaymentNotFoundError();
-  if (row.status !== "authorized") throw new PaymentConflictError("Payment is not awaiting confirmation");
-  return row;
-}
-
 export async function getPaymentWithEvents(
   user: Pick<AuthenticatedUser, "id">,
   paymentId: string,

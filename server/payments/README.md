@@ -7,7 +7,6 @@ The framework-neutral authenticated handlers exported from `server/api/index.ts`
 | `createContactsHandler` | `GET`, `POST`, `DELETE` | Lists, saves by active username, and removes the authenticated user's contacts |
 | `createConversationsHandler` | `GET`, `POST` | Creates a conversation with the first user message, appends user messages, and reads owned history |
 | `createPaymentHandler` | `GET`, `POST` | Reads a payment timeline or resolves recipient/route, obtains balance/fee quotes, and persists a reviewable payment and initial event |
-| `createPaymentConfirmationHandler` | `POST` | Records the user's confirmation and an authorization event |
 
 All handlers verify the Privy bearer session and scope database reads/writes to that user. Conversation history returns only user and assistant messages. Server-only assistant message persistence is available through `appendAssistantMessage`.
 
@@ -25,7 +24,7 @@ Payment creation requires an existing user message ID from the owned conversatio
 
 `createPaymentHandler` requires server-side `getBalances` and `quoteFees` adapters. Missing/erroring providers fail closed with 503. An empty fee list is valid only when the trusted quote adapter confirms that there are no displayable fees. Fee details are stored separately and returned for the user review card. `GET` returns only consumer-safe event fields and never includes internal debug messages.
 
-The created payment stays in `awaiting_confirmation`; confirmation records user consent and an event but does not submit or sign a transaction. The later execution integration must recheck current balance, fee quote, wallet state, and idempotency before submission. Chain execution and finality verification are outside this handler and must use the existing payment completion invariant.
+The created payment stays in `awaiting_confirmation`. No confirmation handler is exposed until a real wallet authorization proof is verified. The later execution integration must recheck current balance, fee quote, wallet state, and idempotency before submission. Chain execution and finality verification are outside this handler and must use the existing payment completion invariant.
 
 ## Example request
 
