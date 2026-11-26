@@ -1,3 +1,3 @@
-export { createIntentHandler } from "./intent.js";
-export type { IntentResult, ParsedPaymentIntent } from "./intent.js";
-export { createTranscriptionHandler } from "./voice.js";
+export { createIntentHandler } from "./intent.ts";
+export type { IntentResult, ParsedPaymentIntent } from "./intent.ts";
+export { createTranscriptionHandler } from "./voice.ts";

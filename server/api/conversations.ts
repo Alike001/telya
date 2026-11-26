@@ -1,4 +1,4 @@
-import { authenticateRequest } from "../auth/privy.js";
+import { authenticateRequest } from "../auth/privy.ts";
 import {
   appendUserMessage,
   ConversationInputError,
@@ -6,9 +6,9 @@ import {
   createConversation,
   listConversationMessages,
   listConversations,
-} from "../conversations/service.js";
-import { createAuthenticatedHandler, isRecord, jsonResponse, readJson } from "./http.js";
-import type { AuthenticateRequest } from "./http.js";
+} from "../conversations/service.ts";
+import { createAuthenticatedHandler, isRecord, jsonResponse, readJson } from "./http.ts";
+import type { AuthenticateRequest } from "./http.ts";
 
 function boundedLimit(value: string | null, fallback: number): number {
   if (!value || !/^\d+$/.test(value)) return fallback;
