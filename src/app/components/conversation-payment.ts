@@ -28,6 +28,11 @@ export type PaymentReview = {
 
 export type PaymentExecutionResult =
   | {
+      readonly status: "status_unknown";
+      readonly transactionHash: null;
+      readonly message: string;
+    }
+  | {
       readonly status: "unverified";
       readonly transactionHash: string;
       readonly message: string;

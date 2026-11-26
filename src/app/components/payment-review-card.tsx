@@ -26,7 +26,7 @@ export function PaymentReviewCard({
   readonly recipientLabel: string;
   readonly canAuthorize: boolean;
   readonly onConfirm: () => Promise<PaymentExecutionResult>;
-  readonly onRefresh: (transactionHash: string) => Promise<PaymentExecutionResult>;
+  readonly onRefresh: (transactionHash?: string) => Promise<PaymentExecutionResult>;
   readonly onCancel: () => void;
 }) {
   const [phase, setPhase] = useState<"idle" | "authorizing" | "refreshing" | "error">("idle");
@@ -52,8 +52,8 @@ export function PaymentReviewCard({
   }
 
   async function refresh() {
-    if (!execution?.transactionHash) return;
-    const transactionHash = execution.transactionHash;
+    if (!execution) return;
+    const transactionHash = execution.transactionHash ?? undefined;
     setPhase("refreshing");
     setErrorMessage(null);
     try {
@@ -125,6 +125,11 @@ export function PaymentReviewCard({
           {execution.message} The hash alone is not proof of submission or completion.
         </div>
       )}
+      {execution?.status === "status_unknown" && (
+        <div className="review-error-banner" role="alert">
+          {execution.message}
+        </div>
+      )}
       {execution?.status === "failed" && (
         <div className="review-error-banner" role="alert">
           {execution.message}
@@ -169,7 +174,9 @@ export function PaymentReviewCard({
             <Fingerprint className="btn-icon" /> Connect verified passkey
           </a>
         )}
-        {(execution?.status === "pending" || execution?.status === "unverified") && (
+        {(execution?.status === "pending" ||
+          execution?.status === "unverified" ||
+          execution?.status === "status_unknown") && (
           <button
             type="button"
             className="cta-button primary review-submit-btn"
