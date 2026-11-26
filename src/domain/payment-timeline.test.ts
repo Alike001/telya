@@ -124,14 +124,28 @@ describe("Payment Timeline & Invariants", () => {
   });
 
   it("detects stalled condition when step has had no progress beyond threshold", () => {
+    const oldEvents = mockEvents.map((event) => ({
+      ...event,
+      startedAt: new Date(Date.now() - 115_000).toISOString(),
+      completedAt: new Date(Date.now() - 110_000).toISOString(),
+    }));
     const stalledPayment: Payment = {
       ...mockStellarPayment,
       createdAt: new Date(Date.now() - 120_000).toISOString(), // 120 seconds ago
     };
 
-    const timeline = computePaymentTimeline(stalledPayment, mockEvents);
+    const timeline = computePaymentTimeline(stalledPayment, oldEvents);
     expect(timeline.isStalled).toBe(true);
     expect(timeline.steps[1]?.status).toBe("stalled");
+  });
+
+  it("does not call a long payment stalled after recent progress or while awaiting user confirmation", () => {
+    const oldPayment: Payment = {
+      ...mockStellarPayment,
+      createdAt: new Date(Date.now() - 120_000).toISOString(),
+    };
+    expect(computePaymentTimeline(oldPayment, mockEvents).isStalled).toBe(false);
+    expect(computePaymentTimeline({ ...oldPayment, status: "awaiting_confirmation" }, []).isStalled).toBe(false);
   });
 
   it("identifies exact failure stage and error details when payment fails", () => {
