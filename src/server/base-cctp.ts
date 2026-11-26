@@ -703,6 +703,8 @@ export async function prepareStellarToBaseCctpDestination(input: {
         source_transaction_hash = ${input.stellarSourceTransactionHash.trim().toLowerCase()},
         updated_at = now()
       WHERE payment_id = ${paymentId}::uuid
+        AND route_id = 'stellar_to_base'
+        AND status IN ('authorized', 'source_confirmed', 'awaiting_attestation')
         AND (source_transaction_hash IS NULL OR source_transaction_hash = ${input.stellarSourceTransactionHash.trim().toLowerCase()})
     `;
     return { status: "pending" };

@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   completionQuery: "",
   transitionRows: true,
   transitionQuery: "",
+  pendingQuery: "",
 }));
 
 vi.mock("server-only", () => ({}));
@@ -125,6 +126,7 @@ beforeEach(() => {
   mocks.completionQuery = "";
   mocks.transitionRows = true;
   mocks.transitionQuery = "";
+  mocks.pendingQuery = "";
   mocks.reconcileStellarCctpSource.mockResolvedValue({ status: "source_confirmed" });
   mocks.getCircleCctpStatus.mockResolvedValue({
     status: "complete",
@@ -169,6 +171,14 @@ beforeEach(() => {
           : null,
         destination_transaction_hash: null,
       }];
+    }
+    if (query.includes("UPDATE base_cctp_operations SET status = 'awaiting_attestation'")) {
+      mocks.pendingQuery = query;
+      if (["authorized", "source_confirmed", "awaiting_attestation"].includes(mocks.status)) {
+        mocks.status = "awaiting_attestation";
+        return [{ payment_id: PAYMENT_ID }];
+      }
+      return [];
     }
     if (query.includes("UPDATE base_cctp_operations SET status = 'destination_prepared'")) {
       mocks.transitionQuery = query;
@@ -223,6 +233,20 @@ describe("Stellar-to-Base CCTP destination reservation", () => {
     })).resolves.toEqual({ status: "in_progress" });
     expect(mocks.transitionQuery).toContain("FOR UPDATE OF p, o");
     expect(mocks.transitionQuery).toContain("FROM payment ON CONFLICT");
+  });
+
+  it("does not regress an active mint reservation when a late Circle poll says pending", async () => {
+    const input = {
+      paymentId: PAYMENT_ID,
+      stellarSourceTransactionHash: STELLAR_SOURCE_HASH,
+      stellarRpc: { getTransaction: vi.fn() } as never,
+      config,
+    };
+    expect((await prepareStellarToBaseCctpDestination(input)).status).toBe("ready");
+    mocks.getCircleCctpStatus.mockResolvedValue({ status: "pending", sourceTransactionHash: STELLAR_SOURCE_HASH });
+    expect(await prepareStellarToBaseCctpDestination(input)).toEqual({ status: "pending" });
+    expect(mocks.status).toBe("destination_prepared");
+    expect(mocks.pendingQuery).toContain("status IN ('authorized', 'source_confirmed', 'awaiting_attestation')");
   });
 
   it("does not record a destination submission event when the guarded payment update loses a race", async () => {
