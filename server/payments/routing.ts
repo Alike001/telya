@@ -45,14 +45,14 @@ export type RouteResult =
       readonly reasons: readonly RouteReasonCode[];
     };
 
-function amountUnits(value: string): bigint | null {
+function decimalUnits(value: string, allowZero = false): bigint | null {
   const match = /^(0|[1-9]\d{0,19})(?:\.(\d{1,18}))?$/.exec(value);
   if (!match) return null;
   const whole = match[1];
   if (!whole) return null;
   const fraction = (match[2] ?? "").padEnd(18, "0");
   const units = BigInt(whole) * 10n ** 18n + BigInt(fraction || "0");
-  return units > 0n ? units : null;
+  return units > 0n || (allowZero && units === 0n) ? units : null;
 }
 
 function amountFitsRoute(value: string, source: Network, destination: Network): boolean {
@@ -80,7 +80,7 @@ function clarification(question: string, reasons: readonly RouteReasonCode[]): R
 
 /** Resolve route constraints in product priority order without making provider or chain calls. */
 export function resolvePaymentRoute(input: RouteInput): RouteResult {
-  const amount = amountUnits(input.amount);
+  const amount = decimalUnits(input.amount);
   if (amount === null) return { status: "unavailable", reason: "invalid_amount", reasons: [] };
 
   const destinations = input.recipient.destinations;
@@ -151,12 +151,12 @@ export function resolvePaymentRoute(input: RouteInput): RouteResult {
     } else if (sourceCandidates.length > 1) {
       const sufficientWallets = sourceCandidates.filter((wallet) => {
         const balance = input.balances[wallet.id];
-        const available = balance === null || balance === undefined ? null : amountUnits(balance);
+        const available = balance === null || balance === undefined ? null : decimalUnits(balance, true);
         return available !== null && available >= amount;
       });
       const hasUnknownBalance = sourceCandidates.some((wallet) => {
         const balance = input.balances[wallet.id];
-        return balance === null || balance === undefined || amountUnits(balance) === null;
+        return balance === null || balance === undefined || decimalUnits(balance, true) === null;
       });
       if (sufficientWallets.length === 1 && !hasUnknownBalance) {
         sourceWallet = sufficientWallets[0];
@@ -169,7 +169,7 @@ export function resolvePaymentRoute(input: RouteInput): RouteResult {
       } else {
         const hasUnknownBalance = sourceCandidates.some((wallet) => {
           const balance = input.balances[wallet.id];
-          return balance === null || balance === undefined || amountUnits(balance) === null;
+          return balance === null || balance === undefined || decimalUnits(balance, true) === null;
         });
         return {
           status: "unavailable",
@@ -191,13 +191,13 @@ export function resolvePaymentRoute(input: RouteInput): RouteResult {
     }
     const sufficientWallets = input.sourceWallets.filter((wallet) => {
       const balance = input.balances[wallet.id];
-      const available = balance === null || balance === undefined ? null : amountUnits(balance);
+      const available = balance === null || balance === undefined ? null : decimalUnits(balance, true);
       return available !== null && available >= amount;
     });
     if (sufficientWallets.length === 0) {
       const hasUnknownBalance = input.sourceWallets.some((wallet) => {
         const balance = input.balances[wallet.id];
-        return balance === null || balance === undefined || amountUnits(balance) === null;
+        return balance === null || balance === undefined || decimalUnits(balance, true) === null;
       });
       return {
         status: "unavailable",
@@ -207,7 +207,7 @@ export function resolvePaymentRoute(input: RouteInput): RouteResult {
     }
     const hasUnknownBalance = input.sourceWallets.some((wallet) => {
       const balance = input.balances[wallet.id];
-      return balance === null || balance === undefined || amountUnits(balance) === null;
+      return balance === null || balance === undefined || decimalUnits(balance, true) === null;
     });
     if (hasUnknownBalance) {
       return clarification("Which wallet should the payment use? I couldn't verify every wallet balance.", [
@@ -258,7 +258,7 @@ export function resolvePaymentRoute(input: RouteInput): RouteResult {
   if (sourceBalance === null || sourceBalance === undefined) {
     return { status: "unavailable", reason: "balance_unavailable", reasons };
   }
-  const available = amountUnits(sourceBalance);
+  const available = decimalUnits(sourceBalance, true);
   if (available === null || available < amount) {
     return { status: "unavailable", reason: "insufficient_balance", reasons };
   }
