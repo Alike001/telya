@@ -1,6 +1,6 @@
 # Telya Current Status
 
-**Date:** November 26, 2026  
+**Date:** November 27, 2026
 **Team:** Bravo  
 **Product:** Telya  
 **Repository:** Alike001/telya  
@@ -53,7 +53,7 @@ Open draft on Prudentdev-xyz/telya, now at `0a87405`. The existing PR stacks the
 
 [PR #65](https://github.com/Alike001/telya/pull/65) is now at `6a3d512` and includes the protected PR #49 journey. It mounts authenticated owner-scoped payment history with stable pagination, persisted PaymentEvent timelines and canonical non-signing refresh for an already-submitted direct Stellar payment. Its parser rejects mismatched route/network/rail, decimal, timestamp and network-hash evidence. A receipt appears only when the completed Payment has the exact recipient, amount and destination hash plus matching recipient-verification and completion events; there is no browser-stored financial truth or amount fallback. With `DATABASE_URL`, 139 tests passed across 29 files; plain `pnpm test` passed 135 with four DB tests skipped. Client/server TypeScript, build and diff check passed. [PR evidence](https://github.com/Alike001/telya/pull/65#issuecomment-7204514936). Browser Privy pagination/refresh and a real Testnet timeline/receipt remain unverified; Vercel requires fork authorization. Keep draft.
 
-[PR #66](https://github.com/Alike001/telya/pull/66) remains at `f4d2402`. It shows MoneyGram/contacts as unavailable until verified, removes unproven judge claims and keeps the Agent Pass panel from retaining stale API status. Its last recorded head passed 90 tests, typecheck, build, diff check and GitGuardian; Vercel requires fork authorization. Real authenticated contacts, Agent Pass browser proof and provider acceptance remain. Do not merge or close Issue #8.
+[PR #66](https://github.com/Alike001/telya/pull/66) is now at `cbd14a3` and stacks the protected conversation plus persisted activity journeys. Contacts use Privy-authenticated owner-scoped APIs, fail closed on malformed/unverified destinations and only prefill the composer; they never authorize a payment. Agent Pass status validates the restored account, rule, verifier/key, exact atomic limit/spend, expiry, status and create/revoke transaction evidence. Create/revoke remain actual Smart Account Kit owner-passkey operations; the prior fake payee spend action is gone. MoneyGram remains visibly unavailable pending partner access and C-address compatibility, and the Testnet guide makes no provider/payment success claim. With `DATABASE_URL`, 154 tests passed across 35 files; plain `pnpm test` passed 150 with four DB tests skipped. Client/server TypeScript, build and diff check passed. [PR evidence](https://github.com/Alike001/telya/pull/66#issuecomment-7205223133). Browser Privy contacts, real Agent Pass create/revoke, Vercel authorization and live user acceptance remain unverified. Keep draft and do not close Issue #8.
 
 ### PR #50 — execution documentation
 Merged as `ab8d4f5`; the playbook, tracker and execution plan are available on main. The latest tracker audit was merged in PR #52.
@@ -81,7 +81,7 @@ MoneyGram's documented non-custodial Stellar widget flow uses a G-address. Telya
 3. Implement Issue #15 service/API contracts using actual balances, recipient resolution, quotes, payment state and idempotency.
 4. Reconcile PR #49's main-branch conflicts and prove its protected Smart Account Kit confirmation in a real Privy/passkey browser session and signed Testnet payment; its implementation now refuses hash-only success.
 5. Prove PR #65 authenticated browser pagination/refresh and a real Testnet submitted-to-completed timeline/receipt; its owner-scoped persisted integration is implemented at `6a3d512`.
-6. Complete Issue #8 Agent Pass, contacts and Judge mode using real states.
+6. Prove PR #66 authenticated contacts and owner-passkey Agent Pass create/revoke in a real browser/Testnet session; its real-state integration is implemented at `cbd14a3`, while MoneyGram remains externally blocked.
 7. Run Issue #18 end-to-end route/recovery matrix.
 8. Complete Issue #19/#22, independent teammate testing, bug fixes, demo and submission.
 
