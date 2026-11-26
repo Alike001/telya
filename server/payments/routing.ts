@@ -138,6 +138,17 @@ export function resolvePaymentRoute(input: RouteInput): RouteResult {
       ? input.sourceWallets.filter((wallet) => wallet.id === input.selectedSourceWalletId)
       : [];
 
+  if (input.selectedSourceWalletId) {
+    const selected = input.sourceWallets.find((wallet) => wallet.id === input.selectedSourceWalletId);
+    if (!selected) return { status: "unavailable", reason: "source_wallet_unavailable", reasons };
+    if (input.requestedSourceNetwork && selected.network !== input.requestedSourceNetwork) {
+      return clarification(
+        `The selected wallet is on ${selected.network}, but the request says ${input.requestedSourceNetwork}. Which source should the payment use?`,
+        [...reasons, "selected_source_wallet", "ambiguous_requires_clarification"],
+      );
+    }
+  }
+
   let sourceWallet: VerifiedSourceWallet | undefined;
   if (input.requestedSourceNetwork) {
     const selectedWallet = input.selectedSourceWalletId
