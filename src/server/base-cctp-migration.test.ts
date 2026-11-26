@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
+import { request as httpsRequest } from "node:https";
 
-import { neon } from "@neondatabase/serverless";
+import { neon, neonConfig } from "@neondatabase/serverless";
 import { describe, expect, it } from "vitest";
 
 const migration = readFileSync(
@@ -18,6 +19,23 @@ describe("Base CCTP recipient address constraint", () => {
   it.skipIf(!process.env.DATABASE_URL)(
     "accepts a checksummed Base recipient and lowercase verified recipient under the applied PostgreSQL constraint",
     async () => {
+      neonConfig.fetchFunction = (url: string, options?: RequestInit) => new Promise<Response>((resolve, reject) => {
+        const request = httpsRequest(url, {
+          method: options?.method,
+          headers: options?.headers as Record<string, string>,
+          family: 4,
+        }, (response) => {
+          const chunks: Buffer[] = [];
+          response.on("data", (chunk: Buffer) => chunks.push(chunk));
+          response.on("end", () => resolve(new Response(Buffer.concat(chunks), {
+            status: response.statusCode ?? 502,
+            headers: response.headers as HeadersInit,
+          })));
+          response.on("error", reject);
+        });
+        request.on("error", reject);
+        request.end(options?.body as string);
+      });
       const sql = neon(process.env.DATABASE_URL!);
       const results = await sql.transaction([
         sql`CREATE TEMP TABLE base_cctp_recipient_case_probe
@@ -38,5 +56,6 @@ describe("Base CCTP recipient address constraint", () => {
 
       expect(results[1]).toHaveLength(1);
     },
+    15_000,
   );
 });

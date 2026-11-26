@@ -55,6 +55,9 @@ beforeEach(() => {
         source_address: SOURCE,
       }];
     }
+    if (query.startsWith("WITH eligible AS MATERIALIZED")) {
+      return [{ id: PAYMENT_ID }];
+    }
     return [];
   }) as unknown as {
     (strings: TemplateStringsArray, ...values: unknown[]): Promise<Array<Record<string, unknown>>>;
