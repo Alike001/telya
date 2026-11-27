@@ -5,19 +5,14 @@ import {
   AuthenticationError,
   AuthenticationUnavailableError,
 } from "../../../../../server/auth/privy";
-import { getSqlClient } from "../../../../../server/db/client";
+import {
+  claimUsernameForVerifiedStellarWallet,
+  StellarWalletNotVerifiedError,
+  UsernameUnavailableError,
+} from "../../../../../server/db/usernames";
 import { validateUsername } from "../../../../domain/username";
 
 export const dynamic = "force-dynamic";
-
-function databaseErrorCode(error: unknown): string | undefined {
-  if (typeof error !== "object" || error === null || !("code" in error)) {
-    return undefined;
-  }
-  return typeof (error as Record<string, unknown>).code === "string"
-    ? ((error as Record<string, unknown>).code as string)
-    : undefined;
-}
 
 export async function POST(request: Request) {
   let body: unknown;
@@ -79,31 +74,12 @@ export async function POST(request: Request) {
   }
 
   try {
-    const sql = getSqlClient();
-
-    // The wallet must have been verified and bound to this authenticated user
-    // by a separate proof-of-control flow. A browser-supplied address never
-    // creates or upgrades a wallet record here.
-    const claimRows = await sql`
-      WITH owned_wallet AS MATERIALIZED (
-        SELECT id FROM wallets
-        WHERE user_id = ${user.id}::uuid
-          AND network = 'stellar'
-          AND normalized_address = ${normalizedSmartAccount}
-          AND verification_status = 'verified'
-        FOR UPDATE
-      )
-      SELECT claim_username(${user.id}::uuid, ${validation.display}) AS username_normalized
-      FROM owned_wallet
-    `;
-
-    const claimed = claimRows[0]?.username_normalized;
-    if (typeof claimed !== "string") {
-      return NextResponse.json(
-        { success: false, error: "This Stellar account is not verified for your sign-in." },
-        { status: 403, headers: { "cache-control": "no-store" } },
-      );
-    }
+    // A browser-supplied address never creates or upgrades a wallet record.
+    const claimed = await claimUsernameForVerifiedStellarWallet(
+      user,
+      validation.display,
+      normalizedSmartAccount,
+    );
     return NextResponse.json(
       {
         success: true,
@@ -113,9 +89,13 @@ export async function POST(request: Request) {
       { headers: { "cache-control": "no-store" } },
     );
   } catch (error) {
-    const code = databaseErrorCode(error);
-    // 23505 = unique_violation: username already taken by another user
-    if (code === "23505") {
+    if (error instanceof StellarWalletNotVerifiedError) {
+      return NextResponse.json(
+        { success: false, error: "This Stellar account is not verified for your sign-in." },
+        { status: 403, headers: { "cache-control": "no-store" } },
+      );
+    }
+    if (error instanceof UsernameUnavailableError) {
       return NextResponse.json(
         {
           success: false,
