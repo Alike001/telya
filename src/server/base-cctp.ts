@@ -729,7 +729,12 @@ export async function prepareStellarToBaseCctpDestination(input: {
     rpc: input.stellarRpc,
     config,
   });
-  if (source.status === "pending") return { status: "pending" };
+  if (source.status === "pending") {
+    return {
+      status: "pending",
+      sourceTransactionHash: input.stellarSourceTransactionHash.trim().toLowerCase(),
+    };
+  }
   const circle = await (input.fetchCircle ?? getCircleCctpStatus)({
     sourceDomain: CCTP_STELLAR_DOMAIN,
     sourceTransactionHash: input.stellarSourceTransactionHash,
@@ -744,7 +749,10 @@ export async function prepareStellarToBaseCctpDestination(input: {
         AND status IN ('authorized', 'source_confirmed', 'awaiting_attestation')
         AND (source_transaction_hash IS NULL OR source_transaction_hash = ${input.stellarSourceTransactionHash.trim().toLowerCase()})
     `;
-    return { status: "pending" };
+    return {
+      status: "pending",
+      sourceTransactionHash: input.stellarSourceTransactionHash.trim().toLowerCase(),
+    };
   }
   if (!circle.forwardTransactionHash) {
     throw new BaseCctpPersistenceError(
@@ -836,7 +844,13 @@ export async function prepareStellarToBaseCctpDestination(input: {
     )
     SELECT id FROM payment
   `;
-  if (reserved.length === 0) return { status: "in_progress" };
+  if (reserved.length === 0) {
+    return {
+      status: "in_progress",
+      sourceTransactionHash: input.stellarSourceTransactionHash.trim().toLowerCase(),
+      destinationTransactionHash: circle.forwardTransactionHash,
+    };
+  }
   try {
     await recordStellarToBaseDestinationSubmitted({
       paymentId,
