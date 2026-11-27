@@ -41,22 +41,10 @@ import { resolveConversationIntent } from "./conversation-intent";
 import { verifyRestoredAccountOwnership } from "../restored-account-ownership";
 import { PaymentReviewCard } from "./payment-review-card";
 import { VoiceComposer } from "./voice-composer";
-
-interface ChatMessage {
-  readonly id: string;
-  readonly sender: "user" | "telya";
-  readonly text: string;
-  readonly timestamp: string;
-  readonly review?: PaymentReview;
-  readonly recipientLabel?: string;
-}
-
-const welcome: ChatMessage = {
-  id: "welcome-1",
-  sender: "telya",
-  text: "Tell Telya who you want to pay and how much. A payment review appears only after the recipient, balance, route and fees are verified.",
-  timestamp: "Just now",
-};
+import {
+  resetConversationSession,
+  type ChatMessage,
+} from "./conversation-session";
 
 export function ConversationalHome() {
   if (!process.env.NEXT_PUBLIC_PRIVY_APP_ID) return <UnavailableConversation />;
@@ -80,7 +68,8 @@ function AuthenticatedConversation() {
   const { wallets } = useWallets();
   const [smartAccount, setSmartAccount] = useState<ConnectedSmartAccount | null>(null);
   const [balances, setBalances] = useState<readonly VerifiedBalance[]>([]);
-  const [messages, setMessages] = useState<ChatMessage[]>([welcome]);
+  const initialSession = resetConversationSession();
+  const [messages, setMessages] = useState<readonly ChatMessage[]>(initialSession.messages);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const streamEndRef = useRef<HTMLDivElement>(null);
@@ -92,11 +81,18 @@ function AuthenticatedConversation() {
 
   useEffect(() => {
     if (!authReady || !authenticated) {
+      const reset = resetConversationSession();
       setSmartAccount(null);
       setBalances([]);
+      setMessages(reset.messages);
+      setConversationId(reset.conversationId);
+      setIsProcessing(false);
       configRef.current = null;
       return;
     }
+    setSmartAccount(null);
+    setBalances([]);
+    configRef.current = null;
     let active = true;
     async function restore() {
       try {

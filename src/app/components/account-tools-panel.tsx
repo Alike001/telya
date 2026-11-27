@@ -40,6 +40,8 @@ function AuthenticatedAccountToolsPanel() {
       setAccount(null);
       return;
     }
+    setKit(null);
+    setAccount(null);
     let active = true;
     async function restore() {
       try {
