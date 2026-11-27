@@ -1,7 +1,13 @@
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
 import { StrKey } from "@stellar/stellar-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createWalletBindingChallenge, verifyWalletAssertion, verifyWalletBindingToken } from "./binding.ts";
+import {
+  bindVerifiedBaseWallet,
+  createWalletBindingChallenge,
+  verifyWalletAssertion,
+  verifyWalletBindingToken,
+} from "./binding.ts";
+import { verifiedPrivyEthereumWallets } from "../auth/privy.ts";
 
 const user = {
   id: "00000000-0000-0000-0000-000000000001",
@@ -27,6 +33,27 @@ function configure() {
 }
 
 describe("wallet ownership proof", () => {
+  it("accepts only verified Ethereum linked accounts from Privy", () => {
+    const address = `0x${"A".repeat(40)}`;
+    expect(verifiedPrivyEthereumWallets({ linked_accounts: [
+      { type: "wallet", chain_type: "ethereum", address, verified_at: 1 },
+      { type: "wallet", chain_type: "solana", address, verified_at: 1 },
+      { type: "wallet", chain_type: "ethereum", address: `0x${"b".repeat(40)}`, verified_at: null },
+      { type: "email", address: "person@example.com", verified_at: 1 },
+    ] })).toEqual([address.toLowerCase()]);
+  });
+
+  it("rejects a browser address that Privy does not link to the authenticated user", async () => {
+    const address = `0x${"a".repeat(40)}`;
+    await expect(bindVerifiedBaseWallet(
+      user,
+      address,
+      async (privyUserId) => {
+        expect(privyUserId).toBe(user.privyUserId);
+        return [`0x${"b".repeat(40)}`];
+      },
+    )).rejects.toMatchObject({ code: "wallet_proof_rejected", status: 403 });
+  });
   it("binds a fresh challenge to the authenticated user, session, wallet, and credential", () => {
     configure();
     const challenge = createWalletBindingChallenge(user, contractId, credentialId);

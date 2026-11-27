@@ -1,6 +1,7 @@
 import { createHash, createHmac, createPublicKey, randomBytes, timingSafeEqual, verify } from "node:crypto";
 import { Networks, rpc, StrKey, xdr } from "@stellar/stellar-sdk";
 import type { AuthenticatedUser } from "../auth/privy.ts";
+import { getVerifiedPrivyEthereumWallets } from "../auth/privy.ts";
 import { getSqlClient } from "../db/client.ts";
 
 const PROOF_LIFETIME_MS = 5 * 60_000;
@@ -205,6 +206,39 @@ export async function bindVerifiedStellarWallet(user: AuthenticatedUser, token: 
   const rows = await sql`
     INSERT INTO wallets (user_id, network, address, normalized_address, verification_status, verified_at)
     VALUES (${user.id}::uuid, 'stellar', ${proof.contractId}, ${proof.contractId}, 'verified', now())
+    ON CONFLICT (network, normalized_address) DO UPDATE
+    SET verification_status = 'verified', verified_at = COALESCE(wallets.verified_at, now())
+    WHERE wallets.user_id = EXCLUDED.user_id
+    RETURNING id, address
+  `;
+  if (!rows[0]) throw new WalletBindingError("wallet_bound_to_other_user", 409);
+  return { walletId: String(rows[0].id), address: String(rows[0].address) };
+}
+type EthereumWalletLoader = (privyUserId: string) => Promise<readonly string[]>;
+
+/** Bind only an Ethereum address Privy currently verifies for this authenticated identity. */
+export async function bindVerifiedBaseWallet(
+  user: AuthenticatedUser,
+  address: string,
+  loadWallets: EthereumWalletLoader = getVerifiedPrivyEthereumWallets,
+) {
+  const normalized = address.trim().toLowerCase();
+  if (!/^0x[0-9a-f]{40}$/.test(normalized)) {
+    throw new WalletBindingError("invalid_wallet", 400);
+  }
+  let linkedWallets: readonly string[];
+  try {
+    linkedWallets = await loadWallets(user.privyUserId);
+  } catch {
+    throw new WalletBindingError("wallet_verification_unavailable", 503);
+  }
+  if (!linkedWallets.some((wallet) => wallet.toLowerCase() === normalized)) {
+    throw new WalletBindingError("wallet_proof_rejected", 403);
+  }
+  const sql = getSqlClient();
+  const rows = await sql`
+    INSERT INTO wallets (user_id, network, address, normalized_address, verification_status, verified_at)
+    VALUES (${user.id}::uuid, 'base', ${normalized}, ${normalized}, 'verified', now())
     ON CONFLICT (network, normalized_address) DO UPDATE
     SET verification_status = 'verified', verified_at = COALESCE(wallets.verified_at, now())
     WHERE wallets.user_id = EXCLUDED.user_id
