@@ -55,6 +55,7 @@ export function PaymentProgressTimeline({
   }, [payment.status]);
 
   const timeline: ComputedTimeline = computePaymentTimeline(payment, events, nowMs);
+  const failedStep = timeline.steps.find((step) => step.status === "failed");
 
   async function handleRefreshClick() {
     if (!onRefresh || isRefreshing) return;
@@ -160,7 +161,7 @@ export function PaymentProgressTimeline({
             <strong>Payment Failed</strong>
             <p>
               Failed at stage:{" "}
-              <code>{timeline.failureStage ?? "execution"}</code>. {timeline.failureReason}
+              <strong>{failedStep?.title ?? "Payment execution"}</strong>. {timeline.failureReason}
             </p>
           </div>
         </div>
