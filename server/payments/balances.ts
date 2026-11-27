@@ -1,6 +1,12 @@
 import { rpc, StrKey, Networks } from "@stellar/stellar-sdk";
 
 import { stellarUsdcAmountFromRawUnits } from "../../src/stellar/usdc.ts";
+import {
+  baseEvmConfigFromEnvironment,
+  createBaseRpc,
+  readBaseUsdcBalance,
+  type BaseRpc,
+} from "../../src/base/evm.ts";
 import type { BalanceProvider } from "./service.ts";
 
 export interface TokenBalanceReader {
@@ -29,6 +35,10 @@ export function stellarBalanceReaderFromEnvironment(): {
   return { reader: new rpc.Server(parsed.toString()), tokenContract };
 }
 
+export function baseBalanceReaderFromEnvironment(): BaseRpc {
+  return createBaseRpc(baseEvmConfigFromEnvironment());
+}
+
 /** Return only a read-only on-chain USDC balance; never substitute zero on failure. */
 export async function readStellarUsdcBalance(input: {
   reader: TokenBalanceReader;
@@ -51,20 +61,36 @@ export async function readStellarUsdcBalance(input: {
   return stellarUsdcAmountFromRawUnits(result.result);
 }
 
-/** Read every verified Stellar source wallet; unsupported Base reads remain unavailable. */
+/** Read verified wallets without letting one unavailable network fabricate or erase another. */
 export async function readVerifiedWalletBalances(
   _user: Parameters<BalanceProvider>[0],
   wallets: Parameters<BalanceProvider>[1],
-  loadReader = stellarBalanceReaderFromEnvironment,
+  loadStellarReader = stellarBalanceReaderFromEnvironment,
+  loadBaseReader = baseBalanceReaderFromEnvironment,
 ): Promise<Awaited<ReturnType<BalanceProvider>>> {
   const stellarWallets = wallets.filter((wallet) => wallet.network === "stellar");
+  const baseWallets = wallets.filter((wallet) => wallet.network === "base");
   const result: Record<string, string | null> = Object.fromEntries(wallets.map((wallet) => [wallet.id, null]));
-  if (stellarWallets.length === 0) return result;
-  const { reader, tokenContract } = loadReader();
-  const balances = await Promise.all(stellarWallets.map((wallet) =>
-    readStellarUsdcBalance({ reader, tokenContract, address: wallet.address })));
-  for (let index = 0; index < stellarWallets.length; index += 1) {
-    result[stellarWallets[index]!.id] = balances[index]!;
+  if (stellarWallets.length > 0) {
+    const { reader, tokenContract } = loadStellarReader();
+    const balances = await Promise.all(stellarWallets.map((wallet) =>
+      readStellarUsdcBalance({ reader, tokenContract, address: wallet.address })));
+    for (let index = 0; index < stellarWallets.length; index += 1) {
+      result[stellarWallets[index]!.id] = balances[index]!;
+    }
+  }
+  if (baseWallets.length > 0) {
+    try {
+      const rpc = loadBaseReader();
+      const balances = await Promise.all(baseWallets.map((wallet) =>
+        readBaseUsdcBalance({ rpc, owner: wallet.address })));
+      for (let index = 0; index < baseWallets.length; index += 1) {
+        result[baseWallets[index]!.id] = balances[index]!;
+      }
+    } catch {
+      // Preserve null for every Base wallet. A selected Base route will fail
+      // unavailable, while an independently verified Stellar route can proceed.
+    }
   }
   return result;
 }

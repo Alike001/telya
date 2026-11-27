@@ -18,6 +18,8 @@ import {
   completeStellarAgentPassRevocation,
   completeStellarUsdcTransferRequest,
   completeStellarRelayerRequest,
+  recordStellarCctpBurnAuthorization,
+  recordStellarCctpBurnSubmission,
   recordStellarAgentPassAuthorization,
   recordStellarUsdcTransferAuthorization,
   recordStellarUsdcTransferSubmission,
@@ -25,6 +27,8 @@ import {
   reserveStellarRelayerRequest,
   stellarRelayerRequestIdentity,
   linkStellarPaymentAuthorization,
+  linkStellarCctpPaymentAuthorization,
+  validateStellarCctpPaymentAuthorization,
   validateStellarPaymentAuthorization,
 } from "../../../../server/stellar-relayer-requests";
 import {
@@ -120,19 +124,28 @@ export async function handleStellarRelayerRequest(
       spendingLimitPolicyAddress:
         process.env.STELLAR_SPENDING_LIMIT_POLICY ?? "",
       usdcContract: process.env.STELLAR_USDC_SAC ?? "",
+      cctpTokenMessenger: process.env.CCTP_STELLAR_TOKEN_MESSENGER ?? "",
+      baseDomain: Number(process.env.CCTP_BASE_DOMAIN),
     });
-    if (paymentId && validated.kind !== "usdc_transfer") {
+    if (paymentId && validated.kind !== "usdc_transfer" && validated.kind !== "cctp_burn") {
       throw new StellarRelayerError(
         "INVALID_REQUEST",
         "A payment ID is accepted only for a USDC transfer",
         400,
       );
     }
-    const paymentUserId = validated.kind === "usdc_transfer" && paymentId
+    const paymentUserId = (validated.kind === "usdc_transfer" || validated.kind === "cctp_burn") && paymentId
       ? paymentContext?.userId ?? (await authenticateRequest(request)).id
       : null;
     if (paymentUserId && paymentId && validated.kind === "usdc_transfer") {
       await validateStellarPaymentAuthorization(
+        paymentUserId,
+        paymentId,
+        validated,
+      );
+    }
+    if (paymentUserId && paymentId && validated.kind === "cctp_burn") {
+      await validateStellarCctpPaymentAuthorization(
         paymentUserId,
         paymentId,
         validated,
@@ -193,6 +206,19 @@ export async function handleStellarRelayerRequest(
         );
       }
     }
+    if (validated.kind === "cctp_burn") {
+      // A finalized burn is source evidence only. The Circle coordinator
+      // verifies the attestation and destination before completing payment.
+      await recordStellarCctpBurnAuthorization(identity.requestHash, validated);
+      if (paymentUserId && paymentId) {
+        await linkStellarCctpPaymentAuthorization(
+          paymentUserId,
+          paymentId,
+          identity.requestHash,
+          validated,
+        );
+      }
+    }
     if (
       validated.kind === "agent_pass_create" ||
       validated.kind === "agent_pass_revoke"
@@ -235,6 +261,15 @@ export async function handleStellarRelayerRequest(
         amountRaw: validated.amountRaw,
       });
       await recordVerifiedAgentPassSpend(validated, result.hash);
+    } else if (validated.kind === "cctp_burn") {
+      await recordStellarCctpBurnSubmission(identity.requestHash, {
+        transactionHash: result.hash,
+        ledger: result.ledger,
+      });
+      await completeStellarRelayerRequest(identity.requestHash, {
+        status: "succeeded",
+        transactionHash: result.hash,
+      });
     } else if (validated.kind === "agent_pass_create") {
       await completeStellarAgentPassCreation(identity.requestHash, validated, {
         transactionHash: result.hash,

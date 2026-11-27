@@ -6,6 +6,7 @@ import { getSqlClient } from "../../server/db/client.ts";
 import type {
   ValidatedStellarAgentPassCreate,
   ValidatedStellarAgentPassRevoke,
+  ValidatedStellarCctpBurn,
   ValidatedStellarUsdcTransfer,
 } from "../stellar/relayer.ts";
 import { StellarRelayerError } from "../stellar/relayer.ts";
@@ -254,6 +255,106 @@ export async function linkStellarPaymentAuthorization(
   }
 }
 
+/** Verify an authenticated CCTP review still matches the exact signed burn. */
+export async function validateStellarCctpPaymentAuthorization(
+  userId: string,
+  paymentId: string,
+  burn: ValidatedStellarCctpBurn,
+): Promise<void> {
+  const sql = getSqlClient();
+  const rows = await sql`
+    SELECT p.id
+    FROM payments p
+    JOIN messages m ON m.id = p.intent_message_id
+      AND m.conversation_id = p.conversation_id
+    JOIN wallets w ON w.id::text =
+      m.structured_intent->'selectedSourceWallet'->>'id'
+    JOIN base_cctp_operations o ON o.payment_id = p.id
+    WHERE p.id = ${paymentId}::uuid AND p.user_id = ${userId}::uuid
+      AND p.route_id = 'stellar_to_base'
+      AND p.status IN ('awaiting_confirmation', 'authorized', 'source_confirmed',
+        'awaiting_attestation', 'destination_submitted', 'completed')
+      AND lower(p.recipient_address) = lower(${burn.recipient})
+      AND w.user_id = p.user_id AND w.network = 'stellar'
+      AND w.address = ${burn.smartAccount} AND w.verification_status = 'verified'
+      AND o.route_id = 'stellar_to_base' AND o.status IN ('authorized', 'source_confirmed',
+        'awaiting_attestation', 'destination_prepared', 'destination_submitted', 'completed')
+      AND o.burn_amount_atomic = ${burn.amountRaw.toString()}::numeric
+      AND o.max_fee_atomic = ${burn.maxFeeRaw.toString()}::numeric
+      AND lower(o.expected_recipient_address) = lower(${burn.recipient})
+    LIMIT 1
+  `;
+  if (!rows[0]) {
+    throw new StellarRelayerError(
+      "PAYMENT_MISMATCH",
+      "Signed Stellar CCTP burn does not match the owned payment review",
+      409,
+    );
+  }
+}
+
+/** Link the exact owner-authorized CCTP burn and Payment before broadcast. */
+export async function linkStellarCctpPaymentAuthorization(
+  userId: string,
+  paymentId: string,
+  requestHash: string,
+  burn: ValidatedStellarCctpBurn,
+): Promise<void> {
+  const sql = getSqlClient();
+  const rows = await sql`
+    WITH eligible AS MATERIALIZED (
+      SELECT p.id
+      FROM payments p
+      JOIN messages m ON m.id = p.intent_message_id
+        AND m.conversation_id = p.conversation_id
+      JOIN wallets w ON w.id::text =
+        m.structured_intent->'selectedSourceWallet'->>'id'
+      JOIN base_cctp_operations o ON o.payment_id = p.id
+      JOIN stellar_relayer_requests r ON r.request_hash = ${requestHash}
+      WHERE p.id = ${paymentId}::uuid AND p.user_id = ${userId}::uuid
+        AND p.route_id = 'stellar_to_base'
+        AND p.status IN ('awaiting_confirmation', 'authorized')
+        AND lower(p.recipient_address) = lower(${burn.recipient})
+        AND w.user_id = p.user_id AND w.network = 'stellar'
+        AND w.address = ${burn.smartAccount} AND w.verification_status = 'verified'
+        AND o.route_id = 'stellar_to_base' AND o.status = 'authorized'
+        AND o.burn_amount_atomic = ${burn.amountRaw.toString()}::numeric
+        AND o.max_fee_atomic = ${burn.maxFeeRaw.toString()}::numeric
+        AND lower(o.expected_recipient_address) = lower(${burn.recipient})
+        AND r.status = 'pending' AND r.operation_kind = 'cctp_burn'
+        AND (r.payment_id IS NULL OR r.payment_id = p.id)
+        AND r.sender_address = ${burn.smartAccount}
+        AND lower(r.recipient_address) = lower(${burn.recipient})
+        AND r.expected_amount_atomic = ${burn.amountRaw.toString()}::numeric
+        AND r.cctp_destination_domain = 6
+        AND r.cctp_max_fee_atomic = ${burn.maxFeeRaw.toString()}::numeric
+      FOR UPDATE OF p, o, r
+    ), request AS (
+      UPDATE stellar_relayer_requests r SET payment_id = eligible.id, updated_at = now()
+      FROM eligible WHERE r.request_hash = ${requestHash}
+      RETURNING r.payment_id
+    ), payment AS (
+      UPDATE payments p SET status = 'authorized', updated_at = now()
+      FROM request WHERE p.id = request.payment_id
+      RETURNING p.id
+    ), event AS (
+      INSERT INTO payment_events (
+        payment_id, event_key, stage, status, network, public_message, completed_at
+      ) SELECT payment.id, 'stellar_cctp_owner_authorized', 'authorization', 'authorized',
+        'stellar', 'Your passkey authorized this exact cross-chain recipient, amount and fee.', now()
+      FROM payment ON CONFLICT (payment_id, event_key) DO NOTHING
+    )
+    SELECT id FROM payment
+  `;
+  if (!rows[0]) {
+    throw new StellarRelayerError(
+      "PAYMENT_MISMATCH",
+      "Stellar CCTP authorization changed before it could be recorded",
+      409,
+    );
+  }
+}
+
 export async function assertStellarPaymentRequestLink(
   userId: string,
   paymentId: string,
@@ -273,6 +374,46 @@ export async function assertStellarPaymentRequestLink(
       "Relayer request belongs to a different payment",
       409,
     );
+  }
+}
+
+export async function recordStellarCctpBurnAuthorization(
+  requestHash: string,
+  burn: ValidatedStellarCctpBurn,
+): Promise<void> {
+  const sql = getSqlClient();
+  const rows = await sql`
+    UPDATE stellar_relayer_requests
+    SET operation_kind = 'cctp_burn', token_contract = ${burn.burnToken},
+      sender_address = ${burn.smartAccount}, recipient_address = ${burn.recipient},
+      expected_amount_atomic = ${burn.amountRaw.toString()}::numeric,
+      cctp_destination_domain = 6,
+      cctp_max_fee_atomic = ${burn.maxFeeRaw.toString()}::numeric,
+      authorization_kind = 'owner', context_rule_id = 0,
+      signer_address = ${burn.smartAccount}, updated_at = now()
+    WHERE request_hash = ${requestHash} AND status = 'pending'
+    RETURNING request_hash
+  `;
+  if (!(rows as Record<string, unknown>[])[0]) {
+    throw new Error("Stellar CCTP burn authorization was not persisted");
+  }
+}
+
+export async function recordStellarCctpBurnSubmission(
+  requestHash: string,
+  result: { readonly transactionHash: string; readonly ledger: number },
+): Promise<void> {
+  const sql = getSqlClient();
+  const rows = await sql`
+    UPDATE stellar_relayer_requests
+    SET submitted_transaction_hash = ${result.transactionHash},
+      submitted_ledger = ${result.ledger}, updated_at = now()
+    WHERE request_hash = ${requestHash}
+      AND status = 'pending' AND operation_kind = 'cctp_burn'
+    RETURNING request_hash
+  `;
+  if (!(rows as Record<string, unknown>[])[0]) {
+    throw new Error("Stellar CCTP burn submission was not persisted");
   }
 }
 
