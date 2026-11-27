@@ -223,7 +223,11 @@ describe("Stellar-to-Base CCTP destination reservation", () => {
     const duplicate = await prepareStellarToBaseCctpDestination(input);
 
     expect(first.status).toBe("completed");
-    expect(duplicate).toEqual({ status: "in_progress" });
+    expect(duplicate).toEqual({
+      status: "in_progress",
+      sourceTransactionHash: STELLAR_SOURCE_HASH,
+      destinationTransactionHash: DESTINATION_HASH,
+    });
     expect(first.destinationTransactionHash).toBe(DESTINATION_HASH);
     expect(mocks.transitionQuery).toContain("FROM payment ON CONFLICT");
   });
@@ -236,7 +240,11 @@ describe("Stellar-to-Base CCTP destination reservation", () => {
       stellarRpc: { getTransaction: vi.fn() } as never,
       config,
       baseRpc: mintRpc(),
-    })).resolves.toEqual({ status: "in_progress" });
+    })).resolves.toEqual({
+      status: "in_progress",
+      sourceTransactionHash: STELLAR_SOURCE_HASH,
+      destinationTransactionHash: DESTINATION_HASH,
+    });
     expect(mocks.transitionQuery).toContain("FOR UPDATE OF p, o");
     expect(mocks.transitionQuery).toContain("FROM payment ON CONFLICT");
   });
@@ -295,7 +303,10 @@ describe("Stellar-to-Base CCTP destination reservation", () => {
     };
     expect((await prepareStellarToBaseCctpDestination(input)).status).toBe("completed");
     mocks.getCircleCctpStatus.mockResolvedValue({ status: "pending", sourceTransactionHash: STELLAR_SOURCE_HASH });
-    expect(await prepareStellarToBaseCctpDestination(input)).toEqual({ status: "pending" });
+    expect(await prepareStellarToBaseCctpDestination(input)).toEqual({
+      status: "pending",
+      sourceTransactionHash: STELLAR_SOURCE_HASH,
+    });
     expect(mocks.status).toBe("destination_prepared");
     expect(mocks.pendingQuery).toContain("status IN ('authorized', 'source_confirmed', 'awaiting_attestation')");
   });
