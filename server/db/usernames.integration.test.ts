@@ -1,11 +1,14 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 
 import { neon } from "@neondatabase/serverless";
+import { StrKey } from "@stellar/stellar-sdk/base";
 import { describe, expect, it } from "vitest";
 
 import {
   claimUsername,
+  claimUsernameForVerifiedStellarWallet,
   isUsernameAvailable,
+  StellarWalletNotVerifiedError,
   UsernameUnavailableError,
 } from "./usernames.js";
 
@@ -66,6 +69,50 @@ describe("username registry on PostgreSQL", () => {
             WHERE user_id IN (${firstUserId}::uuid, ${secondUserId}::uuid)`,
           sql`DELETE FROM users
             WHERE id IN (${firstUserId}::uuid, ${secondUserId}::uuid)`,
+        ]);
+      }
+    },
+    30_000,
+  );
+
+  it.skipIf(!process.env.DATABASE_URL)(
+    "requires the authenticated user's exact verified Stellar wallet before claiming",
+    async () => {
+      const sql = neon(process.env.DATABASE_URL!);
+      const ownerId = randomUUID();
+      const otherId = randomUUID();
+      const address = StrKey.encodeContract(randomBytes(32));
+      const ownerName = `dbt_${randomUUID().replaceAll("-", "").slice(0, 20)}`;
+      const otherName = `dbt_${randomUUID().replaceAll("-", "").slice(0, 20)}`;
+
+      try {
+        await sql.transaction([
+          sql`INSERT INTO users (id, privy_did) VALUES
+            (${ownerId}::uuid, ${`did:privy:telya_dbtest_${ownerId}`}),
+            (${otherId}::uuid, ${`did:privy:telya_dbtest_${otherId}`})`,
+          sql`INSERT INTO wallets
+            (user_id, network, address, normalized_address, verification_status, verified_at)
+            VALUES (${ownerId}::uuid, 'stellar', ${address}, ${address}, 'verified', now())`,
+        ]);
+
+        await expect(claimUsernameForVerifiedStellarWallet(
+          { id: otherId },
+          otherName,
+          address,
+        )).rejects.toBeInstanceOf(StellarWalletNotVerifiedError);
+        await expect(isUsernameAvailable(otherName)).resolves.toBe(true);
+
+        await expect(claimUsernameForVerifiedStellarWallet(
+          { id: ownerId },
+          ownerName.toUpperCase(),
+          address,
+        )).resolves.toBe(ownerName);
+        await expect(isUsernameAvailable(ownerName)).resolves.toBe(false);
+      } finally {
+        await sql.transaction([
+          sql`DELETE FROM username_registry WHERE user_id IN (${ownerId}::uuid, ${otherId}::uuid)`,
+          sql`DELETE FROM wallets WHERE user_id IN (${ownerId}::uuid, ${otherId}::uuid)`,
+          sql`DELETE FROM users WHERE id IN (${ownerId}::uuid, ${otherId}::uuid)`,
         ]);
       }
     },
