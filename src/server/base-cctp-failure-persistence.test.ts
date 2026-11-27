@@ -51,7 +51,10 @@ describe("Base payment verification failure persistence", () => {
     });
 
     expect(mocks.query).toContain("route_id = 'base_to_stellar'");
-    expect(mocks.query).toContain("status = 'submitted'");
+    expect(mocks.query).toContain("p.status IN ('submitted', 'source_confirmed', 'awaiting_attestation')");
+    expect(mocks.query).toContain("o.status IN ('source_submitted', 'source_confirmed', 'awaiting_attestation')");
+    expect(mocks.query).toContain("p.destination_transaction_hash IS NULL");
+    expect(mocks.query).toContain("o.destination_transaction_hash IS NULL");
     expect(mocks.query).toContain("source_transaction_hash =");
     expect(mocks.query).toContain("'source_verification'");
     expect(mocks.query).toContain("FROM payment p JOIN operation o ON o.payment_id = p.id");
