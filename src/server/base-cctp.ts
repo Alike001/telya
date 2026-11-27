@@ -154,7 +154,7 @@ export async function verifyBaseCctpSource(input: {
   const parsed = parseCctpMessage(circle.message);
   const expectedAmount = normalizeBaseUsdcAmount(input.burnAmount);
   const expectedMaxFee = normalizeBaseUsdcFee(input.maxFee);
-  const expectedRecipientAmount = normalizeBaseUsdcAmount(input.expectedRecipientAmount);
+  const expectedRecipientAmount = normalizeBaseUsdcAmount(canonicalDatabaseDecimal(input.expectedRecipientAmount));
   const destinationDomain = input.destinationDomain ?? CCTP_STELLAR_DOMAIN;
   let expectedMintRecipient: string;
   let expectedDestinationTokenMessenger: string;

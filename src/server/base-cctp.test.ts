@@ -145,6 +145,16 @@ function verifySourceMessages(input: {
 }
 
 describe("Base-to-Stellar CCTP source verification", () => {
+  it("accepts an exact six-decimal amount read back from numeric(38,18)", async () => {
+    const sourceMessage = buildCctpMessage(5_100_000n, 100_000n);
+    const result = await verifySourceMessages({
+      sourceMessage,
+      attestedMessage: attestCctpMessage(sourceMessage),
+      expectedRecipientAmount: "5.000000000000000000",
+    });
+    expect(result.status).toBe("verified");
+  });
+
   it("accepts only the finalized Base message Circle attested for the reserved intent", async () => {
     const sourceMessage = buildCctpMessage(5_100_000n, 100_000n);
     const message = attestCctpMessage(sourceMessage);
