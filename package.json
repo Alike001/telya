@@ -10,6 +10,7 @@
   "scripts": {
     "build": "next build",
     "dev": "next dev",
+    "env:check": "node scripts/check-environment.mjs",
     "start": "next start",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",

@@ -18,8 +18,13 @@ Node.js 22 or newer and pnpm 11 are required.
 
 ```bash
 pnpm install
+pnpm env:check -- --flow=onboarding
 pnpm dev
 ```
+
+The preflight reports only `READY`, `MISSING`, `PLACEHOLDER` or `INVALID` beside
+configuration names; it never prints credential values. Use `--flow=stellar`,
+`--flow=base` or `--flow=full` when validating those paths.
 
 Open `http://localhost:3000`. The readiness endpoint is available at
 `http://localhost:3000/api/health`; it returns HTTP `200` only when the app can
