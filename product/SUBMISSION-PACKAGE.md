@@ -17,6 +17,7 @@ Agent Pass is the secondary differentiator: an agent receives a bounded, expirin
 - Source: <https://github.com/Alike001/telya>
 - Current implementation and blockers: [EXECUTION-TRACKER.md](EXECUTION-TRACKER.md)
 - Architecture: [ARCHITECTURE.md](ARCHITECTURE.md)
+- Evidence manifest: [EVIDENCE-MANIFEST.md](EVIDENCE-MANIFEST.md)
 - Independent tester runbook: [INDEPENDENT-TESTING.md](INDEPENDENT-TESTING.md)
 
 The public URL currently proves the deployed `main` branch only. Features in draft pull requests are not part of the public acceptance claim until their tested commits are deployed.
