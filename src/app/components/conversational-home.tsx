@@ -5,7 +5,11 @@ import { usePrivy, useWallets } from "@privy-io/react-auth";
 import { CheckCircle2 } from "lucide-react";
 
 import { authenticatedFetch } from "../authenticated-fetch";
-import { createSessionRequestGuard, type SessionRequestGuard } from "../session-request-guard";
+import {
+  captureSessionAccessToken,
+  createSessionRequestGuard,
+  type SessionRequestGuard,
+} from "../session-request-guard";
 import {
   createBrowserSmartAccountKit,
   restoreSmartAccount,
@@ -37,6 +41,7 @@ import {
   reconcileConversationBaseToStellarPayment,
   reconcileConversationCctpPayment,
   reconcileConversationPayment,
+  type AuthenticatedRequest,
 } from "./conversation-payment-execution";
 import { resolveConversationIntent } from "./conversation-intent";
 import { verifyRestoredAccountOwnership } from "../restored-account-ownership";
@@ -101,6 +106,16 @@ function AuthenticatedConversation() {
     const guard = createSessionRequestGuard();
     sessionGuardRef.current = guard;
     async function restore() {
+      let request: AuthenticatedRequest;
+      try {
+        request = await captureOperationRequest(guard);
+      } catch {
+        if (guard.isActive()) {
+          setSmartAccount(null);
+          setBalances([]);
+        }
+        return;
+      }
       try {
         const configResponse = await fetch("/api/stellar/config", { cache: "no-store" });
         if (configResponse.ok) {
@@ -111,7 +126,7 @@ function AuthenticatedConversation() {
           if (account) {
             const owned = await verifyRestoredAccountOwnership(
               account,
-              (input, init) => authenticatedFetch(input, init, getAccessToken),
+              request,
             );
             if (guard.isActive()) setSmartAccount(owned ? account : null);
           } else if (guard.isActive()) {
@@ -124,10 +139,9 @@ function AuthenticatedConversation() {
       if (!guard.isActive()) return;
       let verifiedBalances: readonly VerifiedBalance[] = [];
       try {
-        const stellarBalanceResponse = await authenticatedFetch(
+        const stellarBalanceResponse = await request(
           "/api/balances",
           { cache: "no-store" },
-          getAccessToken,
         );
         if (stellarBalanceResponse.ok) {
           verifiedBalances = parseVerifiedBalances(await stellarBalanceResponse.json());
@@ -136,10 +150,9 @@ function AuthenticatedConversation() {
         verifiedBalances = [];
       }
       try {
-        const baseBalanceResponse = await authenticatedFetch(
+        const baseBalanceResponse = await request(
           "/api/base/balances",
           { cache: "no-store" },
-          getAccessToken,
         );
         if (baseBalanceResponse.ok) {
           verifiedBalances = mergeVerifiedBalanceSnapshots(
@@ -160,6 +173,13 @@ function AuthenticatedConversation() {
     };
   }, [authReady, authenticated, getAccessToken]);
 
+  async function captureOperationRequest(
+    guard: SessionRequestGuard,
+  ): Promise<AuthenticatedRequest> {
+    const tokenProvider = await captureSessionAccessToken(getAccessToken, guard);
+    return (input, init) => authenticatedFetch(input, init, tokenProvider);
+  }
+
   function appendTelya(
     text: string,
     review?: PaymentReview,
@@ -177,12 +197,13 @@ function AuthenticatedConversation() {
   async function persistUserMessage(
     text: string,
     guard: SessionRequestGuard,
+    request: AuthenticatedRequest,
   ): Promise<{ conversationId: string; messageId: string } | null> {
-    const response = await authenticatedFetch("/api/conversations", {
+    const response = await request("/api/conversations", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message: text, ...(conversationId ? { conversationId } : {}) }),
-    }, getAccessToken);
+    });
     const payload = await response.json() as {
       conversation?: { id?: unknown };
       message?: { id?: unknown };
@@ -200,12 +221,14 @@ function AuthenticatedConversation() {
     review: PaymentReview,
     submittedTransactionHash?: string,
   ): Promise<PaymentExecutionResult> {
+    const guard = sessionGuardRef.current;
+    if (!guard?.isActive()) throw new Error("Authenticated session changed.");
+    const request = await captureOperationRequest(guard);
     let transactionHash = submittedTransactionHash;
     if (!transactionHash && review.sourceNetwork === "base") {
-      const response = await authenticatedFetch(
+      const response = await request(
         `/api/payments?id=${encodeURIComponent(review.id)}`,
         { cache: "no-store" },
-        getAccessToken,
       );
       const hashes = response.ok
         ? parsePersistedPaymentHashes(await response.json(), review.id)
@@ -221,31 +244,34 @@ function AuthenticatedConversation() {
       return reconcileConversationBaseDirectPayment(
         review,
         transactionHash,
-        (input, init) => authenticatedFetch(input, init, getAccessToken),
+        request,
       );
     }
     if (review.routeId === "base_to_stellar" && transactionHash) {
       return reconcileConversationBaseToStellarPayment(
         review,
         transactionHash,
-        (input, init) => authenticatedFetch(input, init, getAccessToken),
+        request,
       );
     }
     if (review.routeId === "stellar_to_base") {
       return reconcileConversationCctpPayment(
         review,
         transactionHash,
-        (input, init) => authenticatedFetch(input, init, getAccessToken),
+        request,
       );
     }
     return reconcileConversationPayment(
       review,
       transactionHash,
-      (input, init) => authenticatedFetch(input, init, getAccessToken),
+      request,
     );
   }
 
   async function confirmPayment(review: PaymentReview): Promise<PaymentExecutionResult> {
+    const guard = sessionGuardRef.current;
+    if (!guard?.isActive()) throw new Error("Authenticated session changed.");
+    const request = await captureOperationRequest(guard);
     const config = configRef.current;
     if (review.sourceNetwork === "stellar" && (!smartAccount || !config)) {
       throw new Error("Connect and verify the same Stellar passkey account before authorizing.");
@@ -271,7 +297,7 @@ function AuthenticatedConversation() {
     return executeConversationPayment(review, {
       config,
       smartAccount,
-      request: (input, init) => authenticatedFetch(input, init, getAccessToken),
+      request,
       createKit: createBrowserSmartAccountKit,
       restoreAccount: restoreSmartAccount,
       submitTransfer: submitStellarUsdcTransfer,
@@ -295,12 +321,13 @@ function AuthenticatedConversation() {
     if (!guard?.isActive()) return;
     setIsProcessing(true);
     try {
-      const saved = await persistUserMessage(text, guard);
+      const request = await captureOperationRequest(guard);
+      const saved = await persistUserMessage(text, guard, request);
       if (!saved || !guard.isActive()) return;
       const parsed = await resolveConversationIntent(
         text,
         inputMode,
-        (input, init) => authenticatedFetch(input, init, getAccessToken),
+        request,
       );
       if (!guard.isActive()) return;
       if (parsed.kind === "balance_check") {
@@ -347,7 +374,7 @@ function AuthenticatedConversation() {
       const selectedWallet = parsed.requestedSourceNetwork
         ? balances.find((balance) => balance.network === parsed.requestedSourceNetwork && balance.status === "verified")
         : undefined;
-      const response = await authenticatedFetch("/api/payments", {
+      const response = await request("/api/payments", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -366,7 +393,7 @@ function AuthenticatedConversation() {
             requestedDestinationNetwork: parsed.requestedDestinationNetwork ?? null,
           },
         }),
-      }, getAccessToken);
+      });
       const payload: unknown = await response.json();
       if (!guard.isActive()) return;
       const review = response.ok ? parsePaymentReview(payload) : null;
