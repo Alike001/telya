@@ -5,7 +5,7 @@ import {
   CCTP_STELLAR_DOMAIN,
   baseEvmConfigFromEnvironment,
   createBaseRpc,
-  encodeCctpDepositForBurn,
+  encodeCctpDepositForBurnWithHook,
   encodeErc20Transfer,
   estimateBaseTransactionFee,
   normalizeBaseUsdcAmount,
@@ -78,11 +78,13 @@ export const quoteSupportedPaymentFees: FeeQuoteProvider = async (input) => {
       rpc,
       from: input.sourceWallet.address,
       to: BASE_SEPOLIA_TOKEN_MESSENGER,
-      data: encodeCctpDepositForBurn({
+      data: encodeCctpDepositForBurnWithHook({
         amount: input.amount,
         maxFee: "0",
         destinationDomain: CCTP_STELLAR_DOMAIN,
         mintRecipient: stellarContractToBytes32(stellar.forwarder),
+        destinationCaller: stellarContractToBytes32(stellar.forwarder),
+        forwardRecipient: input.destinationAddress,
       }),
     });
     return [

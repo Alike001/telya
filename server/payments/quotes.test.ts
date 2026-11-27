@@ -184,7 +184,12 @@ describe("mounted payment fee policy", () => {
       { kind: "provider", payer: "sender", asset: "USDC", amount: "0", label: "Circle CCTP Standard fee" },
       { kind: "network", payer: "sender", asset: "ETH", amount: "0.0001", label: "Estimated Base CCTP burn gas" },
     ]);
-    expect(calls.filter((body) => body.method === "eth_estimateGas").map((body) =>
-      (body.params[0] as { data: string }).data.slice(0, 10))).toEqual(["0x8e0250ee"]);
+    const burnCalls = calls.filter((body) => body.method === "eth_estimateGas").map((body) =>
+      (body.params[0] as { data: string }).data);
+    expect(burnCalls).toHaveLength(1);
+    expect(burnCalls[0]?.slice(0, 10)).toBe("0x779b432d");
+    expect(burnCalls[0]?.slice(10 + 2 * 64, 10 + 3 * 64)).toBe(
+      burnCalls[0]?.slice(10 + 4 * 64, 10 + 5 * 64),
+    );
   });
 });

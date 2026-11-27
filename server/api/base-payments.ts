@@ -8,6 +8,7 @@ import {
   CCTP_STELLAR_DOMAIN,
   baseEvmConfigFromEnvironment,
   createBaseRpc,
+  encodeCctpForwarderHookData,
   normalizeBaseUsdcAmount,
 } from "../../src/base/evm.ts";
 import type { DecimalAmount } from "../../src/domain/contracts.ts";
@@ -191,8 +192,13 @@ export function createBaseCctpAuthorizationHandler(options: { authenticate?: Aut
         return jsonResponse({ error: "payment_not_authorized" }, 409);
       }
       const intent = trustedCctpBurnIntent(payment);
-      const operation = await authorizeBaseCctpOperation({ paymentId: id, ...intent });
       const stellar = stellarCctpConfigFromEnvironment();
+      if (typeof payment.recipient_address !== "string") {
+        throw new PaymentInputError("Stellar CCTP recipient is missing from the reviewed payment");
+      }
+      encodeCctpForwarderHookData(payment.recipient_address);
+      const forwarder = stellarContractToBytes32(stellar.forwarder);
+      const operation = await authorizeBaseCctpOperation({ paymentId: id, ...intent });
       return jsonResponse({
         paymentId: id,
         status: "authorization_ready",
@@ -204,7 +210,9 @@ export function createBaseCctpAuthorizationHandler(options: { authenticate?: Aut
           burnAmount: intent.burnAmount,
           maxFee: intent.maxFee,
           destinationDomain: CCTP_STELLAR_DOMAIN,
-          mintRecipient: stellarContractToBytes32(stellar.forwarder),
+          mintRecipient: forwarder,
+          destinationCaller: forwarder,
+          forwardRecipient: payment.recipient_address,
         },
       }, 200);
     },
