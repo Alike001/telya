@@ -1,10 +1,13 @@
+import { Buffer } from "node:buffer";
+import { StrKey } from "@stellar/stellar-sdk";
 import { describe, expect, it, vi } from "vitest";
 
 import {
   BASE_SEPOLIA_MESSAGE_TRANSMITTER,
   BASE_SEPOLIA_CHAIN_ID,
   BASE_SEPOLIA_USDC,
-  encodeCctpDepositForBurn,
+  encodeCctpDepositForBurnWithHook,
+  encodeCctpForwarderHookData,
   encodeCctpReceiveMessage,
   encodeErc20Transfer,
   estimateBaseTransactionFee,
@@ -23,6 +26,7 @@ import {
 const TX_HASH = `0x${"a".repeat(64)}`;
 const RECIPIENT = `0x${"b".repeat(40)}`;
 const SENDER = `0x${"1".repeat(40)}`;
+const STELLAR_RECIPIENT = StrKey.encodeContract(Buffer.alloc(32, 0x55));
 const TOPIC =
   "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef";
 const MESSAGE_TOPIC =
@@ -141,11 +145,19 @@ describe("Base Sepolia transaction encoding and verification", () => {
     expect(encodeErc20Transfer(RECIPIENT, "1.25")).toBe(
       `0xa9059cbb${RECIPIENT.slice(2).padStart(64, "0")}${word(1_250_000n)}`,
     );
-    expect(encodeCctpDepositForBurn({
+    const forwarder = `0x${"c".repeat(64)}`;
+    const hook = encodeCctpForwarderHookData(STELLAR_RECIPIENT).slice(2);
+    expect(encodeCctpDepositForBurnWithHook({
       amount: "1",
       destinationDomain: 27,
-      mintRecipient: `0x${"c".repeat(64)}`,
-    })).toMatch(/^0x8e0250ee/);
+      mintRecipient: forwarder,
+      destinationCaller: forwarder,
+      forwardRecipient: STELLAR_RECIPIENT,
+    })).toBe(`0x779b432d${word(1_000_000n)}${word(27n)}${"c".repeat(64)}${BASE_SEPOLIA_USDC.slice(2).toLowerCase().padStart(64, "0")}${"c".repeat(64)}${word(0n)}${word(2000n)}${word(256n)}${word(BigInt(hook.length / 2))}${hook.padEnd(Math.ceil(hook.length / 64) * 64, "0")}`);
+    expect(() => encodeCctpDepositForBurnWithHook({
+      amount: "1", destinationDomain: 27, mintRecipient: forwarder,
+      destinationCaller: `0x${"0".repeat(64)}`, forwardRecipient: STELLAR_RECIPIENT,
+    })).toThrow("same nonzero forwarder");
     expect(encodeCctpReceiveMessage("0x0102", "0xaabb")).toBe(
       `0x57ecfd28${word(64n)}${word(128n)}${word(2n)}0102${"0".repeat(60)}${word(2n)}aabb${"0".repeat(60)}`,
     );
