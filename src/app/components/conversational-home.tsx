@@ -12,6 +12,7 @@ import {
   type SmartAccountPublicConfig,
 } from "../../stellar/smart-account";
 import { submitStellarUsdcTransfer } from "../../stellar/usdc";
+import { submitStellarCctpBurn } from "../../stellar/cctp";
 import {
   apiMessage,
   parsePaymentReview,
@@ -24,6 +25,7 @@ import type {
 } from "./conversation-payment";
 import {
   executeConversationPayment,
+  reconcileConversationCctpPayment,
   reconcileConversationPayment,
 } from "./conversation-payment-execution";
 import { resolveConversationIntent } from "./conversation-intent";
@@ -144,6 +146,13 @@ function AuthenticatedConversation() {
     review: PaymentReview,
     submittedTransactionHash?: string,
   ): Promise<PaymentExecutionResult> {
+    if (review.routeId === "stellar_to_base") {
+      return reconcileConversationCctpPayment(
+        review,
+        submittedTransactionHash,
+        (input, init) => authenticatedFetch(input, init, getAccessToken),
+      );
+    }
     return reconcileConversationPayment(
       review,
       submittedTransactionHash,
@@ -163,6 +172,7 @@ function AuthenticatedConversation() {
       createKit: createBrowserSmartAccountKit,
       restoreAccount: restoreSmartAccount,
       submitTransfer: submitStellarUsdcTransfer,
+      submitCctpBurn: submitStellarCctpBurn,
     });
   }
 
