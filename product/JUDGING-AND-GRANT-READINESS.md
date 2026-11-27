@@ -1,10 +1,10 @@
-# Telya Judging and Grant Readiness Baseline
+# Telya Judging and Grant Readiness
 
-> **Live continuation note — November 26, 2026:** This document is a point-in-time assessment based on November 25 repository state, not the live PR ledger. PR #16 now has implementation work in PR #48; PR #48's latest Circle attestation-field fix is commit 481cbba, while database/Testnet acceptance evidence remains outstanding. PRs #46 and #49 have received further updates and still have blocking identity/payment-flow findings. For current facts, read [product/EXECUTION-TRACKER.md](EXECUTION-TRACKER.md), [product/STATUS.md](STATUS.md), and [product/CODEX-MASTER-PLAYBOOK.md](CODEX-MASTER-PLAYBOOK.md). The current execution sequence supersedes the historical snapshot below.
+**Last refreshed:** November 27, 2026
 
-**Assessment date:** November 25, 2026
+**Merged baseline:** `origin/main` at `2531820`
 
-**Repository baseline:** `origin/main` at `c04a1ec`
+**Integrated draft baseline:** PR #66 at `65ff241`
 
 **Assessment scope:** repository code, merged and open pull requests, open issues, automated checks, public Testnet deployment, and linked Testnet transaction evidence
 
@@ -27,15 +27,16 @@ Telya is **not yet ready to declare the P0 product, the cross-chain demo, or a p
 - Agent Pass allowance, cumulative-spend, revocation, and owner-control enforcement; and
 - a Stellar-side CCTP implementation in draft PR #44 with crash-recovery and idempotency work.
 
-The critical path is now integration rather than invention. Issue #16 remains owned by @Webghost01-NG and has no implementation PR at the assessment date. PR #44 must remain draft until the Base/Circle coordinator is integrated and both CCTP directions have real destination recipient, amount, finality, and retry evidence.
+The critical path is now authenticated live acceptance rather than missing product code. PR #48 implements the Base/Circle boundary; PR #53 mounts deterministic orchestration; PRs #46/#49/#65/#66 carry the integrated onboarding, conversational, timeline and Agent Pass stack. These PRs remain draft because Privy/sponsor credentials, preview authorization and real signed Testnet evidence are still missing. PRs #44/#48 must remain draft until both CCTP directions have exact destination recipient, amount, finality and retry/restart evidence.
 
 ### Evidence register
 
-- Repository baseline: [`c04a1ec`](https://github.com/Alike001/telya/commit/c04a1ec)
+- Merged baseline: [`2531820`](https://github.com/Alike001/telya/commit/2531820e3ebe831c4b914d1e023a10f1cdc6d87f)
 - Canonical contracts and backend foundations: [PR #30](https://github.com/Alike001/telya/pull/30), [PR #33](https://github.com/Alike001/telya/pull/33), [PR #36](https://github.com/Alike001/telya/pull/36), and [PR #37](https://github.com/Alike001/telya/pull/37)
 - Public shell and deployment readiness: [PR #38](https://github.com/Alike001/telya/pull/38) and [PR #45](https://github.com/Alike001/telya/pull/45)
 - Verified Stellar work: [PR #40](https://github.com/Alike001/telya/pull/40), [PR #41](https://github.com/Alike001/telya/pull/41), and [PR #43](https://github.com/Alike001/telya/pull/43)
-- Open integration work: draft [PR #44](https://github.com/Alike001/telya/pull/44), [Issue #16](https://github.com/Alike001/telya/issues/16), and [PR #46](https://github.com/Alike001/telya/pull/46)
+- Open integration work: draft [PR #44](https://github.com/Alike001/telya/pull/44), [PR #48](https://github.com/Alike001/telya/pull/48), [PR #53](https://github.com/Alike001/telya/pull/53), [PR #46](https://github.com/Alike001/telya/pull/46), [PR #49](https://github.com/Alike001/telya/pull/49), [PR #65](https://github.com/Alike001/telya/pull/65), and [PR #66](https://github.com/Alike001/telya/pull/66)
+- Submission evidence: [submission package](SUBMISSION-PACKAGE.md), [evidence manifest](EVIDENCE-MANIFEST.md), and [independent tester runbook](INDEPENDENT-TESTING.md)
 - External-readiness tracking: [Issue #22](https://github.com/Alike001/telya/issues/22) and [Issue #24](https://github.com/Alike001/telya/issues/24)
 - Public Testnet application: [telya.vercel.app](https://telya.vercel.app)
 
@@ -55,11 +56,11 @@ These criteria guide prioritization, but do not relax financial correctness or s
 
 | Criterion | Status | Current evidence | Remaining gap |
 | --- | --- | --- | --- |
-| Stellar integration depth | **Implemented but awaiting integration** | Real Testnet smart-account creation/reconnection, sponsored direct USDC, durable receipts, and Agent Pass enforcement. Draft PR #44 implements the Stellar CCTP boundary and recovery behavior. | Integrate Issue #16, prove both CCTP directions, retain exact recipient/amount verification, and document external contract dependencies and assumptions. |
-| Working demo and product functionality | **In progress** | Public application and health endpoint are live; database health is reported ready; direct Stellar and Agent Pass flows have real transaction evidence. | The account-to-intent-to-route-to-confirmation-to-settlement journey is not integrated in the public UI. PR #46 remains open; Vercel reports authorization is required before it can deploy the fork commit, and no preview build log exists for that attempt. Base, CCTP end-to-end, MoneyGram, and complete recovery UX are unfinished. |
+| Stellar integration depth | **Implemented but awaiting live integration proof** | Real Testnet smart-account creation/reconnection, sponsored direct USDC, durable receipts and Agent Pass enforcement. PR #44 implements the Stellar CCTP boundary/recovery; PR #53 and PR #66 bind the exact reviewed Payment to protected relayer execution. | Prove the integrated passkey/browser flow and both CCTP directions with exact recipient/amount/finality evidence. |
+| Working demo and product functionality | **In progress** | Public application and health endpoint are live; direct Stellar and Agent Pass foundations have real transaction evidence. The integrated draft includes authenticated onboarding, deterministic intent/review, all four routes, persisted timelines/receipts, contacts and Agent Pass administration/spending. | The integrated stack is not deployed or live-accepted. Privy/sponsor values and teammate-fork Vercel authorization are absent. Base, CCTP and current browser journeys have no signed end-to-end evidence; MoneyGram is externally blocked. |
 | Real-world usefulness | **Requires external verification** | The PRD identifies freelancers, remote workers, small businesses, and digital-dollar users; the product hides chain mechanics behind usernames, routes, and verified outcomes. | Conduct and record genuine external user testing. Do not claim adoption, customers, volume, partnerships, or testimonials without evidence. |
-| Innovation and novelty | **Implemented but awaiting integration** | Agent Pass proves restricted, revocable agent authority instead of unrestricted wallet access. The payment state model is designed around verified destination outcomes. | Demonstrate verified money movement through a complete cross-chain journey and surface Agent Pass controls in the product experience. |
-| Pitching and presentation | **In progress** | Direct Stellar and Agent Pass provide credible fallback demonstrations with inspectable Testnet hashes and persistent evidence. | Prepare the single coherent demo, evidence manifest, recovery/failure path, verified official submission requirements, and presentation assets. Cross-chain claims must wait for real evidence. |
+| Innovation and novelty | **Implemented but awaiting current-browser proof** | Agent Pass has real restricted/revocable Testnet evidence. PR #66 adds owner-bound one-use administration, current-ledger expiry and exact reviewed Payment execution with a memory-only delegated signer. | Demonstrate the current UI in one authenticated browser session and retain the exact rejection/revocation evidence. |
+| Pitching and presentation | **In progress** | Direct Stellar and Agent Pass provide credible fallback demonstrations with inspectable hashes. A submission package, evidence manifest, architecture, no-wallet path, independent-test runbook and 30-second fallback script exist. | Confirm organizer cutoff/artifacts/video format, run independent testing, record the exact deployed commit and produce the final video/submission links. Cross-chain claims must wait for real evidence. |
 
 ## 3. Product capability baseline
 
@@ -67,21 +68,21 @@ These criteria guide prioritization, but do not relax financial correctness or s
 | --- | --- | --- |
 | Public Testnet application and health | **Implemented and verified** | `https://telya.vercel.app` and `/api/health` returned HTTP 200 during this assessment; application and database checks reported `ok`. |
 | Canonical domain contracts | **Implemented and verified** | Merged PR #30 established the shared types and passed its automated tests. |
-| Database schema and readiness plumbing | **Implemented and verified** | Migrations through `0005` are represented on `main`; the deployed health endpoint reports database readiness. PR #44 adds later CCTP migrations that are not yet on `main`. |
-| Authentication and durable username claiming | **In progress** | Backend schema/auth work exists, and PR #46 adds onboarding. The public end-to-end authenticated claim/reconnect flow is not yet accepted. PR #46 also contains a mock availability fallback on database failure and tests a duplicated validator rather than production code. Its Vercel status is an authorization blocker, not evidence of a build failure; no deployment record or build log was produced for the current fork commit. Its separate GitGuardian check flags a high-entropy value in public Stellar configuration and requires disposition before merge; the check alone is not proof that a secret was committed. |
+| Database schema and readiness plumbing | **Implemented and database-verified in drafts** | Main retains migrations through `0005`; Neon has recorded PR #44/#48 CCTP migrations `0006`–`0008`, PR #53 Payment handoffs `0009`–`0010`, and PR #66 Agent Pass/deployment handoffs `0011`–`0012`. Their PostgreSQL regressions passed. Unmerged schema is not yet part of the public deployment. |
+| Authentication and durable username claiming | **In progress** | PR #46 requires a verified Privy session, exact server-re-fetched Base wallet and fresh passkey assertion against the live Stellar smart account. Username checks fail closed on DB/auth failure; Neon proves case-insensitive uniqueness and that another owner cannot claim through the verified wallet. Its exact head passes tests, build and GitGuardian. **Remaining:** real Privy wallet link/switch, passkey binding, authenticated claim/reconnect and deployed preview; Vercel requires fork authorization. |
 | Stellar smart account lifecycle | **Implemented and verified** | Merged PR #40 includes real Testnet create, reconnect, silent restore, prompted passkey reconnect, sponsorship, and failure evidence. |
 | Direct Stellar USDC payment | **Implemented and verified** | Merged PR #41 includes a real 0.5 USDC Testnet payment, finality, exact recipient verification, amount verification, durable events, and receipt restoration. |
 | Agent Pass | **Implemented and verified** | Merged PR #43 includes real Testnet creation, allowed spend, overspend rejection, revocation, post-revocation rejection, and continued owner control. P0 remains direct Stellar USDC only. |
-| AI and voice intent handlers | **Implemented but awaiting integration** | Framework-neutral handlers exist, but no mounted App Router endpoints, production-code tests, provider-outage proof, or complete UI fallback were found on `main`. AI remains parse-only. |
-| Contacts, routing, fee preview, and payment orchestration | **Implemented but awaiting integration** | Merged server handlers and fail-closed provider boundaries exist. The handlers are not mounted in the public application, lack automated coverage, and intentionally exclude chain execution. Issue #15 remains open. |
-| Payment movement and receipt UI | **In progress** | The shell communicates truthful states, but the complete live progression, refresh recovery, failure recovery, and receipt journey are not integrated for every P0 route. |
-| Base-to-Base execution | **Not implemented** | No accepted Base execution implementation or real Base Sepolia settlement evidence was found. |
-| Stellar-side CCTP | **Implemented but awaiting integration** | Draft PR #44 implements Stellar burn/mint verification, evidence reservation, replay recovery, and the shared Issue #16 seam. It is intentionally not complete end to end. |
-| Base/Circle coordinator | **Not implemented** | Issue #16 remains open with no implementation PR. It is owned by @Webghost01-NG and must not be duplicated. |
-| Bidirectional CCTP settlement | **Not implemented** | There is no real Base Sepolia-to-Stellar Testnet and Stellar Testnet-to-Base Sepolia destination evidence yet. Source confirmation alone is never completion. |
+| AI and voice intent handlers | **Implemented but awaiting live browser proof** | PR #49 mounts authenticated intent/voice endpoints, constrained parsing, injection/ambiguity tests, manual fallback and a typed path when providers are unavailable. AI remains parse-only and never signs. **Remaining:** no authenticated live voice/provider outage session has been recorded. |
+| Contacts, routing, fee preview, and payment orchestration | **Implemented but awaiting live proof** | PR #53 mounts contacts/conversations/payment APIs with real owner-scoped balances, deterministic routing, Standard CCTP quotes, Base gas estimates, one-use authorization, idempotency and guarded failure/completion persistence. PR #66 adds Neon contact ownership/resolution evidence. **Remaining:** prove exact providers, balances, fees and signed routes in the accepted browser deployment. |
+| Payment movement and receipt UI | **Implemented but awaiting live proof** | PRs #49/#65 integrate protected execution for all four routes, persisted Payment/PaymentEvent timelines, exact receipt gating, pagination and refresh-only recovery without resubmission. **Remaining:** no current authenticated browser has demonstrated a real submitted-to-completed/failed timeline and restored receipt. |
+| Base-to-Base execution | **Implemented but awaiting live proof** | PR #48/#53 encode and authorize the exact ERC-20 transfer, verify Base Sepolia, persist the first hash, require receipt/finality and exact transfer evidence, and guard mismatch failure. **Remaining:** no real Base Sepolia wallet signature, balance/fee review or settlement evidence exists. |
+| Stellar-side CCTP | **Implemented but awaiting live settlement** | PR #44 implements Stellar burn/mint verification, evidence reservation, guarded Payment transitions and replay/restart recovery. PR #53 binds its exact reviewed burn to an authenticated one-use handoff. **Remaining:** real source/destination hashes, Circle evidence and exact final recipient/amount. |
+| Base/Circle coordinator | **Implemented but awaiting live settlement** | PR #48 at `05531f5` implements guarded Base/Stellar state, Circle Testnet Standard quotes, canonical hashes, attestation/mint evidence and owner-scoped Base balance reads. It is stacked through PR #53 rather than duplicated. **Remaining:** authenticated Base balance/browser proof and real bidirectional settlement/recovery evidence; Vercel fork authorization is required. |
+| Bidirectional CCTP settlement | **Not live-verified** | Both code paths and automated/database recovery safeguards exist in the integrated draft. A read-only probe verifies Base Sepolia chain `84532`, deployed Base CCTP code, a current Stellar ledger and configured Stellar contract interfaces. **Remaining:** no signed Base Sepolia→Stellar Testnet or Stellar Testnet→Base Sepolia destination proof. Public RPC/contract readiness is not financial completion. |
 | MoneyGram provider access and smart-account compatibility | **Requires external verification** | Partner access has not been obtained. New widget integrations require partner sandbox credentials, and registration requires a company email. MoneyGram's Stellar non-custodial documentation passes a G-address, while Telya uses Smart Account Kit contract accounts; compatibility requires explicit provider confirmation. |
 | MoneyGram sandbox flow | **Not implemented** | No provider implementation or accepted sandbox transaction evidence was found. No fake provider response or simulated completed payment may substitute for access. This external blocker does not interrupt direct Stellar, CCTP, or the core product journey. |
-| External user validation | **Requires external verification** | No verified interviews, usability sessions, testimonials, customers, or usage metrics were found. |
+| External user validation | **Requires external verification** | A consent-aware independent tester runbook and redacted findings/retest format are prepared. No unfamiliar user has executed it. |
 | Official submission rules and cutoff | **Requires external verification** | Issue #22 remains open; exact cutoff/timezone, artifacts, rubric details, and video requirements must be confirmed from official sources. |
 
 ## 4. Competitive differentiation
@@ -128,22 +129,25 @@ These pillars reinforce one another: Telya limits who may authorize money moveme
 
 ### Independent ledger verification
 
-The identifiers above are copied exactly from the merged evidence in PRs #40, #41, and #43. On November 25, 2026, Stellar Expert's Testnet API returned records for all five contract/account addresses and all seven transaction hashes at the ledgers shown above. Stellar Horizon independently returned `successful: true` for every transaction. The negative Agent Pass cases have no transaction by design and remain supported by the merged PR evidence rather than an explorer hash.
+The identifiers above are copied exactly from the merged evidence in PRs #40, #41, and #43. On November 27, 2026 at 03:00 UTC, Stellar Horizon returned `successful: true` for the direct payment and all four positive Agent Pass transactions at the recorded ledgers. The negative Agent Pass cases have no transaction by design and remain supported by merged acceptance evidence rather than an explorer hash.
 
 ### CCTP boundary and required proof
 
-PR #44 exposes the agreed seam:
+PR #44 and PR #48 expose the agreed seam, and PR #53 mounts it into the protected Payment journey:
 
 - `settleBaseToStellarCctp(...)` accepts the trusted Base source hash plus Circle message and attestation, submits Stellar `mint_and_forward`, and may complete only after finalized exact-transfer verification.
-- `reconcileStellarCctpSource(...)` verifies a finalized Stellar burn and records `source_confirmed` only. Issue #16 must still obtain the attestation, mint on Base, and verify the final Base recipient and amount.
+- `reconcileStellarCctpSource(...)` verifies a finalized Stellar burn and records `source_confirmed` only. PR #48 obtains and persists the Circle evidence, submits/verifies Base `receiveMessage`, and can complete only after Base finality plus exact recipient/amount verification.
+- Protected browser authorization binds the authenticated owner, verified wallet, stored route, burn amount and maximum fee to a one-use server handoff before either source operation can be broadcast.
 
 Before PR #44 may be ready:
 
-1. Issue #16 must persist and supply trusted burn amount and maximum fee separately from recipient amount.
+1. Use the persisted trusted burn amount and maximum fee separately from recipient amount; do not replace them with browser values.
 2. Both directions must use real Circle CCTP Standard Testnet operations with Base domain `6`, Stellar domain `27`, and finality threshold `2000`.
 3. Evidence must include source transaction, Circle message, attestation status, destination transaction, finality, exact recipient, accepted amount, and durable event sequence.
 4. Duplicate callbacks, process restarts, and stale `destination_submitting` reservations must prove safe replay without duplicate financial execution.
-5. Migration state must be verified in the configured environment. The handoff records `0006_stellar_cctp.sql` as applied; PR #44 also contains `0007_stellar_cctp_crash_recovery.sql`, which still requires environment-specific application and verification.
+5. Preserve the verified Neon migration chain: CCTP `0006`–`0008`, Payment handoffs `0009`–`0010`, and Agent Pass/deployment handoffs `0011`–`0012`. Reverify checksums and PostgreSQL regressions after any migration change.
+
+The public-network probe on PR #66 verifies Base Sepolia chain `84532`, non-empty deployed code for configured USDC/TokenMessenger/MessageTransmitter, a current Stellar Testnet ledger and all configured Stellar contract interfaces. It deliberately reads no wallet balance, allowance, transaction, attestation or finality and therefore is not settlement evidence.
 
 ### MoneyGram external blocker
 
@@ -227,15 +231,14 @@ Grant funding should be tied to measurable work: integration reliability, indepe
 
 ## 9. Prioritized implementation roadmap
 
-1. **Protect the financial truth boundary.** Keep PR #44 draft. @Webghost01-NG completes Issue #16 on his branch; @Alike001 integrates only through the agreed seam. No competing Circle coordinator.
-2. **Make onboarding truthful and durable.** Review PR #46 with @Prudentdev-xyz: authorize or otherwise obtain a real preview deployment, resolve the separate security gate, remove the silent mock username-availability fallback, exercise production validation code, and prove authenticated claim/reconnect persistence before merge. The current Vercel failure says authorization is required; it is not evidence that the production build failed.
-3. **Connect existing backend capability.** Mount and test the AI/manual intent, contacts, routing, fee-preview, and payment APIs with authenticated, fail-closed provider adapters. Preserve the manual path when AI/voice is unavailable.
-4. **Complete the visible payment journey.** Connect frontend confirmation, real state progression, refresh recovery, failures, and receipts to durable events—first for the already verified direct Stellar route.
-5. **Prove bidirectional CCTP.** After Issue #16 is available, test both directions, exact destination values, duplicate callbacks, stale reservations, and process restarts; attach the evidence to PR #44 before marking it ready.
-6. **Complete remaining P0 providers without blocking the core.** Implement and verify Base-to-Base within its owner's scope. Resume MoneyGram only after partner sandbox access and explicit Smart Account Kit contract-wallet compatibility confirmation. Do not imply provider availability before verification.
-7. **Run external usability sessions.** Test the full journey with target users, record consented observations and failures, and prioritize fixes without fabricating testimonials or adoption.
-8. **Package the demo and submission.** Confirm Issue #22 from official sources, create an evidence manifest, rehearse primary and fallback demos, and record a truthful Testnet presentation.
-9. **Prepare controlled-pilot security.** Complete the threat model, operational controls, independent review scope, monitoring, and incident/reconciliation procedures before any production claim.
+1. **Unlock authenticated acceptance.** Configure Privy app ID/secret and a usable Testnet sponsor only in the secure environment; authorize the exact teammate-fork Vercel preview. Prove PR #46 sign-in, wallet ownership, username claim and reconnect before merge.
+2. **Prove the integrated direct-Stellar journey first.** On PR #66, complete intent/manual review, exact recipient/amount/fee display, passkey authorization, real submission, persisted timeline, completion verification and receipt restoration. Capture interruption and duplicate protection without resubmission.
+3. **Prove Base and bidirectional CCTP.** Use real Base Sepolia wallet authorization and both Circle Standard directions. Retain exact destination recipient/amount/finality, duplicate callback, stale reservation and restart evidence; keep PRs #44/#48/#53 draft until complete.
+4. **Prove current Agent Pass UI.** In one authenticated session, create a bounded pass, execute the exact reviewed allowed Payment, show cumulative over-limit rejection, expiry or revocation, post-revoke rejection and continued owner control. A page refresh must discard the memory-only delegated signer.
+5. **Keep MoneyGram unavailable until approved.** Resume only after partner sandbox access and written Smart Account Kit contract-wallet compatibility. Do not substitute a simulated provider lifecycle.
+6. **Run independent usability acceptance.** Have an unfamiliar tester execute the prepared runbook, record consented findings, fix defects and record the retest verdict without fabricating testimonials or adoption.
+7. **Finish the demo and submission.** Confirm Issue #22 from official sources, deploy the exact accepted commit, record the truthful primary or fallback Testnet video, verify links signed out, and save submission confirmation.
+8. **Prepare controlled-pilot security.** Complete the threat model, operational controls, independent review scope, monitoring, dependency/secret scanning and incident/reconciliation procedures before any production claim.
 
 Work that does not improve one of these outcomes should be challenged before entering P0.
 
@@ -258,11 +261,16 @@ Work that does not improve one of these outcomes should be challenged before ent
 
 ## Current verification record
 
-On the assessed `main` commit:
+Merged `main` at `2531820` remains the public deployment baseline. The public health endpoint most recently returned HTTP 200 with Testnet application/database readiness; the recorded merged direct-Stellar and positive Agent Pass transactions were independently rechecked on Stellar Testnet.
 
-- 5 test files and 40 tests passed;
-- Next.js route type generation and TypeScript checking passed;
-- the production build passed; and
-- the public deployment and database health endpoint responded successfully.
+On integrated draft PR #66 head `65ff241`:
 
-These gates prove repository health for the tested commit. They do not prove the unmerged PRs, unavailable providers, cross-chain routes, or production readiness.
+- secure environment: 72 files / 370 tests passed with no skips;
+- plain environment: 61 files / 352 tests passed, while 11 files / 18 credential/database-gated tests were explicitly skipped;
+- client TypeScript, server TypeScript, production build, frozen install and `git diff --check` passed;
+- GitGuardian passed;
+- `pnpm audit --prod` reported no known vulnerabilities after resolving transitive Zod to patched `4.6.7`;
+- the read-only public-network probe passed at Stellar ledger `5,946,104`; and
+- mobile/desktop unauthenticated acceptance proved no financial controls or substituted data appear without sign-in, while protected reads return 401.
+
+Vercel did not build PR #66 because the teammate fork requires team authorization. The checks above prove automated, database, public-infrastructure and unavailable-state behavior only. They do not prove authenticated browser ownership, real balances, wallet signatures, Base/CCTP settlement, MoneyGram, independent-user acceptance or production readiness.

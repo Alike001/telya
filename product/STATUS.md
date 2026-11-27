@@ -103,6 +103,8 @@ The submission package now includes the exact PR #66 head and commands for repro
 
 Issue #19's README now gives strangers a no-wallet health/explorer/evidence path before local setup, and the submission package includes the previously missing Mainnet roadmap. Mainnet remains gated on independent review, fresh production contracts/providers, operational controls and exact production acceptance; no Testnet proof is promoted to Mainnet readiness.
 
+[JUDGING-AND-GRANT-READINESS.md](JUDGING-AND-GRANT-READINESS.md) now reflects merged main `2531820` and integrated PR #66 `65ff241` instead of the obsolete November 25 implementation snapshot. It records PR #48/#53 orchestration, migrations through `0012`, current automated/database/public-network evidence and the remaining authenticated/live-provider gates without claiming Base or CCTP completion.
+
 ## November 26 backend progress
 
 Draft [PR #53](https://github.com/Alike001/telya/pull/53) stacks PR #48 without duplication and is at `d20dddd`. All four routes have fail-closed reviews and persisted authorization/first-hash recovery. Definitive finalized Base direct, source-burn and destination-mint mismatches now atomically fail only the exact saved operation/Payment/hash and record the true verification stage; Neon parsed all three guarded transitions. Exact finality, recipient and amount still gate completion. No live browser wallet walkthrough or transaction was performed.
