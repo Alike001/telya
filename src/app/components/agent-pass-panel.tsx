@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { usePrivy } from "@privy-io/react-auth";
 import type { SmartAccountKit } from "smart-account-kit";
 import {
@@ -18,6 +18,7 @@ import {
 import type { SmartAccountPublicConfig } from "../../stellar/smart-account";
 import { createBrowserSmartAccountKit, restoreSmartAccount } from "../../stellar/smart-account";
 import { authenticatedFetch } from "../authenticated-fetch";
+import { createSessionRequestGuard, type SessionRequestGuard } from "../session-request-guard";
 import {
   AlertTriangle,
   ArrowUpRight,
@@ -103,40 +104,62 @@ function AgentPassManagement({
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [spendingLimitInput, setSpendingLimitInput] = useState("25.00");
   const [durationHours, setDurationHours] = useState(24);
+  const sessionGuardRef = useRef<SessionRequestGuard | null>(null);
 
   // Fetch active Agent Pass from API
   useEffect(() => {
+    sessionGuardRef.current?.cancel();
+    sessionGuardRef.current = null;
+    setPass(null);
+    setAgentSpendSession(null);
+    setError(null);
+    setSuccessNotice(null);
+    setShowCreateModal(false);
+    setIsLoading(false);
+    setIsSubmitting(false);
     if (!smartAccountAddress) return;
-    void fetchPass();
+    const guard = createSessionRequestGuard();
+    sessionGuardRef.current = guard;
+    void fetchPass(guard, smartAccountAddress);
+    return () => {
+      guard.cancel();
+      if (sessionGuardRef.current === guard) sessionGuardRef.current = null;
+    };
   }, [smartAccountAddress]);
 
-  async function fetchPass() {
-    if (!smartAccountAddress) return;
+  async function fetchPass(
+    guard: SessionRequestGuard | null = sessionGuardRef.current,
+    accountAddress: string | null = smartAccountAddress,
+  ) {
+    if (!accountAddress || !guard?.isActive()) return;
     setIsLoading(true);
     setError(null);
     try {
-      const res = await request(`/api/stellar/agent-passes/${smartAccountAddress}`, {
+      const res = await request(`/api/stellar/agent-passes/${accountAddress}`, {
         cache: "no-store",
       });
       if (res.ok) {
         const data: unknown = await res.json();
         const parsed = parsePersistedAgentPass(data);
-        if (!parsed || parsed.smartAccount !== smartAccountAddress) {
+        if (!parsed || parsed.smartAccount !== accountAddress) {
           throw new Error("Agent Pass status evidence could not be verified.");
         }
+        if (!guard.isActive()) return;
         setPass(parsed);
         if (parsed.status !== "active") setAgentSpendSession(null);
       } else if (res.status === 404) {
+        if (!guard.isActive()) return;
         setPass(null);
         setAgentSpendSession(null);
       } else {
         throw new Error("Agent Pass status is unavailable. Please retry.");
       }
     } catch {
+      if (!guard.isActive()) return;
       setPass(null);
       setError("Agent Pass status could not be verified. Please retry.");
     } finally {
-      setIsLoading(false);
+      if (guard.isActive()) setIsLoading(false);
     }
   }
 
@@ -146,6 +169,9 @@ function AgentPassManagement({
       setError("Please connect your passkey account to create an Agent Pass.");
       return;
     }
+    const guard = sessionGuardRef.current;
+    const accountAddress = smartAccountAddress;
+    if (!guard?.isActive()) return;
 
     setIsSubmitting(true);
     setError(null);
@@ -158,7 +184,7 @@ function AgentPassManagement({
       const authorizationRes = await request("/api/stellar/agent-passes/authorize", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ kind: "create", smartAccount: smartAccountAddress }),
+        body: JSON.stringify({ kind: "create", smartAccount: accountAddress }),
       });
       const authorizationPayload: unknown = await authorizationRes.json();
       const authorization = authorizationRes.ok
@@ -170,10 +196,10 @@ function AgentPassManagement({
         relayerUrl: authorization.relayerUrl,
       });
       const restored = await restoreSmartAccount(authorizedKit);
-      if (restored?.contractId !== smartAccountAddress) {
+      if (restored?.contractId !== accountAddress) {
         throw new Error("The authenticated Agent Pass account does not match the restored passkey account.");
       }
-      onKitChange?.(authorizedKit);
+      if (!guard.isActive()) return;
 
       // Convert hours to ledgers (~5 seconds per ledger on Stellar)
       // 1 hour = ~720 ledgers
@@ -188,6 +214,8 @@ function AgentPassManagement({
         durationLedgers,
       });
 
+      if (!guard.isActive()) return;
+      onKitChange?.(authorizedKit);
       setAgentSpendSession({
         kit: authorizedKit,
         pass: created,
@@ -195,16 +223,20 @@ function AgentPassManagement({
       });
       setSuccessNotice(`Agent Pass creation submitted for Rule #${created.ruleId}. Checking its recorded status.`);
       setShowCreateModal(false);
-      await fetchPass();
+      await fetchPass(guard, accountAddress);
     } catch (err) {
+      if (!guard.isActive()) return;
       setError(err instanceof Error ? err.message : "Failed to create Agent Pass.");
     } finally {
-      setIsSubmitting(false);
+      if (guard.isActive()) setIsSubmitting(false);
     }
   }
 
   async function handleRevokeAgentPass() {
     if (!kit || !pass) return;
+    const guard = sessionGuardRef.current;
+    const accountAddress = smartAccountAddress;
+    if (!accountAddress || !guard?.isActive() || pass.smartAccount !== accountAddress) return;
     const confirmRevoke = window.confirm(
       "Are you sure you want to revoke this Agent Pass? The AI agent will immediately lose spending access.",
     );
@@ -240,19 +272,22 @@ function AgentPassManagement({
       if (restored?.contractId !== pass.smartAccount) {
         throw new Error("The authenticated Agent Pass account does not match the restored passkey account.");
       }
-      onKitChange?.(authorizedKit);
+      if (!guard.isActive()) return;
       const result = await revokeStellarAgentPass({
         kit: authorizedKit,
         pass: { ruleId: pass.ruleId },
       });
 
+      if (!guard.isActive()) return;
+      onKitChange?.(authorizedKit);
       setAgentSpendSession(null);
       setSuccessNotice(`Revocation submitted. Check the recorded status before assuming the pass is inactive. Transaction: ${result.transactionHash.slice(0, 10)}...`);
-      await fetchPass();
+      await fetchPass(guard, accountAddress);
     } catch (err) {
+      if (!guard.isActive()) return;
       setError(err instanceof Error ? err.message : "Failed to revoke Agent Pass.");
     } finally {
-      setIsSubmitting(false);
+      if (guard.isActive()) setIsSubmitting(false);
     }
   }
 
