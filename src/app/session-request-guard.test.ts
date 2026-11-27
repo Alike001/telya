@@ -1,4 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { authenticatedFetch } from "./authenticated-fetch.ts";
 
 import {
   captureSessionAccessToken,
@@ -6,6 +8,10 @@ import {
 } from "./session-request-guard.ts";
 
 describe("authenticated session request guard", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("permanently rejects late writes after cancellation", () => {
     const guard = createSessionRequestGuard();
     expect(guard.isActive()).toBe(true);
@@ -35,5 +41,26 @@ describe("authenticated session request guard", () => {
       return "identity-b-token";
     }, changed);
     await expect(pending).rejects.toThrow("Authenticated session changed");
+  });
+
+  it("keeps one authorization token across every request in an operation", async () => {
+    const guard = createSessionRequestGuard();
+    const getAccessToken = vi.fn()
+      .mockResolvedValueOnce("identity-a-token")
+      .mockResolvedValueOnce("identity-b-token");
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const tokenProvider = await captureSessionAccessToken(getAccessToken, guard);
+    await authenticatedFetch("/api/payments/reconcile", { method: "POST" }, tokenProvider);
+    await authenticatedFetch("/api/payments?id=payment-1", { method: "GET" }, tokenProvider);
+
+    expect(getAccessToken).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    for (const [, init] of fetchMock.mock.calls) {
+      expect((init as RequestInit).headers).toBeInstanceOf(Headers);
+      expect(((init as RequestInit).headers as Headers).get("Authorization"))
+        .toBe("Bearer identity-a-token");
+    }
   });
 });

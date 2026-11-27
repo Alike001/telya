@@ -11,7 +11,11 @@ import {
 } from "../../domain/payment-activity";
 import { buildPaymentReceipt } from "../../domain/payment-timeline";
 import { authenticatedFetch } from "../authenticated-fetch";
-import { createSessionRequestGuard, type SessionRequestGuard } from "../session-request-guard";
+import {
+  captureSessionAccessToken,
+  createSessionRequestGuard,
+  type SessionRequestGuard,
+} from "../session-request-guard";
 import { ActivityHistory } from "./activity-history";
 import { PaymentProgressTimeline } from "./payment-progress-timeline";
 import { PaymentReceiptModal } from "./payment-receipt-modal";
@@ -42,8 +46,12 @@ function AuthenticatedPaymentActivity() {
   const [error, setError] = useState<string | null>(null);
   const sessionGuardRef = useRef<SessionRequestGuard | null>(null);
 
-  const request = useCallback(
-    (input: string, init: RequestInit = {}) => authenticatedFetch(input, init, getAccessToken),
+  const captureRequest = useCallback(
+    async (guard: SessionRequestGuard) => {
+      const tokenProvider = await captureSessionAccessToken(getAccessToken, guard);
+      return (input: string, init: RequestInit = {}) =>
+        authenticatedFetch(input, init, tokenProvider);
+    },
     [getAccessToken],
   );
 
@@ -53,6 +61,7 @@ function AuthenticatedPaymentActivity() {
     setLoading(true);
     setError(null);
     try {
+      const request = await captureRequest(guard);
       const query = cursor
         ? `/api/payments?limit=20&before=${encodeURIComponent(cursor)}`
         : "/api/payments?limit=20";
@@ -69,7 +78,7 @@ function AuthenticatedPaymentActivity() {
     } finally {
       if (guard.isActive()) setLoading(false);
     }
-  }, [request]);
+  }, [captureRequest]);
 
   useEffect(() => {
     sessionGuardRef.current?.cancel();
@@ -100,8 +109,10 @@ function AuthenticatedPaymentActivity() {
   async function fetchDetail(
     paymentId: string,
     guard: SessionRequestGuard | null = sessionGuardRef.current,
+    operationRequest?: (input: string, init?: RequestInit) => Promise<Response>,
   ): Promise<PersistedPayment | null> {
     if (!guard?.isActive()) return null;
+    const request = operationRequest ?? await captureRequest(guard);
     const response = await request(`/api/payments?id=${encodeURIComponent(paymentId)}`, {
       cache: "no-store",
     });
@@ -120,7 +131,8 @@ function AuthenticatedPaymentActivity() {
     setError(null);
     setShowReceipt(false);
     try {
-      await fetchDetail(payment.id, guard);
+      const request = await captureRequest(guard);
+      await fetchDetail(payment.id, guard, request);
     } catch (reason) {
       if (!guard.isActive()) return;
       setError(reason instanceof Error ? reason.message : "Payment details are temporarily unavailable.");
@@ -133,6 +145,7 @@ function AuthenticatedPaymentActivity() {
     if (!guard?.isActive()) return;
     setError(null);
     try {
+      const request = await captureRequest(guard);
       if (selected.route.id === "stellar_to_stellar" && selected.status === "submitted") {
         await request(
           `/api/payments/stellar/direct/reconcile?id=${encodeURIComponent(selected.id)}`,
@@ -140,7 +153,7 @@ function AuthenticatedPaymentActivity() {
         );
       }
       if (!guard.isActive()) return;
-      await fetchDetail(selected.id, guard);
+      await fetchDetail(selected.id, guard, request);
     } catch (reason) {
       if (!guard.isActive()) return;
       setError(reason instanceof Error ? reason.message : "Payment refresh is temporarily unavailable.");
