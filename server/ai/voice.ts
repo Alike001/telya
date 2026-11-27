@@ -1,4 +1,4 @@
-import { authenticateRequest } from "../auth/privy.js";
+import { authenticateRequest } from "../auth/privy.ts";
 
 const GROQ_TRANSCRIPTION_URL = "https://api.groq.com/openai/v1/audio/transcriptions";
 const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
