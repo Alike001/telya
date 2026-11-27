@@ -107,7 +107,7 @@ describe("Base payment authorization on PostgreSQL", () => {
           paymentId: cctpId,
           sourceTransactionHash: cctpHash,
           rpc: pendingRpc,
-        })).resolves.toEqual({ status: "pending" });
+        })).resolves.toEqual({ status: "pending", sourceTransactionHash: cctpHash });
 
         const payments = await sql`
           SELECT id, status, source_transaction_hash, destination_transaction_hash FROM payments

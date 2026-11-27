@@ -675,6 +675,7 @@ export async function reconcileBaseToStellarCctp(input: {
   readonly stellarRpc?: Pick<rpc.Server, "getTransaction">;
 }): Promise<{
   readonly status: "pending" | "in_progress" | "completed";
+  readonly sourceTransactionHash?: string;
   readonly destinationTransactionHash?: string;
 }> {
   const paymentId = requirePaymentId(input.paymentId);
@@ -773,7 +774,9 @@ export async function reconcileBaseToStellarCctp(input: {
     expectedMintRecipient: stellarConfig.forwarder,
     expectedDestinationTokenMessenger: stellarConfig.tokenMessenger,
   });
-  if (verification.status === "pending") return { status: "pending" };
+  if (verification.status === "pending") {
+    return { status: "pending", sourceTransactionHash: sourceHash };
+  }
   if (verification.status !== "verified") {
     throw new BaseCctpPersistenceError(
       "DESTINATION_MISMATCH",
@@ -817,7 +820,9 @@ export async function reconcileBaseToStellarCctp(input: {
       throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "Completed Stellar settlement conflicts with persisted Base CCTP state");
     }
   }
-  return result;
+  return result.status === "completed"
+    ? result
+    : { ...result, sourceTransactionHash: sourceHash };
 }
 
 export interface PreparedBaseCctpDestination {
