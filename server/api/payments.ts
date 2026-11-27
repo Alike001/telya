@@ -187,8 +187,7 @@ export function createPaymentHandler(options: PaymentApiOptions = {}) {
       let balances: Awaited<ReturnType<BalanceProvider>>;
       try {
         balances = await options.getBalances(user, sourceWallets);
-      } catch (error) {
-        if (error instanceof BaseApprovalRequiredError) throw error;
+      } catch {
         throw new PaymentProviderUnavailableError();
       }
       const route = resolvePaymentRoute({
@@ -235,7 +234,8 @@ export function createPaymentHandler(options: PaymentApiOptions = {}) {
           sourceWallet: route.sourceWallet,
           destinationAddress: route.destinationAddress,
         });
-      } catch {
+      } catch (error) {
+        if (error instanceof BaseApprovalRequiredError) throw error;
         throw new PaymentProviderUnavailableError();
       }
       fees = validateFeeList(fees);
