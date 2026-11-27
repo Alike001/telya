@@ -5,6 +5,7 @@ import {
   parseCompletedPaymentReceipt,
   mergeVerifiedBalanceSnapshots,
   parsePaymentReview,
+  parseOwnedStellarIdentity,
   parseReconciliation,
   parseVerifiedBalances,
 } from "./conversation-payment.ts";
@@ -34,6 +35,13 @@ describe("conversation financial response parsing", () => {
       { walletId: "base-1", network: "base", address: "0x01", amount: "2.75", status: "verified" },
     ]);
     expect(mergeVerifiedBalanceSnapshots(primary, [])).toEqual(primary);
+  });
+
+  it("accepts a restored Stellar account only after an owner-scoped identity lookup", () => {
+    expect(parseOwnedStellarIdentity({ found: true, username: "alice" })).toBe(true);
+    expect(parseOwnedStellarIdentity({ found: true })).toBe(false);
+    expect(parseOwnedStellarIdentity({ found: false, username: "alice" })).toBe(false);
+    expect(parseOwnedStellarIdentity({ found: true, username: "   " })).toBe(false);
   });
 
   it("accepts only an awaiting-confirmation review and never promotes a hash to success", () => {

@@ -21,6 +21,7 @@ import {
 import {
   apiMessage,
   mergeVerifiedBalanceSnapshots,
+  parseOwnedStellarIdentity,
   parsePaymentReview,
   parsePersistedPaymentHashes,
   parseVerifiedBalances,
@@ -93,6 +94,7 @@ function AuthenticatedConversation() {
     if (!authReady || !authenticated) {
       setSmartAccount(null);
       setBalances([]);
+      configRef.current = null;
       return;
     }
     let active = true;
@@ -103,7 +105,18 @@ function AuthenticatedConversation() {
           const config = await configResponse.json() as SmartAccountPublicConfig;
           configRef.current = config;
           const account = await restoreSmartAccount(createBrowserSmartAccountKit(config));
-          if (active) setSmartAccount(account);
+          if (account) {
+            const lookupResponse = await authenticatedFetch(
+              `/api/usernames/lookup?account=${encodeURIComponent(account.contractId)}`,
+              { cache: "no-store" },
+              getAccessToken,
+            );
+            const owned = lookupResponse.ok &&
+              parseOwnedStellarIdentity(await lookupResponse.json());
+            if (active) setSmartAccount(owned ? account : null);
+          } else if (active) {
+            setSmartAccount(null);
+          }
         }
       } catch {
         if (active) setSmartAccount(null);
