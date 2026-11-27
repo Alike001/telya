@@ -9,7 +9,7 @@ import {
 const active = {
   smartAccount: `C${"A".repeat(55)}`,
   ruleId: 3,
-  agentAddress: `C${"B".repeat(55)}`,
+  agentAddress: "GCQZMUA62XYUWELVOEVHVXJUQGHJT2QR73FBPILYYFXMKHDNLVAILEH5",
   agentPublicKey: "c".repeat(64),
   spendingLimit: "25.0000000",
   spendingLimitAtomic: "250000000",
@@ -39,6 +39,7 @@ describe("persisted Agent Pass parsing", () => {
     expect(parsePersistedAgentPass({ ...active, spentAmountAtomic: "260000000" })).toBeNull();
     expect(parsePersistedAgentPass({ ...active, status: "revoked" })).toBeNull();
     expect(parsePersistedAgentPass({ ...active, smartAccount: "not-a-contract" })).toBeNull();
+    expect(parsePersistedAgentPass({ ...active, agentAddress: `C${"B".repeat(55)}` })).toBeNull();
   });
 
   it("requires observed ledger evidence to agree with active and expired status", () => {

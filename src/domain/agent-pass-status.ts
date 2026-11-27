@@ -31,6 +31,10 @@ function contract(value: unknown): value is string {
   return typeof value === "string" && /^C[A-Z2-7]{55}$/.test(value);
 }
 
+function stellarAccount(value: unknown): value is string {
+  return typeof value === "string" && /^G[A-Z2-7]{55}$/.test(value);
+}
+
 function decimal(value: unknown): value is string {
   return typeof value === "string" && /^(?:0|[1-9]\d{0,37})(?:\.\d{1,7})?$/.test(value);
 }
@@ -48,7 +52,7 @@ export function parsePersistedAgentPass(value: unknown): PersistedAgentPass | nu
   if (
     !pass || !contract(pass.smartAccount) ||
     !Number.isSafeInteger(pass.ruleId) || Number(pass.ruleId) < 1 ||
-    !contract(pass.agentAddress) ||
+    !stellarAccount(pass.agentAddress) ||
     typeof pass.agentPublicKey !== "string" || !/^[0-9a-f]{64}$/i.test(pass.agentPublicKey) ||
     !decimal(pass.spendingLimit) || typeof pass.spendingLimitAtomic !== "string" || !/^\d+$/.test(pass.spendingLimitAtomic) ||
     !decimal(pass.spentAmount) || typeof pass.spentAmountAtomic !== "string" || !/^\d+$/.test(pass.spentAmountAtomic) ||
