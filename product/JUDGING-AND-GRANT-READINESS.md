@@ -4,7 +4,7 @@
 
 **Merged baseline:** `origin/main` at `2531820`
 
-**Integrated draft baseline:** PR #66 at `3a49308`
+**Integrated draft baseline:** PR #66 at `cf6aaee`
 
 **Assessment scope:** repository code, merged and open pull requests, open issues, automated checks, public Testnet deployment, and linked Testnet transaction evidence
 
@@ -263,7 +263,7 @@ Work that does not improve one of these outcomes should be challenged before ent
 
 Merged `main` at `2531820` remains the public deployment baseline. The public health endpoint most recently returned HTTP 200 with Testnet application/database readiness; the recorded merged direct-Stellar and positive Agent Pass transactions were independently rechecked on Stellar Testnet.
 
-On integrated draft PR #66 head `3a49308`:
+On integrated draft PR #66 head `cf6aaee`:
 
 - secure environment: 76 files / 382 tests passed with no skips;
 - plain environment: 65 files / 364 tests passed, while 11 files / 18 credential/database-gated tests were explicitly skipped;
@@ -280,5 +280,6 @@ On integrated draft PR #66 head `3a49308`:
 - Agent Pass status, create, revoke and post-action refresh capture the exact verified C-address and auth epoch; an account change clears the pass and ephemeral signer session before any late response can write.
 - the conversation's saved-message, intent, balance/reply and payment-review pipeline captures one auth epoch; a departed session cannot append recipient/amount/route/fee data or errors into the next identity.
 - onboarding captures one token provider/auth epoch across deployment authorization, passkey challenge/assertion, Stellar binding, username claim and Base binding; an identity change clears state and prevents later steps from switching users.
+- conversation creation, intent parsing, payment review, confirmation and recovery each capture one token-backed request function, so later authenticated stages cannot silently switch to another Privy identity.
 
 Vercel did not build PR #66 because the teammate fork requires team authorization. The checks above prove automated, database, public-infrastructure and unavailable-state behavior only. They do not prove authenticated browser ownership, real balances, wallet signatures, Base/CCTP settlement, MoneyGram, independent-user acceptance or production readiness.
