@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { SmartAccountKit } from "smart-account-kit";
 import { ArrowUpRight, Bot, CheckCircle2, Loader2, RefreshCw } from "lucide-react";
 
@@ -16,12 +16,14 @@ import {
   prepareAgentPassPayment,
 } from "./agent-pass-payment-execution";
 import { runPaymentActionOnce } from "./payment-action-guard";
+import { agentPassBrowserSessionKey } from "./agent-pass-browser-session";
+import { createSessionRequestGuard, type SessionRequestGuard } from "../session-request-guard";
 
 type Request = (input: string, init?: RequestInit) => Promise<Response>;
 
 export function AgentPassSpendPanel({
   session,
-  request,
+  captureRequest,
   onStatusChanged,
 }: {
   readonly session: {
@@ -29,7 +31,7 @@ export function AgentPassSpendPanel({
     readonly pass: ActiveAgentPass;
     readonly tokenContract: string;
   } | null;
-  readonly request: Request;
+  readonly captureRequest: () => Promise<Request>;
   readonly onStatusChanged: () => Promise<void>;
 }) {
   const [recipientInput, setRecipientInput] = useState("");
@@ -39,6 +41,27 @@ export function AgentPassSpendPanel({
   const [error, setError] = useState<string | null>(null);
   const [phase, setPhase] = useState<"idle" | "reviewing" | "submitting" | "refreshing">("idle");
   const actionGuard = useRef<Promise<PaymentExecutionResult> | null>(null);
+  const sessionGuardRef = useRef<SessionRequestGuard | null>(null);
+  const sessionKey = agentPassBrowserSessionKey(session?.pass ?? null);
+
+  useEffect(() => {
+    sessionGuardRef.current?.cancel();
+    sessionGuardRef.current = null;
+    actionGuard.current = null;
+    setRecipientInput("");
+    setAmount("1.00");
+    setReview(null);
+    setExecution(null);
+    setError(null);
+    setPhase("idle");
+    if (!sessionKey) return;
+    const guard = createSessionRequestGuard();
+    sessionGuardRef.current = guard;
+    return () => {
+      guard.cancel();
+      if (sessionGuardRef.current === guard) sessionGuardRef.current = null;
+    };
+  }, [sessionKey]);
 
   function resetReview() {
     setReview(null);
@@ -49,58 +72,79 @@ export function AgentPassSpendPanel({
   async function prepare(event: React.FormEvent) {
     event.preventDefault();
     if (!session) return;
+    const guard = sessionGuardRef.current;
+    if (!guard?.isActive()) return;
     setPhase("reviewing");
     setError(null);
     setExecution(null);
     try {
-      setReview(await prepareAgentPassPayment({ recipientInput, amount, request }));
+      const request = await captureRequest();
+      const prepared = await prepareAgentPassPayment({ recipientInput, amount, request });
+      if (!guard.isActive()) return;
+      setReview(prepared);
     } catch (cause) {
+      if (!guard.isActive()) return;
       setReview(null);
       setError(cause instanceof Error ? cause.message : "The Agent Pass payment review is unavailable.");
     } finally {
-      setPhase("idle");
+      if (guard.isActive()) setPhase("idle");
     }
   }
 
   async function submit() {
     if (!session || !review) return;
+    const guard = sessionGuardRef.current;
+    if (!guard?.isActive()) return;
     setPhase("submitting");
     setError(null);
     try {
-      const result = await runPaymentActionOnce(actionGuard, () => executeAgentPassPayment({
-        review,
-        kit: session.kit,
-        pass: session.pass,
-        tokenContract: session.tokenContract,
-        request,
-      }));
+      const result = await runPaymentActionOnce(actionGuard, async () => {
+        const request = await captureRequest();
+        return executeAgentPassPayment({
+          review,
+          kit: session.kit,
+          pass: session.pass,
+          tokenContract: session.tokenContract,
+          request,
+        });
+      });
+      if (!guard.isActive()) return;
       setExecution(result);
       await onStatusChanged();
     } catch (cause) {
+      if (!guard.isActive()) return;
       setError(cause instanceof Error ? cause.message : "The Agent Pass payment could not be authorized.");
     } finally {
-      setPhase("idle");
+      if (guard.isActive()) setPhase("idle");
     }
   }
 
   async function refresh() {
     if (!review || !execution || execution.status === "completed" || execution.status === "failed") return;
+    const guard = sessionGuardRef.current;
+    if (!guard?.isActive()) return;
     setPhase("refreshing");
     setError(null);
     try {
       const transactionHash = execution.transactionHash ?? undefined;
       const result = await runPaymentActionOnce(
         actionGuard,
-        () => reconcileConversationPayment(review, transactionHash, request),
+        async () => reconcileConversationPayment(
+          review,
+          transactionHash,
+          await captureRequest(),
+        ),
       );
+      if (!guard.isActive()) return;
       setExecution(result);
       await onStatusChanged();
     } catch (cause) {
+      if (!guard.isActive()) return;
       setError(cause instanceof Error
         ? cause.message
         : "The persisted Agent Pass payment status is unavailable.");
     } finally {
-      setPhase("idle");
+      if (guard.isActive()) setPhase("idle");
     }
   }
 

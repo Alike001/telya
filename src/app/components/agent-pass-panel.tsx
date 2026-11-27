@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePrivy } from "@privy-io/react-auth";
 import type { SmartAccountKit } from "smart-account-kit";
 import {
@@ -18,7 +18,11 @@ import {
 import type { SmartAccountPublicConfig } from "../../stellar/smart-account";
 import { createBrowserSmartAccountKit, restoreSmartAccount } from "../../stellar/smart-account";
 import { authenticatedFetch } from "../authenticated-fetch";
-import { createSessionRequestGuard, type SessionRequestGuard } from "../session-request-guard";
+import {
+  captureSessionAccessToken,
+  createSessionRequestGuard,
+  type SessionRequestGuard,
+} from "../session-request-guard";
 import {
   AlertTriangle,
   ArrowUpRight,
@@ -61,10 +65,6 @@ export function AgentPassPanel(props: AgentPassPanelProps) {
 
 function AuthenticatedAgentPassPanel(props: AgentPassPanelProps) {
   const { ready, authenticated, login, getAccessToken } = usePrivy();
-  const request = useCallback(
-    (input: string, init: RequestInit = {}) => authenticatedFetch(input, init, getAccessToken),
-    [getAccessToken],
-  );
   if (!ready || !authenticated) {
     return (
       <div className="agent-pass-panel" role="region" aria-label="Agent Pass Management">
@@ -77,7 +77,7 @@ function AuthenticatedAgentPassPanel(props: AgentPassPanelProps) {
       </div>
     );
   }
-  return <AgentPassManagement {...props} request={request} />;
+  return <AgentPassManagement {...props} getAccessToken={getAccessToken} />;
 }
 
 function AgentPassManagement({
@@ -85,9 +85,9 @@ function AgentPassManagement({
   kit,
   onKitChange,
   onClose,
-  request,
+  getAccessToken,
 }: AgentPassPanelProps & {
-  readonly request: (input: string, init?: RequestInit) => Promise<Response>;
+  readonly getAccessToken: () => Promise<string | null>;
 }) {
   const [pass, setPass] = useState<PersistedAgentPass | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -105,6 +105,12 @@ function AgentPassManagement({
   const [spendingLimitInput, setSpendingLimitInput] = useState("25.00");
   const [durationHours, setDurationHours] = useState(24);
   const sessionGuardRef = useRef<SessionRequestGuard | null>(null);
+
+  async function captureOperationRequest(guard: SessionRequestGuard) {
+    const tokenProvider = await captureSessionAccessToken(getAccessToken, guard);
+    return (input: string, init: RequestInit = {}) =>
+      authenticatedFetch(input, init, tokenProvider);
+  }
 
   // Fetch active Agent Pass from API
   useEffect(() => {
@@ -130,11 +136,13 @@ function AgentPassManagement({
   async function fetchPass(
     guard: SessionRequestGuard | null = sessionGuardRef.current,
     accountAddress: string | null = smartAccountAddress,
+    operationRequest?: (input: string, init?: RequestInit) => Promise<Response>,
   ) {
     if (!accountAddress || !guard?.isActive()) return;
     setIsLoading(true);
     setError(null);
     try {
+      const request = operationRequest ?? await captureOperationRequest(guard);
       const res = await request(`/api/stellar/agent-passes/${accountAddress}`, {
         cache: "no-store",
       });
@@ -178,6 +186,7 @@ function AgentPassManagement({
     setSuccessNotice(null);
 
     try {
+      const request = await captureOperationRequest(guard);
       const configRes = await fetch("/api/stellar/config", { cache: "no-store" });
       if (!configRes.ok) throw new Error("Could not load Stellar configuration.");
       const config: SmartAccountPublicConfig = await configRes.json();
@@ -223,7 +232,7 @@ function AgentPassManagement({
       });
       setSuccessNotice(`Agent Pass creation submitted for Rule #${created.ruleId}. Checking its recorded status.`);
       setShowCreateModal(false);
-      await fetchPass(guard, accountAddress);
+      await fetchPass(guard, accountAddress, request);
     } catch (err) {
       if (!guard.isActive()) return;
       setError(err instanceof Error ? err.message : "Failed to create Agent Pass.");
@@ -247,6 +256,7 @@ function AgentPassManagement({
     setSuccessNotice(null);
 
     try {
+      const request = await captureOperationRequest(guard);
       const configRes = await fetch("/api/stellar/config", { cache: "no-store" });
       if (!configRes.ok) throw new Error("Could not load Stellar configuration.");
       const config: SmartAccountPublicConfig = await configRes.json();
@@ -282,7 +292,7 @@ function AgentPassManagement({
       onKitChange?.(authorizedKit);
       setAgentSpendSession(null);
       setSuccessNotice(`Revocation submitted. Check the recorded status before assuming the pass is inactive. Transaction: ${result.transactionHash.slice(0, 10)}...`);
-      await fetchPass(guard, accountAddress);
+      await fetchPass(guard, accountAddress, request);
     } catch (err) {
       if (!guard.isActive()) return;
       setError(err instanceof Error ? err.message : "Failed to revoke Agent Pass.");
@@ -425,7 +435,11 @@ function AgentPassManagement({
 
           <AgentPassSpendPanel
             session={agentSpendSession}
-            request={request}
+            captureRequest={async () => {
+              const guard = sessionGuardRef.current;
+              if (!guard?.isActive()) throw new Error("Authenticated session changed.");
+              return captureOperationRequest(guard);
+            }}
             onStatusChanged={fetchPass}
           />
 
