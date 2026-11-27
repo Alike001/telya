@@ -109,6 +109,7 @@ function OnboardingFlow() {
   const kitRef = useRef<SmartAccountKit | null>(null);
   const configRef = useRef<SmartAccountPublicConfig | null>(null);
   const creationRef = useRef(false);
+  const approvalInFlightRef = useRef(false);
   const sessionGuardRef = useRef<SessionRequestGuard | null>(null);
 
   useEffect(() => {
@@ -209,7 +210,9 @@ function OnboardingFlow() {
     const guard = sessionGuardRef.current;
     const review = approvalReview;
     const wallet = wallets.find((candidate) => candidate.address.toLowerCase() === review?.address.toLowerCase());
-    if (!guard?.isActive() || !wallet || !review || review.address !== verifiedBaseWallet || approvalHash) return;
+    if (!guard?.isActive() || !wallet || !review || review.address !== verifiedBaseWallet ||
+        approvalHash || approvalInFlightRef.current) return;
+    approvalInFlightRef.current = true;
     setApprovalBusy(true);
     setApprovalMessage(null);
     let submittedHash: string | null = null;
@@ -239,6 +242,7 @@ function OnboardingFlow() {
         ? "Approval was submitted but its on-chain allowance could not be verified. Check its transaction before trying again."
         : error instanceof Error ? error.message : "Base approval was not completed.");
     } finally {
+      approvalInFlightRef.current = false;
       if (guard.isActive()) setApprovalBusy(false);
     }
   }
