@@ -171,6 +171,8 @@ describe("conversation payment execution", () => {
           maxFee: "0",
           destinationDomain: 27,
           mintRecipient,
+          destinationCaller: mintRecipient,
+          forwardRecipient: baseCctpReview.recipientAddress,
         },
       }))
       .mockResolvedValueOnce(json({ status: "pending", sourceTransactionHash: baseHash }, 202));
@@ -198,6 +200,8 @@ describe("conversation payment execution", () => {
       maxFee: "0",
       destinationDomain: 27,
       mintRecipient,
+      destinationCaller: mintRecipient,
+      forwardRecipient: baseCctpReview.recipientAddress,
     });
   });
 
@@ -215,6 +219,8 @@ describe("conversation payment execution", () => {
           maxFee: "0",
           destinationDomain: 27,
           mintRecipient,
+          destinationCaller: mintRecipient,
+          forwardRecipient: baseCctpReview.recipientAddress,
         },
       }))
       .mockResolvedValueOnce(json({ status: "pending", sourceTransactionHash: baseHash }, 202));
@@ -251,6 +257,8 @@ describe("conversation payment execution", () => {
           token: BASE_SEPOLIA_USDC, tokenMessenger: BASE_SEPOLIA_TOKEN_MESSENGER,
           burnAmount: "0.1", maxFee: "0", destinationDomain: 27,
           mintRecipient: `0x${"4".repeat(64)}`,
+          destinationCaller: `0x${"4".repeat(64)}`,
+          forwardRecipient: baseCctpReview.recipientAddress,
         },
       })),
       createKit: vi.fn(), restoreAccount: vi.fn(), submitTransfer: vi.fn(),
@@ -277,6 +285,8 @@ describe("conversation payment execution", () => {
           maxFee: "0.1",
           destinationDomain: 27,
           mintRecipient: `0x${"4".repeat(64)}`,
+          destinationCaller: `0x${"4".repeat(64)}`,
+          forwardRecipient: baseCctpReview.recipientAddress,
         },
       })),
       createKit: vi.fn(),
@@ -284,6 +294,32 @@ describe("conversation payment execution", () => {
       submitTransfer: vi.fn(),
       getBaseProvider,
       submitBaseCctpBurn,
+    })).rejects.toThrow("The Base CCTP authorization does not match this review.");
+    expect(getBaseProvider).not.toHaveBeenCalled();
+    expect(submitBaseCctpBurn).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { name: "a different forward recipient", recipient: contract(8), caller: `0x${"4".repeat(64)}` },
+    { name: "a zero destination caller", recipient: baseCctpReview.recipientAddress, caller: `0x${"0".repeat(64)}` },
+  ])("rejects $name before opening the Base wallet", async ({ recipient, caller }) => {
+    const getBaseProvider = vi.fn();
+    const submitBaseCctpBurn = vi.fn();
+    await expect(executeConversationPayment(baseCctpReview, {
+      config: null, smartAccount: null,
+      request: vi.fn().mockResolvedValue(json({
+        status: "authorization_ready",
+        transaction: {
+          chainId: BASE_SEPOLIA_CHAIN_ID, sender: baseSender,
+          token: BASE_SEPOLIA_USDC, tokenMessenger: BASE_SEPOLIA_TOKEN_MESSENGER,
+          burnAmount: "5", maxFee: "0", destinationDomain: 27,
+          mintRecipient: `0x${"4".repeat(64)}`,
+          destinationCaller: caller,
+          forwardRecipient: recipient,
+        },
+      })),
+      createKit: vi.fn(), restoreAccount: vi.fn(), submitTransfer: vi.fn(),
+      getBaseProvider, submitBaseCctpBurn,
     })).rejects.toThrow("The Base CCTP authorization does not match this review.");
     expect(getBaseProvider).not.toHaveBeenCalled();
     expect(submitBaseCctpBurn).not.toHaveBeenCalled();

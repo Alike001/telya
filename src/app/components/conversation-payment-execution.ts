@@ -53,8 +53,10 @@ function baseUsdcUnits(value: string): bigint | null {
 
 function baseCctpAuthorizationMatchesReview(
   review: PaymentReview,
-  authorization: { readonly burnAmount: string; readonly maxFee: string },
+  authorization: { readonly burnAmount: string; readonly maxFee: string; readonly forwardRecipient: string; readonly mintRecipient: string; readonly destinationCaller: string },
 ): boolean {
+  if (authorization.forwardRecipient !== review.recipientAddress ||
+      authorization.destinationCaller !== authorization.mintRecipient) return false;
   const expected = baseUsdcUnits(review.expectedRecipientAmount);
   const burn = baseUsdcUnits(authorization.burnAmount);
   const maxFee = baseUsdcUnits(authorization.maxFee);
@@ -283,6 +285,8 @@ export async function executeConversationPayment(
       readonly maxFee: string;
       readonly destinationDomain: number;
       readonly mintRecipient: string;
+      readonly destinationCaller: string;
+      readonly forwardRecipient: string;
     }) => Promise<{ readonly transactionHash: string; readonly approvalTransactionHash?: string }>;
   },
 ): Promise<PaymentExecutionResult> {

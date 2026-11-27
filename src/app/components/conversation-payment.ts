@@ -260,6 +260,8 @@ export function parseBaseCctpAuthorization(value: unknown): {
   readonly maxFee: string;
   readonly destinationDomain: 27;
   readonly mintRecipient: string;
+  readonly destinationCaller: string;
+  readonly forwardRecipient: string;
 } | null {
   const payload = record(value);
   const transaction = record(payload?.transaction);
@@ -269,13 +271,22 @@ export function parseBaseCctpAuthorization(value: unknown): {
       typeof transaction.tokenMessenger !== "string" || transaction.tokenMessenger.toLowerCase() !== BASE_SEPOLIA_TOKEN_MESSENGER.toLowerCase() ||
       !evmAddress(transaction.sender) || !decimal(transaction.burnAmount) || !decimal(transaction.maxFee) ||
       transaction.destinationDomain !== CCTP_STELLAR_DOMAIN ||
-      typeof transaction.mintRecipient !== "string" || !/^0x[0-9a-f]{64}$/i.test(transaction.mintRecipient)) return null;
+      typeof transaction.mintRecipient !== "string" || !/^0x[0-9a-f]{64}$/i.test(transaction.mintRecipient) ||
+      typeof transaction.destinationCaller !== "string" ||
+      transaction.destinationCaller.toLowerCase() !== transaction.mintRecipient.toLowerCase() ||
+      /^0x0{64}$/i.test(transaction.mintRecipient) ||
+      typeof transaction.forwardRecipient !== "string" ||
+      !(StrKey.isValidContract(transaction.forwardRecipient) ||
+        StrKey.isValidEd25519PublicKey(transaction.forwardRecipient) ||
+        StrKey.isValidMed25519PublicKey(transaction.forwardRecipient))) return null;
   return {
     sender: transaction.sender.toLowerCase(),
     burnAmount: transaction.burnAmount,
     maxFee: transaction.maxFee,
     destinationDomain: 27,
     mintRecipient: transaction.mintRecipient.toLowerCase(),
+    destinationCaller: transaction.destinationCaller.toLowerCase(),
+    forwardRecipient: transaction.forwardRecipient,
   };
 }
 
