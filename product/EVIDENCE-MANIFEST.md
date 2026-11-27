@@ -94,7 +94,7 @@ These heads demonstrate code/test state only. They are not accepted financial co
 | [#53 backend orchestration](https://github.com/Alike001/telya/pull/53) | `d20dddd` | 224 configured tests; guarded finalized mismatch persistence | Real browser authorization and route execution |
 | [#49 conversational UI](https://github.com/Alike001/telya/pull/49) | `64ab352` | 294 configured tests; four protected route paths | Real authenticated browser and signed transactions |
 | [#65 timeline/receipts](https://github.com/Alike001/telya/pull/65) | `8f64801` | 310 configured tests; persisted exact failure stages | Real browser refresh and completed/failed receipt |
-| [#66 Agent Pass/contacts/Judge UI](https://github.com/Alike001/telya/pull/66) | `be417ba` | 363 configured tests; Neon contacts, agent-payment ownership/idempotency and over-limit rejection; one-use deployment/Agent Pass/Payment handoffs; generic relayer closed; secret-safe preflight; GitGuardian passed | Usable credentials, browser/passkey onboarding/contacts/admin and live Agent Pass spend acceptance; Vercel fork authorization |
+| [#66 Agent Pass/contacts/Judge UI](https://github.com/Alike001/telya/pull/66) | `21df823` | 366 configured tests; Neon contacts/Agent Pass; one-use execution; exact secret-redacted CCTP/full preflight | Privy, sponsor, Base RPC, live browser/payment/Agent Pass acceptance; exact-head external checks |
 
 Read [EXECUTION-TRACKER.md](EXECUTION-TRACKER.md) for current heads and checks before relying on this snapshot.
 
