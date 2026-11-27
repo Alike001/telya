@@ -43,4 +43,27 @@ describe("saved payment intent validation", () => {
       intent: { ...baseInput.intent, requestedSourceNetwork: "base" },
     })).rejects.toBeInstanceOf(PaymentInputError);
   });
+
+  it.each(["from", "on", "via"])(
+    "accepts the parser's explicit %s Stellar source wording",
+    async (preposition) => {
+      const recipient = "GAAGLUBSWZQPKLAKJS62BB3PUH6XGBJRML6SPX5XIPM56XFNGTV4XCCW";
+      const sql = vi.fn().mockResolvedValue([{
+        content: `Send 0.1 USDC to ${recipient} ${preposition} Stellar Testnet`,
+      }]);
+      vi.spyOn(dbClient, "getSqlClient").mockReturnValue(sql as any);
+
+      await expect(validatePaymentIntentMessage(user, {
+        ...baseInput,
+        inputMode: "text",
+        intent: {
+          amount: "0.1",
+          asset: "USDC",
+          recipientInput: recipient,
+          requestedSourceNetwork: "stellar",
+          requestedDestinationNetwork: null,
+        },
+      })).resolves.toBeUndefined();
+    },
+  );
 });

@@ -209,7 +209,12 @@ function networkIsExplicit(message: string, network: Network, side: "source" | "
   const pair = message.match(/\b(stellar|base)\s*(?:to|->)\s*(stellar|base)\b/i) ??
     message.match(/\bfrom\s+(stellar|base)\b[\s\S]{0,100}?\bon\s+(stellar|base)\b/i);
   if (pair) return (side === "source" ? pair[1] : pair[2])?.toLowerCase() === network;
-  if (side === "source") return new RegExp(`\\bfrom\\s+${network}\\b`, "i").test(message);
+  // Keep this vocabulary aligned with the deterministic intent parser. It
+  // classifies "from", "on", and "via" as explicit source-network wording;
+  // rejecting two of those here would turn a valid saved intent into a 400.
+  if (side === "source") {
+    return new RegExp(`\\b(?:from|on|via)\\s+${network}\\b`, "i").test(message);
+  }
   return new RegExp(`\\b(?:to|on|receive(?:s|d)?\\s+on)\\s+${network}\\b`, "i").test(message);
 }
 
