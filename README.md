@@ -29,6 +29,12 @@ CCTP/full checks require the exact Testnet domains, valid Stellar contract
 addresses and credential-free HTTPS RPC endpoints; they do not treat a malformed
 or Mainnet configuration as ready.
 
+After the `cctp` or `full` preflight is ready, `pnpm testnet:probe` performs a
+read-only network check. It verifies the exact Base Sepolia chain, deployed code
+at the configured Base CCTP contracts, the latest Stellar Testnet ledger and the
+configured Stellar contract interfaces. It never reads a wallet balance, signs,
+submits a transaction or claims settlement evidence.
+
 Open `http://localhost:3000`. The readiness endpoint is available at
 `http://localhost:3000/api/health`; it returns HTTP `200` only when the app can
 reach Neon and HTTP `503` with a sanitized `degraded` response otherwise.

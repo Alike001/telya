@@ -11,6 +11,7 @@
     "build": "next build",
     "dev": "next dev",
     "env:check": "node scripts/check-environment.mjs",
+    "testnet:probe": "tsc --project tsconfig.server.json && node --env-file-if-exists=.env.local dist/scripts/probe-testnet.js",
     "start": "next start",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
