@@ -8,8 +8,10 @@ import {
   encodeCctpReceiveMessage,
   encodeErc20Transfer,
   estimateBaseTransactionFee,
+  formatBaseWeiAsEth,
   findBaseCctpMessage,
   normalizeBaseUsdcAmount,
+  readBaseUsdcAllowance,
   readBaseUsdcBalance,
   parseCctpMessage,
   verifyBaseCctpMint,
@@ -90,6 +92,24 @@ describe("Base Sepolia transaction encoding and verification", () => {
       to: BASE_SEPOLIA_USDC.toLowerCase(),
       data: data.toLowerCase(),
     }, "latest"]);
+  });
+
+  it("reads the exact TokenMessenger allowance used by CCTP approval planning", async () => {
+    const rpc = { request: vi.fn()
+      .mockResolvedValueOnce("0x14a34")
+      .mockResolvedValueOnce(`0x${word(5_000_000n)}`) } as BaseRpc;
+    await expect(readBaseUsdcAllowance({ rpc, owner: SENDER })).resolves.toBe(5_000_000n);
+    expect(rpc.request).toHaveBeenNthCalledWith(2, "eth_call", [{
+      from: SENDER.toLowerCase(),
+      to: BASE_SEPOLIA_USDC.toLowerCase(),
+      data: expect.stringMatching(/^0xdd62ed3e/),
+    }, "latest"]);
+  });
+
+  it("formats summed wei quotes exactly without floating point", () => {
+    expect(formatBaseWeiAsEth(42_000_000_000_000n)).toBe("0.000042");
+    expect(formatBaseWeiAsEth(1_000_000_000_000_000_001n)).toBe("1.000000000000000001");
+    expect(() => formatBaseWeiAsEth(-1n)).toThrow();
   });
 
   it.each([

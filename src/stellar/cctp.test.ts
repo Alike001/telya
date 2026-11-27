@@ -21,6 +21,7 @@ import {
   evmAddressToBytes32,
   prepareStellarCctpBurn,
   submitStellarCctpBurn,
+  stellarContractToBytes32,
   validateStellarCctpConfig,
   verifyStellarCctpBurn,
   type StellarCctpConfig,
@@ -73,6 +74,11 @@ describe("Stellar CCTP configuration", () => {
       stellarDomain: 27,
       networkPassphrase: Networks.TESTNET,
     });
+  });
+
+  it("encodes a validated Stellar contract as Circle bytes32", () => {
+    expect(stellarContractToBytes32(TEST_CONTRACT(4))).toBe(`0x${"04".repeat(32)}`);
+    expect(() => stellarContractToBytes32(SPONSOR)).toThrow("contract address");
   });
 
   it("fails closed on a wrong CCTP domain or network", () => {

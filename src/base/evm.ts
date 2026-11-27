@@ -365,6 +365,30 @@ export async function readBaseUsdcBalance(input: {
   return fraction ? `${whole}.${fraction}` : whole.toString();
 }
 
+/** Read the exact USDC allowance that will determine whether a CCTP approval is required. */
+export async function readBaseUsdcAllowance(input: {
+  readonly rpc: BaseRpc;
+  readonly owner: string;
+  readonly spender?: string;
+}): Promise<bigint> {
+  const owner = requireEvmAddress(input.owner, "owner");
+  const spender = requireEvmAddress(input.spender ?? BASE_SEPOLIA_TOKEN_MESSENGER, "spender");
+  const chainId = await input.rpc.request<unknown>("eth_chainId", []);
+  if (typeof chainId !== "string" || !/^0x[0-9a-f]+$/i.test(chainId) ||
+      BigInt(chainId) !== BigInt(BASE_SEPOLIA_CHAIN_ID)) {
+    throw new BaseEvmError("WRONG_NETWORK", "Base allowance RPC is not on Base Sepolia");
+  }
+  const result = await input.rpc.request<unknown>("eth_call", [{
+    from: owner,
+    to: BASE_SEPOLIA_USDC.toLowerCase(),
+    data: encodeErc20Allowance(owner, spender),
+  }, "latest"]);
+  if (typeof result !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(result)) {
+    throw new BaseEvmError("RPC_FAILED", "Base USDC allowance query returned invalid data");
+  }
+  return BigInt(result);
+}
+
 function parseHexQuantity(value: unknown, label: string): bigint {
   if (typeof value !== "string" || !/^0x(?:0|[1-9a-f][0-9a-f]*)$/i.test(value)) {
     throw new BaseEvmError("RPC_FAILED", `Base ${label} returned an invalid quantity`);
@@ -372,7 +396,8 @@ function parseHexQuantity(value: unknown, label: string): bigint {
   return BigInt(value);
 }
 
-function formatWeiAsEth(value: bigint): string {
+export function formatBaseWeiAsEth(value: bigint): string {
+  if (value < 0n) throw new BaseEvmError("INVALID_AMOUNT", "Base wei amount cannot be negative");
   const scale = 10n ** 18n;
   const whole = value / scale;
   const fraction = (value % scale).toString().padStart(18, "0").replace(/0+$/, "");
@@ -413,7 +438,7 @@ export async function estimateBaseTransactionFee(input: {
     throw new BaseEvmError("RPC_FAILED", "Base gas quote must be greater than zero");
   }
   const feeWei = gasLimit * gasPriceWei;
-  return { gasLimit, gasPriceWei, feeWei, feeEth: formatWeiAsEth(feeWei) };
+  return { gasLimit, gasPriceWei, feeWei, feeEth: formatBaseWeiAsEth(feeWei) };
 }
 
 export function createBaseRpc(config: BaseEvmConfig, fetcher: typeof fetch = fetch): BaseRpc {

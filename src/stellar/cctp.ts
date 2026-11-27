@@ -158,6 +158,13 @@ export function evmAddressToBytes32(address: string): Buffer {
   return Buffer.from(normalized.slice(2).padStart(64, "0"), "hex");
 }
 
+export function stellarContractToBytes32(address: string): string {
+  if (!StrKey.isValidContract(address)) {
+    throw new StellarCctpError("INVALID_ADDRESS", "Stellar CCTP recipient must be a contract address");
+  }
+  return `0x${Buffer.from(StrKey.decodeContract(address)).toString("hex")}`;
+}
+
 export function bytes32ToEvmAddress(value: Uint8Array): string {
   const bytes = Buffer.from(value);
   if (bytes.length !== 32 || bytes.subarray(0, 12).some((byte) => byte !== 0)) {
