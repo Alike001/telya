@@ -4,7 +4,7 @@
 
 **Merged baseline:** `origin/main` at `2531820`
 
-**Integrated draft baseline:** PR #66 at `6d34346`
+**Integrated draft baseline:** PR #66 at `8712797`
 
 **Assessment scope:** repository code, merged and open pull requests, open issues, automated checks, public Testnet deployment, and linked Testnet transaction evidence
 
@@ -263,12 +263,12 @@ Work that does not improve one of these outcomes should be challenged before ent
 
 Merged `main` at `2531820` remains the public deployment baseline. The public health endpoint most recently returned HTTP 200 with Testnet application/database readiness; the recorded merged direct-Stellar and positive Agent Pass transactions were independently rechecked on Stellar Testnet.
 
-On integrated draft PR #66 head `6d34346`:
+On integrated draft PR #66 head `8712797`:
 
 - secure environment: 76 files / 381 tests passed with no skips;
 - plain environment: 65 files / 363 tests passed, while 11 files / 18 credential/database-gated tests were explicitly skipped;
 - client TypeScript, server TypeScript, production build and `git diff --check` passed; the prior dependency-only head also passed frozen install;
-- exact-head GitGuardian passed;
+- exact-head GitHub checks are pending; GitGuardian passed on the prior head;
 - `pnpm audit --prod` reported no known vulnerabilities after resolving transitive Zod to patched `4.6.7`;
 - the read-only public-network probe passed at Stellar ledger `5,946,104`; and
 - mobile/desktop unauthenticated acceptance proved no financial controls or substituted data appear without sign-in, while protected reads return 401; and
@@ -278,5 +278,6 @@ On integrated draft PR #66 head `6d34346`:
 - sign-out/auth loss clears the prior conversation ID, payment-review messages, recipient labels, balances and restored kit; a new owner check begins with blank identity-bound state.
 - Contacts and Activity use one auth-epoch guard for initial loads and all state-writing actions, including save/delete, detail, reconciliation, refresh and pagination; late responses cannot update the next identity.
 - Agent Pass status, create, revoke and post-action refresh capture the exact verified C-address and auth epoch; an account change clears the pass and ephemeral signer session before any late response can write.
+- the conversation's saved-message, intent, balance/reply and payment-review pipeline captures one auth epoch; a departed session cannot append recipient/amount/route/fee data or errors into the next identity.
 
 Vercel did not build PR #66 because the teammate fork requires team authorization. The checks above prove automated, database, public-infrastructure and unavailable-state behavior only. They do not prove authenticated browser ownership, real balances, wallet signatures, Base/CCTP settlement, MoneyGram, independent-user acceptance or production readiness.
