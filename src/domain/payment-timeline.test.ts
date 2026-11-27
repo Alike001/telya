@@ -113,6 +113,67 @@ describe("persisted payment timeline", () => {
     expect(timeline.steps.every((step) => step.status !== "failed")).toBe(true);
   });
 
+  it("shows a Base direct submitted hash at the correct current timeline step", () => {
+    const baseHash = `0x${txHash}`;
+    const baseSubmittedEvent: PersistedPaymentEvent = {
+      ...events[1]!,
+      id: "22222222-2222-4222-8222-222222222225",
+      recordStage: "destination_submission",
+      stage: "destination_submitted",
+      network: "base",
+      txHash: baseHash,
+      explorerUrl: getExplorerUrl("base", baseHash),
+      publicMessage: "The Base wallet submitted the USDC transfer.",
+    };
+    const timeline = computePaymentTimeline({
+      ...payment,
+      route: {
+        id: "base_to_base",
+        sourceNetwork: "base",
+        destinationNetwork: "base",
+        rail: "base_usdc",
+      },
+      status: "destination_submitted",
+      sourceTransaction: null,
+      destinationTransaction: {
+        network: "base",
+        txHash: baseHash,
+        explorerUrl: getExplorerUrl("base", baseHash),
+      },
+      events: [baseSubmittedEvent],
+    }, [baseSubmittedEvent], now);
+
+    expect(timeline.steps[1]).toMatchObject({
+      stage: "submitted",
+      status: "current",
+      txHash: baseHash,
+    });
+  });
+
+  it("identifies a persisted recipient-verification failure without guessing", () => {
+    const failureEvent: PersistedPaymentEvent = {
+      ...events[1]!,
+      id: "22222222-2222-4222-8222-222222222226",
+      recordStage: "recipient_verification",
+      stage: "failed",
+      publicMessage: "The finalized transfer did not match the intended recipient and amount.",
+      errorCode: "DESTINATION_MISMATCH",
+    };
+    const timeline = computePaymentTimeline({
+      ...payment,
+      status: "failed",
+      failureCode: "DESTINATION_MISMATCH",
+      events: [...events, failureEvent],
+    }, [...events, failureEvent], now);
+
+    expect(timeline.failureStage).toBe("recipient_verified");
+    expect(timeline.failureReason).toBe(failureEvent.publicMessage);
+    expect(timeline.steps.find((step) => step.status === "failed")).toMatchObject({
+      stage: "recipient_verified",
+      errorMessage: failureEvent.publicMessage,
+    });
+  });
+
   it("uses the full CCTP lifecycle for a persisted cross-chain route", () => {
     const timeline = computePaymentTimeline({
       ...payment,

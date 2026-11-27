@@ -265,6 +265,55 @@ function equalAddress(network: Network, left: string, right: string): boolean {
   return network === "base" ? left.toLowerCase() === right.toLowerCase() : left === right;
 }
 
+function logicalStage(
+  payment: PersistedPayment,
+  event: PersistedPaymentEvent,
+): PaymentStatus {
+  if (payment.route.id === "base_to_base" && event.stage === "destination_submitted") {
+    return "submitted";
+  }
+  return event.stage;
+}
+
+function logicalCurrentStatus(payment: PersistedPayment): PaymentStatus {
+  if (payment.route.id === "base_to_base" && payment.status === "destination_submitted") {
+    return "submitted";
+  }
+  return payment.status;
+}
+
+function persistedFailureStage(
+  payment: PersistedPayment,
+  event: PersistedPaymentEvent | undefined,
+): PaymentStatus | null {
+  if (!event) return null;
+  switch (event.recordStage) {
+    case "authorization":
+      return "authorized";
+    case "source_submission":
+      return "submitted";
+    case "source_confirmation":
+    case "source_verification":
+      return payment.route.sourceNetwork === payment.route.destinationNetwork
+        ? "destination_confirmed"
+        : "source_confirmed";
+    case "attestation":
+    case "attestation_verification":
+      return "awaiting_attestation";
+    case "destination_submission":
+      return payment.route.id === "base_to_base" ? "submitted" : "destination_submitted";
+    case "destination_confirmation":
+      return "destination_confirmed";
+    case "destination_verification":
+    case "recipient_verification":
+      return "recipient_verified";
+    case "completion":
+      return "completed";
+    default:
+      return null;
+  }
+}
+
 /** Returns the stage blueprint for a given route. */
 export function getRouteBlueprints(routeId: PaymentRoute["id"]): readonly StageBlueprint[] {
   switch (routeId) {
@@ -319,10 +368,12 @@ export function computePaymentTimeline(
   // Group events by stage for fast lookup
   const eventsByStage = new Map<PaymentStatus, PersistedPaymentEvent>();
   for (const event of events) {
-    eventsByStage.set(event.stage, event);
+    if (event.stage !== "failed") eventsByStage.set(logicalStage(payment, event), event);
   }
 
-  const currentStageRank = STAGE_ORDER[payment.status];
+  const currentStageRank = STAGE_ORDER[logicalCurrentStatus(payment)];
+  const failureEvent = [...events].reverse().find((event) => event.stage === "failed");
+  const failureStage = persistedFailureStage(payment, failureEvent);
   let currentStepIdx = 0;
   let isStalled = false;
 
@@ -373,7 +424,11 @@ export function computePaymentTimeline(
       status = "completed";
       completedAt = payment.completedAt;
     } else if (isFailed) {
-      if (event && event.stage !== "failed") {
+      if (failureStage === blueprint.stage) {
+        status = "failed";
+        currentStepIdx = index;
+        errorMessage = failureEvent?.publicMessage ?? payment.failureCode ?? "Payment verification failed.";
+      } else if (event) {
         status = "completed";
       } else {
         status = "pending";
@@ -416,8 +471,8 @@ export function computePaymentTimeline(
     isCompleted,
     isFailed,
     isStalled,
-    failureStage: null,
-    failureReason: payment.failureCode,
+    failureStage,
+    failureReason: failureEvent?.publicMessage ?? payment.failureCode,
     elapsedSeconds,
     elapsedFormatted,
     latestMessage,
