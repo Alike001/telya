@@ -21,7 +21,6 @@ import {
 import {
   apiMessage,
   mergeVerifiedBalanceSnapshots,
-  parseOwnedStellarIdentity,
   parsePaymentReview,
   parsePersistedPaymentHashes,
   parseVerifiedBalances,
@@ -39,6 +38,7 @@ import {
   reconcileConversationPayment,
 } from "./conversation-payment-execution";
 import { resolveConversationIntent } from "./conversation-intent";
+import { verifyRestoredAccountOwnership } from "../restored-account-ownership";
 import { PaymentReviewCard } from "./payment-review-card";
 import { VoiceComposer } from "./voice-composer";
 
@@ -106,13 +106,10 @@ function AuthenticatedConversation() {
           configRef.current = config;
           const account = await restoreSmartAccount(createBrowserSmartAccountKit(config));
           if (account) {
-            const lookupResponse = await authenticatedFetch(
-              `/api/usernames/lookup?account=${encodeURIComponent(account.contractId)}`,
-              { cache: "no-store" },
-              getAccessToken,
+            const owned = await verifyRestoredAccountOwnership(
+              account,
+              (input, init) => authenticatedFetch(input, init, getAccessToken),
             );
-            const owned = lookupResponse.ok &&
-              parseOwnedStellarIdentity(await lookupResponse.json());
             if (active) setSmartAccount(owned ? account : null);
           } else if (active) {
             setSmartAccount(null);

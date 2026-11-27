@@ -134,14 +134,6 @@ export function mergeVerifiedBalanceSnapshots(
   return [...merged.values()];
 }
 
-/** Accept only the authenticated, owner-scoped identity lookup response. */
-export function parseOwnedStellarIdentity(value: unknown): boolean {
-  const payload = record(value);
-  return payload?.found === true &&
-    typeof payload.username === "string" &&
-    payload.username.trim().length > 0;
-}
-
 export function parsePaymentReview(value: unknown): PaymentReview | null {
   const payload = record(value);
   const payment = record(payload?.payment);

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { usePrivy } from "@privy-io/react-auth";
 import type { SmartAccountKit } from "smart-account-kit";
 
 import {
@@ -13,6 +14,8 @@ import { AgentPassPanel } from "./agent-pass-panel";
 import { ContactsDirectory } from "./contacts-directory";
 import { JudgeTestnetDrawer } from "./judge-testnet-drawer";
 import { MoneyGramRampModal } from "./moneygram-ramp-modal";
+import { authenticatedFetch } from "../authenticated-fetch";
+import { verifyRestoredAccountOwnership } from "../restored-account-ownership";
 
 function prefill(text: string) {
   window.location.hash = "composer";
@@ -20,12 +23,23 @@ function prefill(text: string) {
 }
 
 export function AccountToolsPanel() {
+  if (!process.env.NEXT_PUBLIC_PRIVY_APP_ID) {
+    return <AccountToolsContent account={null} kit={null} onKitChange={() => undefined} />;
+  }
+  return <AuthenticatedAccountToolsPanel />;
+}
+
+function AuthenticatedAccountToolsPanel() {
+  const { ready, authenticated, getAccessToken } = usePrivy();
   const [account, setAccount] = useState<ConnectedSmartAccount | null>(null);
-  const [showRamp, setShowRamp] = useState(false);
-  const [showJudge, setShowJudge] = useState(false);
   const [kit, setKit] = useState<SmartAccountKit | null>(null);
 
   useEffect(() => {
+    if (!ready || !authenticated) {
+      setKit(null);
+      setAccount(null);
+      return;
+    }
     let active = true;
     async function restore() {
       try {
@@ -34,9 +48,13 @@ export function AccountToolsPanel() {
         const config = await response.json() as SmartAccountPublicConfig;
         const kit = createBrowserSmartAccountKit(config);
         const restored = await restoreSmartAccount(kit);
+        const owned = restored && await verifyRestoredAccountOwnership(
+          restored,
+          (input, init) => authenticatedFetch(input, init, getAccessToken),
+        );
         if (active) {
-          setKit(kit);
-          setAccount(restored);
+          setKit(owned ? kit : null);
+          setAccount(owned ? restored : null);
         }
       } catch {
         if (active) {
@@ -47,7 +65,22 @@ export function AccountToolsPanel() {
     }
     void restore();
     return () => { active = false; };
-  }, []);
+  }, [authenticated, getAccessToken, ready]);
+
+  return <AccountToolsContent account={account} kit={kit} onKitChange={setKit} />;
+}
+
+function AccountToolsContent({
+  account,
+  kit,
+  onKitChange,
+}: {
+  readonly account: ConnectedSmartAccount | null;
+  readonly kit: SmartAccountKit | null;
+  readonly onKitChange: (kit: SmartAccountKit) => void;
+}) {
+  const [showRamp, setShowRamp] = useState(false);
+  const [showJudge, setShowJudge] = useState(false);
 
   return (
     <section className="account-tools-section shell" aria-label="Contacts and account controls">
@@ -62,7 +95,7 @@ export function AccountToolsPanel() {
         <AgentPassPanel
           smartAccountAddress={account?.contractId ?? null}
           {...(kit ? { kit } : {})}
-          onKitChange={setKit}
+          onKitChange={onKitChange}
         />
       </div>
       <div className="account-tools-actions">
