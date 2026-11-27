@@ -1,6 +1,7 @@
 export { createContactsHandler } from "./contacts.js";
 export { createConversationsHandler } from "./conversations.js";
 export { createPaymentConfirmationHandler, createPaymentHandler } from "./payments.js";
+export { createBaseBalancesHandler } from "./base-balances.js";
 export {
   createBaseCctpAuthorizationHandler,
   createBaseCctpDestinationHandler,
