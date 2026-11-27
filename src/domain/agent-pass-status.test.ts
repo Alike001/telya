@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { formatStellarAtomicAmount, parsePersistedAgentPass } from "./agent-pass-status";
+import {
+  formatStellarAtomicAmount,
+  parseAgentPassAuthorization,
+  parsePersistedAgentPass,
+} from "./agent-pass-status";
 
 const active = {
   smartAccount: `C${"A".repeat(55)}`,
@@ -46,5 +50,21 @@ describe("persisted Agent Pass parsing", () => {
     expect(parsePersistedAgentPass({ ...active, observedLedger: 123457 })).toBeNull();
     expect(parsePersistedAgentPass({ ...active, status: "expired" })).toBeNull();
     expect(parsePersistedAgentPass({ ...active, observedLedger: undefined })).toBeNull();
+  });
+});
+
+describe("Agent Pass authorization parsing", () => {
+  it("accepts only the protected same-origin relayer handoff", () => {
+    const expiresAt = new Date(Date.now() + 60_000).toISOString();
+    expect(parseAgentPassAuthorization({
+      status: "authorization_ready",
+      relayerUrl: "/api/stellar/relayer/agent-pass",
+      expiresAt,
+    })).toEqual({ relayerUrl: "/api/stellar/relayer/agent-pass", expiresAt });
+    expect(parseAgentPassAuthorization({
+      status: "authorization_ready",
+      relayerUrl: "https://attacker.test/relayer",
+      expiresAt,
+    })).toBeNull();
   });
 });

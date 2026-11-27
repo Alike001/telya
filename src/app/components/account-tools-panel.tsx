@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { SmartAccountKit } from "smart-account-kit";
 
 import {
@@ -23,7 +23,7 @@ export function AccountToolsPanel() {
   const [account, setAccount] = useState<ConnectedSmartAccount | null>(null);
   const [showRamp, setShowRamp] = useState(false);
   const [showJudge, setShowJudge] = useState(false);
-  const kitRef = useRef<SmartAccountKit | null>(null);
+  const [kit, setKit] = useState<SmartAccountKit | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -35,12 +35,12 @@ export function AccountToolsPanel() {
         const kit = createBrowserSmartAccountKit(config);
         const restored = await restoreSmartAccount(kit);
         if (active) {
-          kitRef.current = kit;
+          setKit(kit);
           setAccount(restored);
         }
       } catch {
         if (active) {
-          kitRef.current = null;
+          setKit(null);
           setAccount(null);
         }
       }
@@ -61,7 +61,8 @@ export function AccountToolsPanel() {
       <div id="agent-pass">
         <AgentPassPanel
           smartAccountAddress={account?.contractId ?? null}
-          {...(kitRef.current ? { kit: kitRef.current } : {})}
+          {...(kit ? { kit } : {})}
+          onKitChange={setKit}
         />
       </div>
       <div className="account-tools-actions">

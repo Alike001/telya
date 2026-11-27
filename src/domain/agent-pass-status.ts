@@ -16,6 +16,11 @@ export type PersistedAgentPass = {
   readonly revokedAt: string | null;
 };
 
+export type AgentPassAuthorization = {
+  readonly relayerUrl: "/api/stellar/relayer/agent-pass";
+  readonly expiresAt: string;
+};
+
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -80,6 +85,20 @@ export function parsePersistedAgentPass(value: unknown): PersistedAgentPass | nu
     revokeTransactionHash: pass.revokeTransactionHash as string | null,
     createdAt: pass.createdAt,
     revokedAt: pass.revokedAt as string | null,
+  };
+}
+
+export function parseAgentPassAuthorization(value: unknown): AgentPassAuthorization | null {
+  const authorization = record(value);
+  if (
+    !authorization || authorization.status !== "authorization_ready" ||
+    authorization.relayerUrl !== "/api/stellar/relayer/agent-pass" ||
+    !timestamp(authorization.expiresAt) ||
+    Date.parse(authorization.expiresAt) <= Date.now()
+  ) return null;
+  return {
+    relayerUrl: authorization.relayerUrl,
+    expiresAt: authorization.expiresAt,
   };
 }
 

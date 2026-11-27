@@ -79,8 +79,17 @@ function errorResponse(error: unknown): Response {
 
 export async function handleStellarRelayerRequest(
   request: Request,
-  paymentContext?: { readonly userId: string; readonly paymentId: string },
+  context?:
+    | { readonly userId: string; readonly paymentId: string }
+    | { readonly agentPass: {
+        readonly userId: string;
+        readonly kind: "create" | "revoke";
+        readonly smartAccount: string;
+        readonly contextRuleId?: number;
+      } },
 ): Promise<Response> {
+  const paymentContext = context && "paymentId" in context ? context : undefined;
+  const agentPassContext = context && "agentPass" in context ? context.agentPass : undefined;
   let reservedRequestHash: string | undefined;
   let submittedTransfer:
     | { readonly transactionHash: string; readonly ledger: number }
@@ -127,6 +136,28 @@ export async function handleStellarRelayerRequest(
       cctpTokenMessenger: process.env.CCTP_STELLAR_TOKEN_MESSENGER ?? "",
       baseDomain: Number(process.env.CCTP_BASE_DOMAIN),
     });
+    const isAgentPassOperation = validated.kind === "agent_pass_create" ||
+      validated.kind === "agent_pass_revoke";
+    if (isAgentPassOperation && !agentPassContext) {
+      throw new AuthenticationError("Authenticated Agent Pass authorization is required");
+    }
+    if (agentPassContext) {
+      const expectedKind = validated.kind === "agent_pass_create" ? "create"
+        : validated.kind === "agent_pass_revoke" ? "revoke" : null;
+      if (
+        expectedKind !== agentPassContext.kind ||
+        !isAgentPassOperation ||
+        validated.smartAccount !== agentPassContext.smartAccount ||
+        (validated.kind === "agent_pass_revoke" &&
+          validated.contextRuleId !== agentPassContext.contextRuleId)
+      ) {
+        throw new StellarRelayerError(
+          "INVALID_REQUEST",
+          "The Agent Pass operation does not match its authenticated authorization",
+          409,
+        );
+      }
+    }
     if (paymentId && validated.kind !== "usdc_transfer" && validated.kind !== "cctp_burn") {
       throw new StellarRelayerError(
         "INVALID_REQUEST",

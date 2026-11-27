@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { usePrivy } from "@privy-io/react-auth";
 import type { SmartAccountKit } from "smart-account-kit";
 import {
   formatStellarAtomicAmount,
+  parseAgentPassAuthorization,
   parsePersistedAgentPass,
   type PersistedAgentPass,
 } from "../../domain/agent-pass-status";
@@ -14,6 +16,8 @@ import {
   type ActiveAgentPass,
 } from "../../stellar/agent-pass";
 import type { SmartAccountPublicConfig } from "../../stellar/smart-account";
+import { createBrowserSmartAccountKit, restoreSmartAccount } from "../../stellar/smart-account";
+import { authenticatedFetch } from "../authenticated-fetch";
 import {
   AlertTriangle,
   ArrowUpRight,
@@ -34,14 +38,55 @@ import {
 interface AgentPassPanelProps {
   readonly smartAccountAddress: string | null;
   readonly kit?: SmartAccountKit;
+  readonly onKitChange?: (kit: SmartAccountKit) => void;
   readonly onClose?: () => void;
 }
 
-export function AgentPassPanel({
+export function AgentPassPanel(props: AgentPassPanelProps) {
+  if (!process.env.NEXT_PUBLIC_PRIVY_APP_ID) {
+    return (
+      <div className="agent-pass-panel" role="region" aria-label="Agent Pass Management">
+        <div className="pass-empty-state">
+          <Lock className="empty-icon" />
+          <h3>Agent Passes Unavailable</h3>
+          <p>Authenticated sign-in is not configured. Telya will not sponsor or report Agent Pass operations without it.</p>
+        </div>
+      </div>
+    );
+  }
+  return <AuthenticatedAgentPassPanel {...props} />;
+}
+
+function AuthenticatedAgentPassPanel(props: AgentPassPanelProps) {
+  const { ready, authenticated, login, getAccessToken } = usePrivy();
+  const request = useCallback(
+    (input: string, init: RequestInit = {}) => authenticatedFetch(input, init, getAccessToken),
+    [getAccessToken],
+  );
+  if (!ready || !authenticated) {
+    return (
+      <div className="agent-pass-panel" role="region" aria-label="Agent Pass Management">
+        <div className="pass-empty-state">
+          <Lock className="empty-icon" />
+          <h3>{ready ? "Sign In to Manage Agent Passes" : "Checking Sign-In"}</h3>
+          <p>Agent Pass sponsorship requires both the authenticated Telya owner and the smart-account passkey.</p>
+          {ready && <button type="button" className="cta-button primary" onClick={login}>Sign in</button>}
+        </div>
+      </div>
+    );
+  }
+  return <AgentPassManagement {...props} request={request} />;
+}
+
+function AgentPassManagement({
   smartAccountAddress,
   kit,
+  onKitChange,
   onClose,
-}: AgentPassPanelProps) {
+  request,
+}: AgentPassPanelProps & {
+  readonly request: (input: string, init?: RequestInit) => Promise<Response>;
+}) {
   const [pass, setPass] = useState<PersistedAgentPass | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -64,7 +109,7 @@ export function AgentPassPanel({
     setIsLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/stellar/agent-passes/${smartAccountAddress}`, {
+      const res = await request(`/api/stellar/agent-passes/${smartAccountAddress}`, {
         cache: "no-store",
       });
       if (res.ok) {
@@ -102,13 +147,32 @@ export function AgentPassPanel({
       const configRes = await fetch("/api/stellar/config", { cache: "no-store" });
       if (!configRes.ok) throw new Error("Could not load Stellar configuration.");
       const config: SmartAccountPublicConfig = await configRes.json();
+      const authorizationRes = await request("/api/stellar/agent-passes/authorize", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ kind: "create", smartAccount: smartAccountAddress }),
+      });
+      const authorizationPayload: unknown = await authorizationRes.json();
+      const authorization = authorizationRes.ok
+        ? parseAgentPassAuthorization(authorizationPayload)
+        : null;
+      if (!authorization) throw new Error("Authenticated Agent Pass authorization is unavailable.");
+      const authorizedKit = createBrowserSmartAccountKit({
+        ...config,
+        relayerUrl: authorization.relayerUrl,
+      });
+      const restored = await restoreSmartAccount(authorizedKit);
+      if (restored?.contractId !== smartAccountAddress) {
+        throw new Error("The authenticated Agent Pass account does not match the restored passkey account.");
+      }
+      onKitChange?.(authorizedKit);
 
       // Convert hours to ledgers (~5 seconds per ledger on Stellar)
       // 1 hour = ~720 ledgers
       const durationLedgers = durationHours * 720;
 
       const created: ActiveAgentPass = await createStellarAgentPass({
-        kit,
+        kit: authorizedKit,
         tokenContract: config.usdcContract,
         ed25519VerifierAddress: config.ed25519VerifierAddress,
         spendingLimitPolicyAddress: config.spendingLimitPolicyAddress,
@@ -138,8 +202,34 @@ export function AgentPassPanel({
     setSuccessNotice(null);
 
     try {
+      const configRes = await fetch("/api/stellar/config", { cache: "no-store" });
+      if (!configRes.ok) throw new Error("Could not load Stellar configuration.");
+      const config: SmartAccountPublicConfig = await configRes.json();
+      const authorizationRes = await request("/api/stellar/agent-passes/authorize", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          kind: "revoke",
+          smartAccount: pass.smartAccount,
+          contextRuleId: pass.ruleId,
+        }),
+      });
+      const authorizationPayload: unknown = await authorizationRes.json();
+      const authorization = authorizationRes.ok
+        ? parseAgentPassAuthorization(authorizationPayload)
+        : null;
+      if (!authorization) throw new Error("Authenticated Agent Pass authorization is unavailable.");
+      const authorizedKit = createBrowserSmartAccountKit({
+        ...config,
+        relayerUrl: authorization.relayerUrl,
+      });
+      const restored = await restoreSmartAccount(authorizedKit);
+      if (restored?.contractId !== pass.smartAccount) {
+        throw new Error("The authenticated Agent Pass account does not match the restored passkey account.");
+      }
+      onKitChange?.(authorizedKit);
       const result = await revokeStellarAgentPass({
-        kit,
+        kit: authorizedKit,
         pass: { ruleId: pass.ruleId },
       });
 

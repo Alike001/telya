@@ -1,5 +1,11 @@
 import { StrKey } from "@stellar/stellar-sdk";
 
+import {
+  AuthenticationError,
+  AuthenticationUnavailableError,
+  authenticateRequest,
+} from "../../../../../../server/auth/privy";
+import { isVerifiedAgentPassOwner } from "../../../../../../server/agent-pass/execution-session";
 import { getLatestStellarAgentPass } from "../../../../../server/stellar-relayer-requests";
 import {
   observeAgentPassExpiry,
@@ -10,7 +16,7 @@ import { stellarUsdcAmountFromRawUnits } from "../../../../../stellar/usdc";
 export const dynamic = "force-dynamic";
 
 export async function GET(
-  _request: Request,
+  request: Request,
   context: { params: Promise<{ smartAccount: string }> },
 ): Promise<Response> {
   const { smartAccount } = await context.params;
@@ -18,6 +24,32 @@ export async function GET(
     return Response.json(
       { error: "stellar_agent_pass_not_found" },
       { status: 404, headers: { "cache-control": "no-store" } },
+    );
+  }
+  try {
+    const user = await authenticateRequest(request);
+    if (!await isVerifiedAgentPassOwner(user.id, smartAccount)) {
+      return Response.json(
+        { error: "stellar_agent_pass_not_found" },
+        { status: 404, headers: { "cache-control": "no-store" } },
+      );
+    }
+  } catch (error) {
+    if (error instanceof AuthenticationError) {
+      return Response.json(
+        { error: "authentication_required" },
+        { status: 401, headers: { "cache-control": "no-store" } },
+      );
+    }
+    if (error instanceof AuthenticationUnavailableError) {
+      return Response.json(
+        { error: "authentication_unavailable" },
+        { status: 503, headers: { "cache-control": "no-store" } },
+      );
+    }
+    return Response.json(
+      { error: "stellar_agent_pass_status_unavailable" },
+      { status: 503, headers: { "cache-control": "no-store" } },
     );
   }
   const pass = await getLatestStellarAgentPass(smartAccount);

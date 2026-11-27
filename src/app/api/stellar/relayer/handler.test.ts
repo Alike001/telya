@@ -157,3 +157,62 @@ describe("shared Stellar relayer CCTP integration", () => {
     );
   });
 });
+
+describe("authenticated Agent Pass relayer boundary", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.parse.mockReturnValue({ func: "signed-agent-pass", auth: ["passkey"] });
+    mocks.validate.mockReturnValue({
+      kind: "agent_pass_revoke",
+      smartAccount: "smart-account",
+      contextRuleId: 7,
+    });
+    mocks.identity.mockReturnValue({ requestHash: "request-hash", clientKeyHash: "client-key-hash" });
+    mocks.reserve.mockResolvedValue({ decision: "reserved" });
+    mocks.submit.mockResolvedValue({ hash: TRANSACTION_HASH, ledger: 123, returnValue: null });
+  });
+
+  it("rejects an owner-signed Agent Pass request without authenticated owner context", async () => {
+    const response = await handleStellarRelayerRequest(new Request(
+      "https://telya.test/api/stellar/relayer",
+      { method: "POST", body: JSON.stringify({ func: "signed", auth: ["passkey"] }) },
+    ));
+    expect(response.status).toBe(401);
+    expect(mocks.reserve).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it("rejects a signed operation that differs from its one-use authorization", async () => {
+    const response = await handleStellarRelayerRequest(new Request(
+      "https://telya.test/api/stellar/relayer/agent-pass",
+      { method: "POST", body: JSON.stringify({ func: "signed", auth: ["passkey"] }) },
+    ), { agentPass: {
+      userId: "user",
+      kind: "revoke",
+      smartAccount: "smart-account",
+      contextRuleId: 8,
+    } });
+    expect(response.status).toBe(409);
+    expect(mocks.reserve).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it("persists and submits only the exact authenticated Agent Pass operation", async () => {
+    const response = await handleStellarRelayerRequest(new Request(
+      "https://telya.test/api/stellar/relayer/agent-pass",
+      { method: "POST", body: JSON.stringify({ func: "signed", auth: ["passkey"] }) },
+    ), { agentPass: {
+      userId: "user",
+      kind: "revoke",
+      smartAccount: "smart-account",
+      contextRuleId: 7,
+    } });
+    expect(response.status).toBe(200);
+    expect(mocks.recordAgentPassAuthorization).toHaveBeenCalledBefore(mocks.submit);
+    expect(mocks.completeAgentPassRevocation).toHaveBeenCalledWith(
+      "request-hash",
+      expect.objectContaining({ contextRuleId: 7 }),
+      TRANSACTION_HASH,
+    );
+  });
+});
