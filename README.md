@@ -14,6 +14,16 @@ Telya is in Build Week implementation. The public main deployment supports the
 direct Stellar and Agent Pass Testnet flows below. Draft PR features are not part
 of this walkthrough until their live acceptance gates pass.
 
+Fastest no-wallet verification:
+
+1. Open the [public health endpoint](https://telya.vercel.app/api/health) and
+   confirm it reports Testnet application/database readiness. Health alone is
+   not payment proof.
+2. Follow the exact direct-payment and Agent Pass explorer links in the
+   [submission package](product/SUBMISSION-PACKAGE.md#how-to-verify-without-a-wallet).
+3. Check the [evidence manifest](product/EVIDENCE-MANIFEST.md) before treating a
+   draft browser, Base, CCTP or MoneyGram path as verified.
+
 Local development:
 
 Node.js 22 or newer and pnpm 11 are required.

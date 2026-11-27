@@ -161,6 +161,32 @@ Do not record this as a working journey until the integrated browser acceptance 
 - The organizer has not yet confirmed the exact cutoff/timezone, artifacts or video format. No duration is inferred here.
 - New Vercel deployments are temporarily rate-limited, and fork preview checks require Vercel GitHub authorization.
 
+## Mainnet roadmap
+
+Telya is not Mainnet-ready and this Buildathon package requests no Mainnet
+wallet action. A Mainnet release is gated on all of the following rather than a
+network-variable switch:
+
+1. Independent security review of the smart-account rules, relayer boundaries,
+   payment state machine, database migrations and browser authorization paths,
+   with every material finding fixed and retested.
+2. Fresh production deployments and verification of the Stellar account WASM,
+   WebAuthn/Ed25519 verifiers, spending-limit policy and USDC contracts. No
+   Testnet address, passphrase, sponsor or transaction evidence may be reused.
+3. Official Circle Mainnet CCTP domains/contracts, fee behavior, attestation and
+   both-direction destination verification tested with controlled limits before
+   public availability.
+4. Production Privy, RPC, database, sponsor and monitoring configuration with
+   least-privilege access, secret rotation, alerting, reconciliation and a
+   documented incident/rollback procedure.
+5. Risk controls including per-user/route limits, rate limits, insufficient-fund
+   handling, duplicate/restart recovery and operational review of stuck funds.
+6. MoneyGram only after written provider approval, production credentials,
+   compliance requirements and Smart Account Kit contract-wallet compatibility.
+7. A separate independent-user acceptance pass on the exact production commit,
+   followed by staged launch limits. Testnet evidence in this package remains
+   historical evidence and never proves Mainnet settlement.
+
 ## Final submission gate
 
 The package is ready only when the tested deployment commit, integrated browser walkthrough, required live route evidence, independent test findings and fixes, organizer requirements, final video, public links and submission confirmation are recorded. Until then, this document is a truthful preparation package—not a completion claim.
