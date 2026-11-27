@@ -6,6 +6,7 @@ import { getSqlClient } from "../../server/db/client";
 import type {
   ValidatedStellarAgentPassCreate,
   ValidatedStellarAgentPassRevoke,
+  ValidatedStellarCctpBurn,
   ValidatedStellarUsdcTransfer,
 } from "../stellar/relayer";
 
@@ -136,6 +137,46 @@ export async function recordStellarUsdcTransferAuthorization(
   ]);
   if (!(eventRows as Record<string, unknown>[])[0]) {
     throw new Error("Stellar transfer reservation is no longer pending");
+  }
+}
+
+export async function recordStellarCctpBurnAuthorization(
+  requestHash: string,
+  burn: ValidatedStellarCctpBurn,
+): Promise<void> {
+  const sql = getSqlClient();
+  const rows = await sql`
+    UPDATE stellar_relayer_requests
+    SET operation_kind = 'cctp_burn', token_contract = ${burn.burnToken},
+      sender_address = ${burn.smartAccount}, recipient_address = ${burn.recipient},
+      expected_amount_atomic = ${burn.amountRaw.toString()}::numeric,
+      cctp_destination_domain = 6,
+      cctp_max_fee_atomic = ${burn.maxFeeRaw.toString()}::numeric,
+      authorization_kind = 'owner', context_rule_id = 0,
+      signer_address = ${burn.smartAccount}, updated_at = now()
+    WHERE request_hash = ${requestHash} AND status = 'pending'
+    RETURNING request_hash
+  `;
+  if (!(rows as Record<string, unknown>[])[0]) {
+    throw new Error("Stellar CCTP burn authorization was not persisted");
+  }
+}
+
+export async function recordStellarCctpBurnSubmission(
+  requestHash: string,
+  result: { readonly transactionHash: string; readonly ledger: number },
+): Promise<void> {
+  const sql = getSqlClient();
+  const rows = await sql`
+    UPDATE stellar_relayer_requests
+    SET submitted_transaction_hash = ${result.transactionHash},
+      submitted_ledger = ${result.ledger}, updated_at = now()
+    WHERE request_hash = ${requestHash}
+      AND status = 'pending' AND operation_kind = 'cctp_burn'
+    RETURNING request_hash
+  `;
+  if (!(rows as Record<string, unknown>[])[0]) {
+    throw new Error("Stellar CCTP burn submission was not persisted");
   }
 }
 

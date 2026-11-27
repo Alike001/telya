@@ -17,6 +17,8 @@ import {
   completeStellarAgentPassRevocation,
   completeStellarUsdcTransferRequest,
   completeStellarRelayerRequest,
+  recordStellarCctpBurnAuthorization,
+  recordStellarCctpBurnSubmission,
   recordStellarAgentPassAuthorization,
   recordStellarUsdcTransferAuthorization,
   recordStellarUsdcTransferSubmission,
@@ -89,6 +91,8 @@ export async function POST(request: Request): Promise<Response> {
       spendingLimitPolicyAddress:
         process.env.STELLAR_SPENDING_LIMIT_POLICY ?? "",
       usdcContract: process.env.STELLAR_USDC_SAC ?? "",
+      cctpTokenMessenger: process.env.CCTP_STELLAR_TOKEN_MESSENGER ?? "",
+      baseDomain: Number(process.env.CCTP_BASE_DOMAIN),
     });
     const forwardedFor = request.headers
       .get("x-forwarded-for")
@@ -129,6 +133,12 @@ export async function POST(request: Request): Promise<Response> {
     if (validated.kind === "usdc_transfer") {
       await assertActiveAgentPassForTransfer(validated);
       await recordStellarUsdcTransferAuthorization(identity.requestHash, validated);
+    }
+    if (validated.kind === "cctp_burn") {
+      // The finalized burn is source evidence only. Issue #16's Circle
+      // coordinator consumes the transaction hash and advances attestation;
+      // this endpoint never marks the cross-chain payment complete.
+      await recordStellarCctpBurnAuthorization(identity.requestHash, validated);
     }
     if (
       validated.kind === "agent_pass_create" ||
@@ -172,6 +182,15 @@ export async function POST(request: Request): Promise<Response> {
         amountRaw: validated.amountRaw,
       });
       await recordVerifiedAgentPassSpend(validated, result.hash);
+    } else if (validated.kind === "cctp_burn") {
+      await recordStellarCctpBurnSubmission(identity.requestHash, {
+        transactionHash: result.hash,
+        ledger: result.ledger,
+      });
+      await completeStellarRelayerRequest(identity.requestHash, {
+        status: "succeeded",
+        transactionHash: result.hash,
+      });
     } else if (validated.kind === "agent_pass_create") {
       await completeStellarAgentPassCreation(identity.requestHash, validated, {
         transactionHash: result.hash,
