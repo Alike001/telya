@@ -4,7 +4,7 @@
 
 **Merged baseline:** `origin/main` at `2531820`
 
-**Integrated draft baseline:** PR #66 at `8fd8987`
+**Integrated draft baseline:** PR #66 at `a926de2`
 
 **Assessment scope:** repository code, merged and open pull requests, open issues, automated checks, public Testnet deployment, and linked Testnet transaction evidence
 
@@ -263,15 +263,16 @@ Work that does not improve one of these outcomes should be challenged before ent
 
 Merged `main` at `2531820` remains the public deployment baseline. The public health endpoint most recently returned HTTP 200 with Testnet application/database readiness; the recorded merged direct-Stellar and positive Agent Pass transactions were independently rechecked on Stellar Testnet.
 
-On integrated draft PR #66 head `8fd8987`:
+On integrated draft PR #66 head `a926de2`:
 
-- secure environment: 72 files / 371 tests passed with no skips;
-- plain environment: 61 files / 353 tests passed, while 11 files / 18 credential/database-gated tests were explicitly skipped;
+- secure environment: 73 files / 374 tests passed with no skips;
+- plain environment: 62 files / 356 tests passed, while 11 files / 18 credential/database-gated tests were explicitly skipped;
 - client TypeScript, server TypeScript, production build and `git diff --check` passed; the prior dependency-only head also passed frozen install;
-- exact-head GitGuardian passed;
+- exact-head GitHub checks are pending; GitGuardian passed on the prior head;
 - `pnpm audit --prod` reported no known vulnerabilities after resolving transitive Zod to patched `4.6.7`;
 - the read-only public-network probe passed at Stellar ledger `5,946,104`; and
 - mobile/desktop unauthenticated acceptance proved no financial controls or substituted data appear without sign-in, while protected reads return 401; and
 - the conversational client consumes the existing owner-scoped Base balance endpoint, replacing only the matching unavailable Base entry and preserving independently verified Stellar state if Base RPC fails.
+- browser-only Base wallet verification is cleared on Privy sign-out or wallet removal and cannot carry a previous identity's display claim into the next session.
 
 Vercel did not build PR #66 because the teammate fork requires team authorization. The checks above prove automated, database, public-infrastructure and unavailable-state behavior only. They do not prove authenticated browser ownership, real balances, wallet signatures, Base/CCTP settlement, MoneyGram, independent-user acceptance or production readiness.
