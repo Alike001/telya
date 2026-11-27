@@ -185,7 +185,14 @@ export function parsePersistedPayment(value: unknown, requireEvents = false): Pe
 
   const events = parseEvents(payment.events ?? [], payment.id);
   if (!events || (requireEvents && !Array.isArray(payment.events))) return null;
-  const sourceHash = payment.sourceTransactionHash;
+  // Earlier Base→Stellar settlement persisted the correct 32-byte source hash
+  // without the Base 0x prefix. Normalize only that exact legacy shape for
+  // receipt recovery; malformed or cross-network hashes still fail closed.
+  const sourceHash = route.sourceNetwork === "base" &&
+    typeof payment.sourceTransactionHash === "string" &&
+    /^[0-9a-f]{64}$/i.test(payment.sourceTransactionHash)
+      ? `0x${payment.sourceTransactionHash}`
+      : payment.sourceTransactionHash;
   const destinationHash = payment.destinationTransactionHash;
   if (sourceHash !== null && !transactionHash(sourceHash, route.sourceNetwork)) return null;
   if (destinationHash !== null && !transactionHash(destinationHash, route.destinationNetwork)) return null;

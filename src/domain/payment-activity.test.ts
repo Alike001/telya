@@ -53,6 +53,31 @@ describe("persisted payment API parsing", () => {
     expect(parsed?.payments[0]?.route.id).toBe("base_to_stellar_cctp");
   });
 
+  it("recovers an already completed Base-to-Stellar receipt with a bare persisted Base source hash", () => {
+    const sourceHash = "e".repeat(64);
+    const destinationHash = "d".repeat(64);
+    const payment = {
+      ...basePayment,
+      status: "completed",
+      routeId: "base_to_stellar",
+      sourceNetwork: "base",
+      destinationNetwork: "stellar",
+      rail: "circle_cctp_standard",
+      verifiedRecipientAddress: basePayment.recipientAddress,
+      verifiedRecipientAmount: basePayment.expectedRecipientAmount,
+      sourceTransactionHash: sourceHash,
+      destinationTransactionHash: destinationHash,
+      events: [
+        { id: "22222222-2222-4222-8222-222222222223", stage: "recipient_verification", status: "recipient_verified", network: "stellar", txHash: destinationHash, publicMessage: "Exact recipient verified.", errorCode: null, occurredAt: "2026-11-26T12:01:00.000Z", completedAt: "2026-11-26T12:01:00.000Z" },
+        { id: "22222222-2222-4222-8222-222222222224", stage: "completion", status: "completed", network: "stellar", txHash: destinationHash, publicMessage: "Delivered.", errorCode: null, occurredAt: "2026-11-26T12:01:01.000Z", completedAt: "2026-11-26T12:01:01.000Z" },
+      ],
+    };
+    const page = parsePaymentActivityPage({ payments: [payment], nextCursor: null });
+    expect(page?.payments[0]?.sourceTransaction?.txHash).toBe(`0x${sourceHash}`);
+    expect(page?.payments[0]?.destinationTransaction?.txHash).toBe(destinationHash);
+    expect(parsePaymentActivityDetail({ payment })?.status).toBe("completed");
+  });
+
   it("accepts completed detail only with exact recipient, amount, hash and persisted events", () => {
     const completed = {
       ...basePayment,
