@@ -85,9 +85,13 @@ function parseFeeRows(value: unknown): readonly Record<string, unknown>[] {
 
 function decimalToUnits(amount: string, decimals: number): bigint {
   const value = amount.trim();
-  const pattern = new RegExp(`^(?:0|[1-9]\\d*)(?:\\.\\d{1,${decimals}})?$`);
-  if (!pattern.test(value)) throw new PaymentInputError("CCTP amount is not representable on its source network");
-  const [whole, fraction = ""] = value.split(".");
+  const match = /^(0|[1-9]\d*)(?:\.(\d+))?$/.exec(value);
+  if (!match) throw new PaymentInputError("CCTP amount is not representable on its source network");
+  const whole = match[1]!;
+  const fraction = (match[2] ?? "").replace(/0+$/, "");
+  if (fraction.length > decimals) {
+    throw new PaymentInputError("CCTP amount is not representable on its source network");
+  }
   return BigInt(whole!) * 10n ** BigInt(decimals) + BigInt(fraction.padEnd(decimals, "0") || "0");
 }
 
@@ -159,7 +163,9 @@ export function createBaseCctpAuthorizationHandler(options: { authenticate?: Aut
       if (request.method !== "POST") return jsonResponse({ error: "method_not_allowed" }, 405);
       const id = paymentId(request);
       const payment = await getPaymentWithEvents(user, id);
-      if (payment.status !== "authorized") return jsonResponse({ error: "payment_not_authorized" }, 409);
+      if (!["awaiting_confirmation", "authorized"].includes(String(payment.status))) {
+        return jsonResponse({ error: "payment_not_authorized" }, 409);
+      }
       const intent = trustedCctpBurnIntent(payment);
       const operation = await reserveBaseCctpOperation({ paymentId: id, ...intent });
       return jsonResponse({ paymentId: id, status: "authorized", ...operation }, 200);

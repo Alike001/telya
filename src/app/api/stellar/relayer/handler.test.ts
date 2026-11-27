@@ -20,6 +20,8 @@ const mocks = vi.hoisted(() => ({
   recordAgentSpend: vi.fn(),
   identity: vi.fn(),
   authenticate: vi.fn(),
+  validateCctpPayment: vi.fn(),
+  linkCctpPayment: vi.fn(),
 }));
 
 vi.mock("../../../../stellar/relayer", () => ({
@@ -59,6 +61,8 @@ vi.mock("../../../../server/stellar-relayer-requests", () => ({
   reserveStellarRelayerRequest: mocks.reserve,
   stellarRelayerRequestIdentity: mocks.identity,
   linkStellarPaymentAuthorization: vi.fn(),
+  linkStellarCctpPaymentAuthorization: mocks.linkCctpPayment,
+  validateStellarCctpPaymentAuthorization: mocks.validateCctpPayment,
   validateStellarPaymentAuthorization: vi.fn(),
 }));
 
@@ -120,6 +124,36 @@ describe("shared Stellar relayer CCTP integration", () => {
     );
     expect(mocks.recordBurnSubmission.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.completeRequest.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("binds the reviewed CCTP payment before broadcasting the burn", async () => {
+    const paymentContext = {
+      userId: "11111111-1111-4111-8111-111111111111",
+      paymentId: "22222222-2222-4222-8222-222222222222",
+    };
+    const response = await handleStellarRelayerRequest(new Request(
+      "https://telya.test/api/stellar/relayer/payment",
+      { method: "POST", body: JSON.stringify({ func: "signed", auth: ["passkey"] }) },
+    ), paymentContext);
+
+    expect(response.status).toBe(200);
+    expect(mocks.validateCctpPayment).toHaveBeenCalledWith(
+      paymentContext.userId,
+      paymentContext.paymentId,
+      expect.objectContaining({ kind: "cctp_burn" }),
+    );
+    expect(mocks.linkCctpPayment).toHaveBeenCalledWith(
+      paymentContext.userId,
+      paymentContext.paymentId,
+      "request-hash",
+      expect.objectContaining({ kind: "cctp_burn" }),
+    );
+    expect(mocks.validateCctpPayment.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.submit.mock.invocationCallOrder[0]!,
+    );
+    expect(mocks.linkCctpPayment.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.submit.mock.invocationCallOrder[0]!,
     );
   });
 });

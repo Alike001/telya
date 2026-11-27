@@ -19,6 +19,15 @@ import {
 } from "../stellar/cctp.ts";
 import { normalizeStellarUsdcAmount } from "../stellar/usdc.ts";
 
+function canonicalDatabaseDecimal(value: unknown): string {
+  const match = /^(0|[1-9]\d*)(?:\.(\d+))?$/.exec(String(value));
+  if (!match) {
+    throw new StellarCctpPersistenceError("INVALID_PAYMENT_STATE", "Stored payment amount is invalid");
+  }
+  const fraction = (match[2] ?? "").replace(/0+$/, "");
+  return fraction ? `${match[1]}.${fraction}` : match[1]!;
+}
+
 const DEFAULT_MAX_RESOURCE_FEE_STROOPS = 1_000_000n;
 
 export class StellarCctpPersistenceError extends Error {
@@ -512,7 +521,7 @@ export async function reconcileStellarCctpSource(input: {
     );
   }
   const config = input.config ?? stellarCctpConfigFromEnvironment();
-  const expectedAmount = String(payment.expected_amount);
+  const expectedAmount = canonicalDatabaseDecimal(payment.expected_amount);
   const verification = await verifyStellarCctpBurn({
     rpc: input.rpc,
     txHash: input.transactionHash,

@@ -58,6 +58,15 @@ function stellarContractAsBytes32(address: string): string {
   return `0x${Buffer.from(StrKey.decodeContract(address)).toString("hex")}`;
 }
 
+function canonicalDatabaseDecimal(value: unknown): string {
+  const match = /^(0|[1-9]\d*)(?:\.(\d+))?$/.exec(String(value));
+  if (!match) {
+    throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "Stored payment amount is invalid");
+  }
+  const fraction = (match[2] ?? "").replace(/0+$/, "");
+  return fraction ? `${match[1]}.${fraction}` : match[1]!;
+}
+
 const CCTP_V2_MIN_MESSAGE_BYTES = 148 + 228;
 const CCTP_V2_EMPTY_NONCE = `0x${"0".repeat(64)}`;
 const CIRCLE_ATTESTATION_MUTABLE_RANGES = [
@@ -302,8 +311,8 @@ export async function reserveBaseCctpOperation(input: {
     throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "CCTP max fee must be non-negative and less than the burn amount");
   }
   const expectedAmountAtomic = sourceIsStellar
-    ? normalizeBaseUsdcAmount(String(payment.expected_amount))
-    : normalizeStellarUsdcAmount(String(payment.expected_amount)).raw;
+    ? normalizeBaseUsdcAmount(canonicalDatabaseDecimal(payment.expected_amount))
+    : normalizeStellarUsdcAmount(canonicalDatabaseDecimal(payment.expected_amount)).raw;
   const rows = await sql`
     INSERT INTO base_cctp_operations (
       payment_id, route_id, status, burn_amount_atomic, max_fee_atomic,

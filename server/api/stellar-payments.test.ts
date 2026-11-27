@@ -5,6 +5,7 @@ vi.mock("server-only", () => ({}));
 import { PaymentNotFoundError } from "../payments/service.ts";
 import {
   createStellarPaymentAuthorizationHandler,
+  createStellarCctpPaymentAuthorizationHandler,
   createStellarPaymentReconciliationHandler,
 } from "./stellar-payments.ts";
 
@@ -89,5 +90,59 @@ describe("Stellar payment authorization handoff API", () => {
     expect(cookie).toContain("SameSite=Strict");
     expect(cookie).toContain("Path=/api/stellar/relayer/payment");
     expect(createSession).toHaveBeenCalledWith(user, "22222222-2222-4222-8222-222222222222");
+  });
+
+  it("reserves the reviewed CCTP burn before issuing the one-use handoff", async () => {
+    const reserveCctp = vi.fn().mockResolvedValue({
+      burnAmountAtomic: "50526830",
+      maxFeeAtomic: "526830",
+    });
+    const createSession = vi.fn().mockResolvedValue({
+      token: "B".repeat(43),
+      expiresAt: "2030-01-01T00:05:00.000Z",
+    });
+    const paymentId = "22222222-2222-4222-8222-222222222222";
+    const handler = createStellarCctpPaymentAuthorizationHandler({
+      authenticate: vi.fn().mockResolvedValue(user),
+      getPayment: vi.fn().mockResolvedValue({
+        route_id: "stellar_to_base",
+        source_network: "stellar",
+        expected_recipient_amount: "5.000000000000000000",
+        fees: [{
+          kind: "provider",
+          payer: "sender",
+          asset: "USDC",
+          amount: "0.052683",
+        }],
+      }),
+      reserveCctp,
+      createSession,
+    });
+
+    const response = await handler(new Request(
+      "https://telya.test/api/payments/stellar/cctp/authorize",
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ paymentId }),
+      },
+    ));
+
+    expect(response.status).toBe(201);
+    await expect(response.json()).resolves.toEqual({
+      status: "authorization_ready",
+      relayerUrl: "/api/stellar/relayer/payment",
+      expiresAt: "2030-01-01T00:05:00.000Z",
+      burn: { burnAmount: "5.052683", maxFee: "0.052683" },
+    });
+    expect(reserveCctp).toHaveBeenCalledWith({
+      paymentId,
+      burnAmount: "5.052683",
+      maxFee: "0.052683",
+    });
+    expect(reserveCctp.mock.invocationCallOrder[0]).toBeLessThan(
+      createSession.mock.invocationCallOrder[0]!,
+    );
+    expect(response.headers.get("set-cookie")).toContain("HttpOnly");
   });
 });

@@ -54,13 +54,20 @@ export async function createStellarPaymentExecutionSession(
       SELECT p.id
       FROM payments p
       JOIN messages m ON m.id = p.intent_message_id
+      LEFT JOIN base_cctp_operations o ON o.payment_id = p.id
       WHERE p.id = ${paymentId}::uuid
         AND p.user_id = ${user.id}::uuid
         AND p.status = 'awaiting_confirmation'
-        AND p.route_id = 'stellar_to_stellar'
+        AND p.route_id IN ('stellar_to_stellar', 'stellar_to_base')
         AND p.source_network = 'stellar'
-        AND p.destination_network = 'stellar'
-        AND p.rail = 'stellar_direct'
+        AND (
+          (p.route_id = 'stellar_to_stellar'
+            AND p.destination_network = 'stellar' AND p.rail = 'stellar_direct')
+          OR
+          (p.route_id = 'stellar_to_base'
+            AND p.destination_network = 'base' AND p.rail = 'circle_cctp_standard'
+            AND o.route_id = 'stellar_to_base' AND o.status = 'authorized')
+        )
         AND (m.structured_intent->'selectedSourceWallet'->>'id') IS NOT NULL
       FOR UPDATE OF p
     ), invalidated AS (
@@ -105,7 +112,7 @@ export async function consumeStellarPaymentExecutionSession(
         AND p.id = s.payment_id
         AND p.user_id = s.user_id
         AND p.status = 'awaiting_confirmation'
-        AND p.route_id = 'stellar_to_stellar'
+        AND p.route_id IN ('stellar_to_stellar', 'stellar_to_base')
       RETURNING s.user_id, s.payment_id
     )
     SELECT user_id, payment_id FROM consumed

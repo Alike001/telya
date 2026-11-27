@@ -27,6 +27,8 @@ import {
   reserveStellarRelayerRequest,
   stellarRelayerRequestIdentity,
   linkStellarPaymentAuthorization,
+  linkStellarCctpPaymentAuthorization,
+  validateStellarCctpPaymentAuthorization,
   validateStellarPaymentAuthorization,
 } from "../../../../server/stellar-relayer-requests";
 import {
@@ -125,18 +127,25 @@ export async function handleStellarRelayerRequest(
       cctpTokenMessenger: process.env.CCTP_STELLAR_TOKEN_MESSENGER ?? "",
       baseDomain: Number(process.env.CCTP_BASE_DOMAIN),
     });
-    if (paymentId && validated.kind !== "usdc_transfer") {
+    if (paymentId && validated.kind !== "usdc_transfer" && validated.kind !== "cctp_burn") {
       throw new StellarRelayerError(
         "INVALID_REQUEST",
         "A payment ID is accepted only for a USDC transfer",
         400,
       );
     }
-    const paymentUserId = validated.kind === "usdc_transfer" && paymentId
+    const paymentUserId = (validated.kind === "usdc_transfer" || validated.kind === "cctp_burn") && paymentId
       ? paymentContext?.userId ?? (await authenticateRequest(request)).id
       : null;
     if (paymentUserId && paymentId && validated.kind === "usdc_transfer") {
       await validateStellarPaymentAuthorization(
+        paymentUserId,
+        paymentId,
+        validated,
+      );
+    }
+    if (paymentUserId && paymentId && validated.kind === "cctp_burn") {
+      await validateStellarCctpPaymentAuthorization(
         paymentUserId,
         paymentId,
         validated,
@@ -201,6 +210,14 @@ export async function handleStellarRelayerRequest(
       // A finalized burn is source evidence only. The Circle coordinator
       // verifies the attestation and destination before completing payment.
       await recordStellarCctpBurnAuthorization(identity.requestHash, validated);
+      if (paymentUserId && paymentId) {
+        await linkStellarCctpPaymentAuthorization(
+          paymentUserId,
+          paymentId,
+          identity.requestHash,
+          validated,
+        );
+      }
     }
     if (
       validated.kind === "agent_pass_create" ||

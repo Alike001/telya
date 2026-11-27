@@ -54,6 +54,14 @@ Iris API and persisted with hashes for reconciliation. Repeated requests use
 unique payment events, operation hashes, and a 60-second destination lease.
 Source confirmation and Circle attestation remain intermediate states.
 
+For Stellar→Base, `POST /api/payments/stellar/cctp/authorize` re-derives the
+gross burn and maximum fee from the owned persisted review, reserves those
+values, and issues the same path-scoped one-use HttpOnly relayer handoff used by
+direct Stellar. Before sponsorship, deterministic server code requires the
+owner-signed burn to match that payment's verified Stellar wallet, Base
+recipient, gross amount, maximum fee and reserved forwarding operation. A
+general CCTP relayer request cannot attach itself to a Payment after the fact.
+
 ## Stellar / Circle CCTP integration seam
 
 Issue #12 exposes the Stellar half used by Issue #16's Base/Circle coordinator:
