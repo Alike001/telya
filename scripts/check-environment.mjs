@@ -1,8 +1,28 @@
 import { existsSync, readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
-import { StrKey } from "@stellar/stellar-sdk";
+import { Networks, StrKey } from "@stellar/stellar-sdk";
 
 const PLACEHOLDER = /^(?:\[?sensitive\]?|change-?me|replace-?me|your[_-].*|<.*>|example)$/i;
+
+const COMMON_STELLAR_REQUIREMENTS = Object.freeze([
+  "STELLAR_RPC_URL",
+  "STELLAR_NETWORK_PASSPHRASE",
+  "STELLAR_ACCOUNT_WASM_HASH",
+  "STELLAR_WEBAUTHN_VERIFIER",
+  "STELLAR_ED25519_VERIFIER",
+  "STELLAR_SPENDING_LIMIT_POLICY",
+  "STELLAR_USDC_SAC",
+]);
+
+const CCTP_REQUIREMENTS = Object.freeze([
+  "CIRCLE_ENV",
+  "CCTP_BASE_DOMAIN",
+  "CCTP_STELLAR_DOMAIN",
+  "CCTP_STELLAR_TOKEN_MESSENGER",
+  "CCTP_STELLAR_MESSAGE_TRANSMITTER",
+  "CCTP_STELLAR_FORWARDER",
+  "BASE_SEPOLIA_RPC_URL",
+]);
 
 export const FLOW_REQUIREMENTS = Object.freeze({
   onboarding: [
@@ -12,6 +32,7 @@ export const FLOW_REQUIREMENTS = Object.freeze({
     "STELLAR_FEE_SPONSOR_SECRET",
     "STELLAR_WEBAUTHN_ALLOWED_ORIGINS",
     "STELLAR_WEBAUTHN_RP_ID",
+    ...COMMON_STELLAR_REQUIREMENTS,
   ],
   stellar: [
     "DATABASE_URL",
@@ -20,12 +41,23 @@ export const FLOW_REQUIREMENTS = Object.freeze({
     "STELLAR_FEE_SPONSOR_SECRET",
     "STELLAR_WEBAUTHN_ALLOWED_ORIGINS",
     "STELLAR_WEBAUTHN_RP_ID",
+    ...COMMON_STELLAR_REQUIREMENTS,
   ],
   base: [
     "DATABASE_URL",
     "NEXT_PUBLIC_PRIVY_APP_ID",
     "PRIVY_APP_SECRET",
     "BASE_SEPOLIA_RPC_URL",
+  ],
+  cctp: [
+    "DATABASE_URL",
+    "NEXT_PUBLIC_PRIVY_APP_ID",
+    "PRIVY_APP_SECRET",
+    "STELLAR_FEE_SPONSOR_SECRET",
+    "STELLAR_WEBAUTHN_ALLOWED_ORIGINS",
+    "STELLAR_WEBAUTHN_RP_ID",
+    ...COMMON_STELLAR_REQUIREMENTS,
+    ...CCTP_REQUIREMENTS,
   ],
   full: [
     "DATABASE_URL",
@@ -34,7 +66,8 @@ export const FLOW_REQUIREMENTS = Object.freeze({
     "STELLAR_FEE_SPONSOR_SECRET",
     "STELLAR_WEBAUTHN_ALLOWED_ORIGINS",
     "STELLAR_WEBAUTHN_RP_ID",
-    "BASE_SEPOLIA_RPC_URL",
+    ...COMMON_STELLAR_REQUIREMENTS,
+    ...CCTP_REQUIREMENTS,
   ],
 });
 
@@ -96,18 +129,45 @@ function isValidRpId(value) {
   return Boolean(rpId) && !rpId.includes(":") && !rpId.includes("/") && !/\s/.test(rpId);
 }
 
+function isContractAddress(value) {
+  return StrKey.isValidContract(value);
+}
+
+function isHex32(value) {
+  return /^[0-9a-f]{64}$/i.test(value);
+}
+
 function validShape(key, value) {
   switch (key) {
     case "DATABASE_URL":
       return isDatabaseUrl(value);
     case "STELLAR_FEE_SPONSOR_SECRET":
       return StrKey.isValidEd25519SecretSeed(value);
+    case "STELLAR_RPC_URL":
+    case "BASE_SEPOLIA_RPC_URL":
+      return isCredentialFreeHttpsUrl(value);
+    case "STELLAR_NETWORK_PASSPHRASE":
+      return value === Networks.TESTNET;
+    case "STELLAR_ACCOUNT_WASM_HASH":
+      return isHex32(value);
+    case "STELLAR_WEBAUTHN_VERIFIER":
+    case "STELLAR_ED25519_VERIFIER":
+    case "STELLAR_SPENDING_LIMIT_POLICY":
+    case "STELLAR_USDC_SAC":
+    case "CCTP_STELLAR_TOKEN_MESSENGER":
+    case "CCTP_STELLAR_MESSAGE_TRANSMITTER":
+    case "CCTP_STELLAR_FORWARDER":
+      return isContractAddress(value);
     case "STELLAR_WEBAUTHN_ALLOWED_ORIGINS":
       return hasValidWebAuthnOrigins(value);
     case "STELLAR_WEBAUTHN_RP_ID":
       return isValidRpId(value);
-    case "BASE_SEPOLIA_RPC_URL":
-      return isCredentialFreeHttpsUrl(value);
+    case "CIRCLE_ENV":
+      return value === "testnet";
+    case "CCTP_BASE_DOMAIN":
+      return value === "6";
+    case "CCTP_STELLAR_DOMAIN":
+      return value === "27";
     default:
       return true;
   }

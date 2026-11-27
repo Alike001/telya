@@ -24,7 +24,10 @@ pnpm dev
 
 The preflight reports only `READY`, `MISSING`, `PLACEHOLDER` or `INVALID` beside
 configuration names; it never prints credential values. Use `--flow=stellar`,
-`--flow=base` or `--flow=full` when validating those paths.
+`--flow=base`, `--flow=cctp` or `--flow=full` when validating those paths. The
+CCTP/full checks require the exact Testnet domains, valid Stellar contract
+addresses and credential-free HTTPS RPC endpoints; they do not treat a malformed
+or Mainnet configuration as ready.
 
 Open `http://localhost:3000`. The readiness endpoint is available at
 `http://localhost:3000/api/health`; it returns HTTP `200` only when the app can
