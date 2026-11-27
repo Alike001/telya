@@ -139,12 +139,14 @@ Run with a funded, verified Stellar smart account and a small cumulative allowan
 
 1. Create a USDC-only Agent Pass with a visible limit and expiry; authorize with the owner passkey.
 2. Record the rule and creation transaction.
-3. Submit an agent payment below the remaining cumulative allowance.
-4. Verify the real transfer, cumulative spend and current-ledger expiry state.
-5. Attempt an amount that would exceed the cumulative allowance. It must be rejected with no successful transfer.
-6. Revoke using the owner passkey and record the revocation transaction.
-7. Attempt another agent payment. It must be rejected with no movement.
-8. Make a small owner-authorized payment. The owner must retain control after revocation.
+3. Do not refresh: the ephemeral agent private key exists only in this browser session and must never be persisted or exported.
+4. Enter a verified recipient and an amount below the remaining cumulative allowance. Select **Review exact agent payment**.
+5. Before execution, record the resolved recipient address, amount, direct-Stellar route and every displayed fee. Change an input and confirm the old review is discarded.
+6. Select **Run with Agent Pass** once. Verify the real transfer, canonical receipt, cumulative spend and current-ledger expiry state. A pending/unknown result must expose status refresh, not another submit action.
+7. Prepare an amount that would exceed the cumulative allowance. It must be rejected with no successful transfer or completed receipt.
+8. Revoke using the owner passkey and record the revocation transaction.
+9. Attempt another agent payment. It must be rejected with no movement.
+10. Make a small owner-authorized payment. The owner must retain control after revocation.
 
 Evidence:
 
@@ -154,6 +156,8 @@ Evidence:
 | Limit and expiry ledger |  |
 | Creation transaction |  |
 | Allowed-spend transaction and amount |  |
+| Reviewed recipient, route and fees matched execution | Yes / No |
+| Refresh discarded the ephemeral agent key | Yes / No |
 | Cumulative overspend rejected with no transfer | Yes / No |
 | Revocation transaction |  |
 | Post-revocation attempt rejected with no transfer | Yes / No |

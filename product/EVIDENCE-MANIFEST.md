@@ -72,7 +72,7 @@ Merged acceptance evidence: [PR #43](https://github.com/Alike001/telya/pull/43).
 | --- | --- | --- | --- |
 | Stellar → Stellar direct USDC | Accepted transaction, exact recipient/amount, persisted completion/refresh | Merged PR #41 plus later protected-execution regressions | **Verified fallback** |
 | Passkey smart-account lifecycle | Accepted deployment/reconnect evidence | Merged PR #40 plus draft Privy-bound regressions | **Verified foundation; new onboarding UI pending** |
-| Agent Pass direct Stellar USDC | Accepted create/spend/reject/revoke/owner-control evidence | Merged PR #43 plus draft owner-bound one-use execution/ledger-expiry tests | **Verified foundation; new UI pending** |
+| Agent Pass direct Stellar USDC | Accepted create/spend/reject/revoke/owner-control evidence | Merged PR #43 plus PR #66 owner-bound one-use administration, exact Payment review, memory-only delegated execution, ledger-expiry and idempotent-spend tests | **Verified foundation; draft integrated UI not live-verified** |
 | Username/contact resolution | None for current authenticated browser UI | Neon owner/collision/contact tests in draft PRs #46/#66 | **Prepared, not live-verified** |
 | Conversational/manual payment journey | None on integrated deployment | Draft PR #49 and stacked regressions | **Prepared, not live-verified** |
 | Timeline/history/receipt UI | Earlier direct receipt restoration only; none for current integrated UI | Draft PR #65 persistence/refresh tests | **Prepared, not live-verified** |
