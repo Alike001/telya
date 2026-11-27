@@ -12,6 +12,7 @@ const active = {
   spentAmount: "1.5000000",
   spentAmountAtomic: "15000000",
   validUntilLedger: 123456,
+  observedLedger: 123455,
   status: "active",
   createTransactionHash: "d".repeat(64),
   revokeTransactionHash: null,
@@ -34,5 +35,16 @@ describe("persisted Agent Pass parsing", () => {
     expect(parsePersistedAgentPass({ ...active, spentAmountAtomic: "260000000" })).toBeNull();
     expect(parsePersistedAgentPass({ ...active, status: "revoked" })).toBeNull();
     expect(parsePersistedAgentPass({ ...active, smartAccount: "not-a-contract" })).toBeNull();
+  });
+
+  it("requires observed ledger evidence to agree with active and expired status", () => {
+    expect(parsePersistedAgentPass({
+      ...active,
+      status: "expired",
+      observedLedger: 123457,
+    })).toMatchObject({ status: "expired", observedLedger: 123457 });
+    expect(parsePersistedAgentPass({ ...active, observedLedger: 123457 })).toBeNull();
+    expect(parsePersistedAgentPass({ ...active, status: "expired" })).toBeNull();
+    expect(parsePersistedAgentPass({ ...active, observedLedger: undefined })).toBeNull();
   });
 });

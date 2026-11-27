@@ -306,6 +306,25 @@ export function AgentPassPanel({
             </button>
           </div>
         </div>
+      ) : pass?.status === "expired" ? (
+        <div className="no-pass-card">
+          <div className="no-pass-icon-box">
+            <ShieldAlert className="shield-icon-lg" />
+          </div>
+          <h3>Agent Pass Expired</h3>
+          <p>
+            Rule #{pass.ruleId} expired at Stellar ledger #{pass.validUntilLedger}.
+            The latest verified ledger was #{pass.observedLedger}, so this pass can no longer authorize payments.
+          </p>
+          <button
+            type="button"
+            className="cta-button primary create-pass-trigger-btn"
+            onClick={() => setShowCreateModal(true)}
+          >
+            <Plus className="btn-icon" />
+            <span>Create New Agent Pass</span>
+          </button>
+        </div>
       ) : (
         /* No Active Pass State */
         <div className="no-pass-card">

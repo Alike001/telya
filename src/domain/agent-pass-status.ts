@@ -8,7 +8,8 @@ export type PersistedAgentPass = {
   readonly spentAmount: string;
   readonly spentAmountAtomic: bigint;
   readonly validUntilLedger: number;
-  readonly status: "active" | "revoked";
+  readonly observedLedger: number;
+  readonly status: "active" | "expired" | "revoked";
   readonly createTransactionHash: string;
   readonly revokeTransactionHash: string | null;
   readonly createdAt: string;
@@ -47,7 +48,8 @@ export function parsePersistedAgentPass(value: unknown): PersistedAgentPass | nu
     !decimal(pass.spendingLimit) || typeof pass.spendingLimitAtomic !== "string" || !/^\d+$/.test(pass.spendingLimitAtomic) ||
     !decimal(pass.spentAmount) || typeof pass.spentAmountAtomic !== "string" || !/^\d+$/.test(pass.spentAmountAtomic) ||
     !Number.isSafeInteger(pass.validUntilLedger) || Number(pass.validUntilLedger) < 1 ||
-    !(pass.status === "active" || pass.status === "revoked") ||
+    !Number.isSafeInteger(pass.observedLedger) || Number(pass.observedLedger) < 1 ||
+    !(pass.status === "active" || pass.status === "expired" || pass.status === "revoked") ||
     !hash(pass.createTransactionHash) ||
     !(pass.revokeTransactionHash === null || hash(pass.revokeTransactionHash)) ||
     !timestamp(pass.createdAt) ||
@@ -57,6 +59,8 @@ export function parsePersistedAgentPass(value: unknown): PersistedAgentPass | nu
   const spentAmountAtomic = BigInt(pass.spentAmountAtomic);
   if (
     spendingLimitAtomic < 1n || spentAmountAtomic < 0n || spentAmountAtomic > spendingLimitAtomic ||
+    (pass.status === "active" && Number(pass.observedLedger) > Number(pass.validUntilLedger)) ||
+    (pass.status === "expired" && Number(pass.observedLedger) <= Number(pass.validUntilLedger)) ||
     (pass.status === "revoked") !== (pass.revokedAt !== null) ||
     (pass.status === "revoked") !== (pass.revokeTransactionHash !== null)
   ) return null;
@@ -70,6 +74,7 @@ export function parsePersistedAgentPass(value: unknown): PersistedAgentPass | nu
     spentAmount: pass.spentAmount,
     spentAmountAtomic,
     validUntilLedger: Number(pass.validUntilLedger),
+    observedLedger: Number(pass.observedLedger),
     status: pass.status,
     createTransactionHash: pass.createTransactionHash,
     revokeTransactionHash: pass.revokeTransactionHash as string | null,
