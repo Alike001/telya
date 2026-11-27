@@ -339,6 +339,8 @@ After every meaningful implementation task run:
 - pnpm test
 - pnpm typecheck
 - pnpm build
+- pnpm secrets:check (after the production build)
+- pnpm audit --prod
 - git diff --check
 - npx tsc --project tsconfig.server.json --noEmit --pretty false (for server/backend changes)
 
