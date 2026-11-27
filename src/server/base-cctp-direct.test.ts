@@ -4,6 +4,8 @@ const mocks = vi.hoisted(() => ({
   getSqlClient: vi.fn(),
   completionRows: true,
   completionQuery: "",
+  failureRows: true,
+  failureQuery: "",
   submissionQuery: "",
 }));
 
@@ -25,7 +27,7 @@ const TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a
 
 function word(value: bigint): string { return value.toString(16).padStart(64, "0"); }
 
-function finalizedRpc(): BaseRpc {
+function finalizedRpc(recipient = RECIPIENT): BaseRpc {
   const receipt: BaseTransactionReceipt = {
     transactionHash: TX_HASH,
     status: "0x1",
@@ -35,7 +37,7 @@ function finalizedRpc(): BaseRpc {
       topics: [
         TRANSFER_TOPIC,
         `0x${SOURCE.slice(2).padStart(64, "0")}`,
-        `0x${RECIPIENT.slice(2).padStart(64, "0")}`,
+        `0x${recipient.slice(2).padStart(64, "0")}`,
       ],
       data: `0x${word(5_000_000n)}`,
     }],
@@ -56,6 +58,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.completionRows = true;
   mocks.completionQuery = "";
+  mocks.failureRows = true;
+  mocks.failureQuery = "";
   mocks.submissionQuery = "";
   const sql = (async (strings: TemplateStringsArray) => {
     const query = strings.join(" ").replace(/\s+/g, " ").trim();
@@ -74,6 +78,10 @@ beforeEach(() => {
       }];
     }
     if (query.startsWith("WITH operation AS")) {
+      if (query.includes("SET status = 'failed'")) {
+        mocks.failureQuery = query;
+        return mocks.failureRows ? [{ id: PAYMENT_ID }] : [];
+      }
       mocks.submissionQuery = query;
       return [{ id: PAYMENT_ID }];
     }
@@ -113,5 +121,20 @@ describe("Base direct payment completion persistence", () => {
       rpc: finalizedRpc(),
     })).rejects.toThrow("changed while destination verification was being recorded");
     expect(mocks.completionQuery).toContain("FROM payment CROSS JOIN (VALUES");
+  });
+
+  it("persists a guarded recipient-verification failure for the exact finalized hash", async () => {
+    const differentRecipient = `0x${"c".repeat(40)}`;
+
+    await expect(reconcileBaseDirectPayment({
+      paymentId: PAYMENT_ID,
+      transactionHash: TX_HASH,
+      rpc: finalizedRpc(differentRecipient),
+    })).rejects.toThrow("expected recipient");
+
+    expect(mocks.failureQuery).toContain("destination_transaction_hash =");
+    expect(mocks.failureQuery).toContain("'recipient_verification'");
+    expect(mocks.failureQuery).toContain("'failed', 'base'");
+    expect(mocks.failureQuery).toContain("FROM payment p JOIN operation o ON o.payment_id = p.id");
   });
 });
