@@ -346,19 +346,29 @@ export async function recordBaseCctpSourceVerificationFailure(input: {
 }): Promise<void> {
   const sql = getSqlClient();
   const rows = await sql`
-    WITH operation AS (
-      UPDATE base_cctp_operations SET status = 'failed',
+    WITH eligible AS MATERIALIZED (
+      SELECT p.id FROM payments p
+      JOIN base_cctp_operations o ON o.payment_id = p.id
+      WHERE p.id = ${input.paymentId}::uuid
+        AND p.route_id = 'base_to_stellar'
+        AND p.status IN ('submitted', 'source_confirmed', 'awaiting_attestation')
+        AND p.source_transaction_hash = ${input.transactionHash}
+        AND p.destination_transaction_hash IS NULL
+        AND o.route_id = 'base_to_stellar'
+        AND o.status IN ('source_submitted', 'source_confirmed', 'awaiting_attestation')
+        AND o.source_transaction_hash = ${input.transactionHash}
+        AND o.destination_transaction_hash IS NULL
+      FOR UPDATE OF p, o
+    ), operation AS (
+      UPDATE base_cctp_operations o SET status = 'failed',
         failure_code = 'DESTINATION_MISMATCH', updated_at = now()
-      WHERE payment_id = ${input.paymentId}::uuid AND route_id = 'base_to_stellar'
-        AND status = 'submitted' AND source_transaction_hash = ${input.transactionHash}
-      RETURNING payment_id
+      FROM eligible e WHERE o.payment_id = e.id
+      RETURNING o.payment_id
     ), payment AS (
       UPDATE payments p SET status = 'failed', failure_code = 'DESTINATION_MISMATCH',
-        failure_message = 'The finalized Base burn did not match the authorized CCTP intent.',
+        failure_message = 'The Base CCTP source or forwarding proof did not match the authorized payment. Stellar delivery is not verified.',
         updated_at = now()
-      FROM operation o WHERE p.id = o.payment_id
-        AND p.route_id = 'base_to_stellar' AND p.status = 'submitted'
-        AND p.source_transaction_hash = ${input.transactionHash}
+      FROM eligible e WHERE p.id = e.id
       RETURNING p.id
     ), event AS (
       INSERT INTO payment_events (
@@ -367,7 +377,7 @@ export async function recordBaseCctpSourceVerificationFailure(input: {
       )
       SELECT p.id, 'base_cctp_source_mismatch', 'source_verification',
         'failed', 'base', ${input.transactionHash},
-        'The finalized Base burn did not match the authorized Circle payment.',
+        'The Base burn or forwarding proof failed verification. The Stellar recipient has not been paid.',
         ${input.reason}, 'DESTINATION_MISMATCH', now()
       FROM payment p JOIN operation o ON o.payment_id = p.id
       ON CONFLICT (payment_id, event_key) DO NOTHING
