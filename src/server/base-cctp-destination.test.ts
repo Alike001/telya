@@ -13,6 +13,8 @@ const mocks = vi.hoisted(() => ({
   destinationHash: null as string | null,
   completionRows: true,
   completionQuery: "",
+  failureRows: true,
+  failureQuery: "",
   transitionRows: true,
   transitionQuery: "",
   pendingQuery: "",
@@ -64,7 +66,7 @@ function u32(value: number): string { return value.toString(16).padStart(8, "0")
 function word(value: bigint): string { return value.toString(16).padStart(64, "0"); }
 function contractWord(address: string): string { return Buffer.from(StrKey.decodeContract(address)).toString("hex"); }
 
-function mintRpc(): BaseRpc {
+function mintRpc(recipient = BASE_RECIPIENT, amount = 5_000_000n): BaseRpc {
   const attestation = `0x${"c".repeat(130)}`;
   const receipt: BaseTransactionReceipt = {
     transactionHash: DESTINATION_HASH,
@@ -72,8 +74,8 @@ function mintRpc(): BaseRpc {
     blockNumber: "0x100",
     logs: [{
       address: BASE_SEPOLIA_USDC,
-      topics: [TRANSFER_TOPIC, `0x${"0".repeat(64)}`, `0x${BASE_RECIPIENT.slice(2).padStart(64, "0")}`],
-      data: `0x${word(5_000_000n)}`,
+      topics: [TRANSFER_TOPIC, `0x${"0".repeat(64)}`, `0x${recipient.slice(2).padStart(64, "0")}`],
+      data: `0x${word(amount)}`,
     }],
   };
   return {
@@ -125,6 +127,8 @@ beforeEach(() => {
   mocks.destinationHash = null;
   mocks.completionRows = true;
   mocks.completionQuery = "";
+  mocks.failureRows = true;
+  mocks.failureQuery = "";
   mocks.transitionRows = true;
   mocks.transitionQuery = "";
   mocks.pendingQuery = "";
@@ -176,6 +180,10 @@ beforeEach(() => {
           : null,
         destination_transaction_hash: mocks.destinationHash,
       }];
+    }
+    if (query.startsWith("WITH operation AS") && query.includes("SET status = 'failed'")) {
+      mocks.failureQuery = query;
+      return mocks.failureRows ? [{ id: PAYMENT_ID }] : [];
     }
     if (query.includes("UPDATE base_cctp_operations SET status = 'awaiting_attestation'")) {
       mocks.pendingQuery = query;
@@ -373,6 +381,22 @@ describe("Stellar-to-Base CCTP destination reservation", () => {
       rpc: mintRpc(),
     })).rejects.toThrow("changed while destination verification was being recorded");
     expect(mocks.completionQuery).toContain("FROM payment CROSS JOIN (VALUES");
+  });
+
+  it("persists a guarded recipient-verification failure for the exact finalized mint hash", async () => {
+    mocks.paymentStatus = "destination_submitted";
+    mocks.destinationHash = DESTINATION_HASH;
+
+    await expect(reconcileStellarToBaseDestination({
+      paymentId: PAYMENT_ID,
+      destinationTransactionHash: DESTINATION_HASH,
+      rpc: mintRpc(`0x${"c".repeat(40)}`),
+    })).rejects.toThrow("expected recipient");
+
+    expect(mocks.failureQuery).toContain("route_id = 'stellar_to_base'");
+    expect(mocks.failureQuery).toContain("destination_transaction_hash =");
+    expect(mocks.failureQuery).toContain("'recipient_verification'");
+    expect(mocks.failureQuery).toContain("FROM payment p JOIN operation o ON o.payment_id = p.id");
   });
 
   it.each([
