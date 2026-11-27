@@ -28,6 +28,66 @@ Payment creation requires an existing user message ID from the owned conversatio
 
 The created payment stays in `awaiting_confirmation`. No confirmation handler is exposed until a real wallet authorization proof is verified. The later execution integration must recheck current balance, fee quote, wallet state, and idempotency before submission. Chain execution and finality verification are outside this handler and must use the existing payment completion invariant.
 
+Authenticated Base execution routes are exposed under `/api/payments/base`:
+
+- `POST /direct?id=<paymentId>` records a Base -> Base wallet transaction only
+  after Base Sepolia finality and a single exact USDC `Transfer` log prove the
+  source wallet, recipient, and expected amount.
+- `POST /cctp/authorize?id=<paymentId>` reserves the gross burn and Circle
+  maximum fee from the confirmed payment and its server-quoted USDC provider
+  fee. It accepts no user-supplied amount.
+- `POST /cctp/source?id=<paymentId>` reconciles a Base -> Stellar burn and
+  Circle attestation, or reconciles a Stellar -> Base burn plus Circle's
+  Forwarding Service transaction. The latter remains pending until the forwarded
+  Base mint and exact recipient/amount are finalized and verified.
+- `POST /cctp/destination?id=<paymentId>` remains an idempotent reconciliation
+  endpoint for the Circle-forwarded Stellar -> Base mint hash; it cannot replace
+  the hash reserved from Circle's response or bypass exact `receiveMessage` and
+  USDC mint verification.
+
+Each handler checks that the authenticated Privy user owns the payment. Base
+signing uses the connected EIP-1193 wallet; no Base private key is stored by
+Telya. Set `BASE_SEPOLIA_RPC_URL` to a credential-free HTTPS Base Sepolia
+JSON-RPC endpoint on the server and apply migrations `0006`, `0007`, and `0008`
+in order. Circle status and attestation are retrieved from Circle's Testnet
+Iris API and persisted with hashes for reconciliation. Repeated requests use
+unique payment events, operation hashes, and a 60-second destination lease.
+Source confirmation and Circle attestation remain intermediate states.
+
+For Stellar→Base, `POST /api/payments/stellar/cctp/authorize` re-derives the
+gross burn and maximum fee from the owned persisted review, reserves those
+values, and issues the same path-scoped one-use HttpOnly relayer handoff used by
+direct Stellar. Before sponsorship, deterministic server code requires the
+owner-signed burn to match that payment's verified Stellar wallet, Base
+recipient, gross amount, maximum fee and reserved forwarding operation. A
+general CCTP relayer request cannot attach itself to a Payment after the fact.
+
+## Stellar / Circle CCTP integration seam
+
+Issue #12 exposes the Stellar half used by Issue #16's Base/Circle coordinator:
+
+- `submitStellarCctpBurn` creates the owner-authorized Stellar
+  `deposit_for_burn_with_hook` call for Base domain `6` with Standard finality
+  `2000` and Circle's exact Forwarding Service hook. The relayer allowlists the
+  exact token messenger, Stellar USDC contract, recipient, amount, fee, and hook.
+  Circle submits the Base mint and deducts its live quoted USDC forwarding fee;
+  destination finality and exact recipient/amount verification still gate completion.
+- `reconcileStellarCctpSource` verifies the finalized transaction envelope and
+  persists only `source_confirmed`. It never completes the payment.
+- Issue #16 obtains the Circle message/attestation from that source transaction
+  and passes attested bytes to `settleBaseToStellarCctp` for the reverse route.
+- `settleBaseToStellarCctp` reserves the Circle message idempotently, prepares
+  and durably stores the signed `mint_and_forward` envelope and hash before
+  broadcast, verifies Stellar finality plus the exact USDC transfer event, and
+  only then writes `destination_confirmed`, `recipient_verified`, and
+  `completed` PaymentEvents.
+
+`stellar_cctp_operations` is the durable reconciliation record. Reusing a
+payment with different source/message/attestation evidence fails closed, and a
+second worker does not create a different destination operation. A stale worker
+lease can replay only the exact persisted transaction hash; a legacy hashless
+reservation is failed for manual reconciliation instead of being resubmitted.
+
 ## Example request
 
 ```http

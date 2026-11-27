@@ -42,6 +42,35 @@ function getPrivyClient(): PrivyClient {
   return privyClient;
 }
 
+export function verifiedPrivyEthereumWallets(value: unknown): readonly string[] {
+  if (!value || typeof value !== "object") return [];
+  const accounts = (value as { readonly linked_accounts?: unknown }).linked_accounts;
+  if (!Array.isArray(accounts)) return [];
+  const addresses = new Set<string>();
+  for (const account of accounts) {
+    if (!account || typeof account !== "object") continue;
+    const linked = account as Record<string, unknown>;
+    if (linked.type !== "wallet" || linked.chain_type !== "ethereum" ||
+        typeof linked.address !== "string" ||
+        typeof linked.verified_at !== "number" || !Number.isSafeInteger(linked.verified_at) || linked.verified_at <= 0 ||
+        !/^0x[0-9a-fA-F]{40}$/.test(linked.address)) continue;
+    addresses.add(linked.address.toLowerCase());
+  }
+  return [...addresses];
+}
+
+/** Re-read linked wallets from Privy; a browser-supplied address is never trusted. */
+export async function getVerifiedPrivyEthereumWallets(privyUserId: string): Promise<readonly string[]> {
+  try {
+    const privyUser = await getPrivyClient().users()._get(privyUserId);
+    if (privyUser.id !== privyUserId) throw new AuthenticationUnavailableError();
+    return verifiedPrivyEthereumWallets(privyUser);
+  } catch (error) {
+    if (error instanceof AuthenticationUnavailableError) throw error;
+    throw new AuthenticationUnavailableError();
+  }
+}
+
 function isVerifiedClaims(value: VerifyAccessTokenResponse): boolean {
   return Boolean(
     value.user_id &&

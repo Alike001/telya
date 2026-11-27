@@ -1,3 +1,7 @@
+import { Networks, StrKey } from "@stellar/stellar-sdk";
+
+import type { StellarCctpConfig } from "../../stellar/cctp";
+
 export type VerifiedBalance = {
   readonly walletId: string;
   readonly network: "stellar" | "base";
@@ -69,7 +73,7 @@ function decimal(value: unknown): value is string {
 }
 
 function transactionHash(value: unknown): value is string {
-  return typeof value === "string" && /^[0-9a-f]{64}$/i.test(value);
+  return typeof value === "string" && /^(?:0x)?[0-9a-f]{64}$/i.test(value);
 }
 
 function equalDecimal(left: string, right: string): boolean {
@@ -174,6 +178,51 @@ export function parseAuthorizationReady(value: unknown): {
   return { relayerUrl: payload.relayerUrl, expiresAt: payload.expiresAt };
 }
 
+export function parseCctpAuthorizationReady(value: unknown): {
+  readonly relayerUrl: "/api/stellar/relayer/payment";
+  readonly expiresAt: string;
+  readonly burnAmount: string;
+  readonly maxFee: string;
+} | null {
+  const payload = record(value);
+  const burn = record(payload?.burn);
+  const base = parseAuthorizationReady(value);
+  if (!base || !burn || !decimal(burn.burnAmount) || !decimal(burn.maxFee)) {
+    return null;
+  }
+  return { ...base, burnAmount: burn.burnAmount, maxFee: burn.maxFee };
+}
+
+export function parseStellarCctpConfig(value: unknown): StellarCctpConfig | null {
+  const payload = record(value);
+  const config = record(payload?.config);
+  if (!config ||
+      typeof config.rpcUrl !== "string" ||
+      config.networkPassphrase !== Networks.TESTNET ||
+      typeof config.usdcContract !== "string" || !StrKey.isValidContract(config.usdcContract) ||
+      typeof config.tokenMessenger !== "string" || !StrKey.isValidContract(config.tokenMessenger) ||
+      typeof config.messageTransmitter !== "string" || !StrKey.isValidContract(config.messageTransmitter) ||
+      typeof config.forwarder !== "string" || !StrKey.isValidContract(config.forwarder) ||
+      config.baseDomain !== 6 || config.stellarDomain !== 27) return null;
+  let rpcUrl: URL;
+  try {
+    rpcUrl = new URL(config.rpcUrl);
+  } catch {
+    return null;
+  }
+  if (rpcUrl.protocol !== "https:" || rpcUrl.username || rpcUrl.password) return null;
+  return {
+    rpcUrl: rpcUrl.toString(),
+    networkPassphrase: Networks.TESTNET,
+    usdcContract: config.usdcContract,
+    tokenMessenger: config.tokenMessenger,
+    messageTransmitter: config.messageTransmitter,
+    forwarder: config.forwarder,
+    baseDomain: 6,
+    stellarDomain: 27,
+  };
+}
+
 export function parseReconciliation(value: unknown):
   | { readonly status: "pending" | "completed"; readonly transactionHash: string }
   | { readonly status: "failed"; readonly transactionHash: string; readonly reason: string }
@@ -185,6 +234,29 @@ export function parseReconciliation(value: unknown):
   }
   if (payload.status === "failed" && typeof payload.reason === "string") {
     return { status: "failed", transactionHash: payload.transactionHash, reason: payload.reason };
+  }
+  return null;
+}
+
+export function parseCctpReconciliation(value: unknown):
+  | { readonly status: "pending" | "in_progress"; readonly sourceTransactionHash: string }
+  | { readonly status: "completed"; readonly destinationTransactionHash: string }
+  | null {
+  const payload = record(value);
+  if ((payload?.status === "pending" || payload?.status === "in_progress") &&
+      transactionHash(payload.sourceTransactionHash)) {
+    return {
+      status: payload.status,
+      sourceTransactionHash: payload.sourceTransactionHash.replace(/^0x/i, "").toLowerCase(),
+    };
+  }
+  if (payload?.status === "completed" &&
+      typeof payload.destinationTransactionHash === "string" &&
+      /^0x[0-9a-f]{64}$/i.test(payload.destinationTransactionHash)) {
+    return {
+      status: "completed",
+      destinationTransactionHash: payload.destinationTransactionHash.toLowerCase(),
+    };
   }
   return null;
 }
@@ -207,8 +279,13 @@ export function parseCompletedPaymentReceipt(
     !payment ||
     payment.id !== review.id ||
     payment.status !== "completed" ||
-    payment.recipientAddress !== review.recipientAddress ||
-    payment.verifiedRecipientAddress !== review.recipientAddress ||
+    typeof payment.recipientAddress !== "string" ||
+    typeof payment.verifiedRecipientAddress !== "string" ||
+    (review.destinationNetwork === "base"
+      ? payment.recipientAddress.toLowerCase() !== review.recipientAddress.toLowerCase() ||
+        payment.verifiedRecipientAddress.toLowerCase() !== review.recipientAddress.toLowerCase()
+      : payment.recipientAddress !== review.recipientAddress ||
+        payment.verifiedRecipientAddress !== review.recipientAddress) ||
     !decimal(payment.expectedRecipientAmount) ||
     !decimal(payment.verifiedRecipientAmount) ||
     !equalDecimal(payment.expectedRecipientAmount, review.expectedRecipientAmount) ||

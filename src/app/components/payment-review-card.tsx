@@ -35,7 +35,12 @@ export function PaymentReviewCard({
   const actionGuard = useRef<Promise<PaymentExecutionResult> | null>(null);
   const routeLabel = review.routeId === "stellar_to_stellar"
     ? "Stellar Direct USDC"
+    : review.routeId === "stellar_to_base"
+      ? "Circle CCTP Standard · Stellar to Base"
     : review.routeId.replaceAll("_", " ");
+  const completedExplorer = review.destinationNetwork === "base"
+    ? `https://sepolia.basescan.org/tx/${execution?.transactionHash ?? ""}`
+    : `https://stellar.expert/explorer/testnet/tx/${execution?.transactionHash ?? ""}`;
 
   async function confirm() {
     setPhase("authorizing");
@@ -141,9 +146,9 @@ export function PaymentReviewCard({
           <CheckCircle2 className="success-icon" />
           <div>
             <strong>Payment completed and recipient verified</strong>
-            <p>{execution.verifiedAmount} USDC reached the exact saved Stellar recipient.</p>
+            <p>{execution.verifiedAmount} USDC reached the exact saved {review.destinationNetwork === "base" ? "Base" : "Stellar"} recipient.</p>
             <a
-              href={`https://stellar.expert/explorer/testnet/tx/${execution.transactionHash}`}
+              href={completedExplorer}
               target="_blank"
               rel="noreferrer"
               className="tx-hash-link"
