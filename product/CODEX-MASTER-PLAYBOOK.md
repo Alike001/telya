@@ -119,7 +119,7 @@ Codex is allowed and expected to fix work on existing teammate PRs, not create d
 ### PR stacking and merge order
 
 - PR #48 is stacked on PR #44. Do not merge #48 into main while its base PR is not integrated. Complete and merge the stack in a safe order only after each acceptance gate is passed.
-- PR #49 includes onboarding changes from PR #46. Fix and merge #46 first; then rebase/reconcile #49 against the updated main so it does not duplicate or preserve obsolete onboarding code.
+- PR #49 already contains the current PR #46 onboarding history without duplicate implementations. Preserve that integrated history; after PR #46 becomes merge-ready, reconcile PR #49 against the resulting main without reintroducing older onboarding code.
 - Do not merge a draft or changes-requested PR.
 - Codex may mark a PR ready and merge it when all code review, security, CI, database, Testnet and acceptance requirements in this playbook are genuinely met. Never merge just to clear a backlog.
 - Do not commit directly to main. Use the existing PR or a focused feature branch.
@@ -135,50 +135,44 @@ Always refresh these from GitHub before acting. The snapshot below is a continua
 
 ### PR #48 — Base payments and Circle CCTP, Issue #16
 
-- Existing head: Webghost01-NG/telya, branch feat/base-circle-cctp-16.
-- Latest reported fix commit: 481cbba0f8dbda55fe06a05fe43ca0edf9c2c9a6, already pushed to the existing PR.
-- It handles the four Circle/Iris attestation-time fields at absolute byte offsets: nonce 12/32 bytes, finalityThresholdExecuted 144/4, feeExecuted 312/32, expirationBlock 344/32.
-- The source placeholders must be zero; all immutable bytes are compared exactly; the attested nonce must be nonzero; Standard finality is enforced; feeExecuted must not exceed maxFee; burnAmount - feeExecuted must equal the expected recipient amount.
-- Codex reported: 104 tests passed, 1 PostgreSQL-backed test skipped without DATABASE_URL; typecheck, build, server TypeScript and diff check passed; GitGuardian passed.
-- Still outstanding: apply/verify migrations 0007 and 0008 in Neon (0006 is recorded as applied); execute the DB-backed recipient-casing constraint test; prove both Base Sepolia ↔ Stellar Testnet directions with source and destination hashes, exact recipient/amount, Standard finality and retry/restart idempotency. Vercel is authorization-required, not a failed app build.
-- Keep draft until all live evidence is attached. Re-read the latest source/tests after 481cbba before trusting the report.
+- Current head: `05531f5` on Webghost01-NG/telya:feat/base-circle-cctp-16. Draft.
+- Implements guarded Base/Stellar state, exact Circle attestation/mint evidence, canonical Stellar hashes, authenticated owner-scoped Base balances and strict Circle Testnet Standard quotes for domains 6 ↔ 27.
+- PR #53 mounts its existing quote/execution primitives in both CCTP payment reviews; do not create a duplicate coordinator.
+- Neon migrations `0006`–`0008` and their PostgreSQL regressions are verified. Configured suite: 150 tests; plain: 145 with five DB skips; both TypeScript checks, build, diff check and GitGuardian passed.
+- Still outstanding: authenticated Base balance/browser proof; real Base Sepolia ↔ Stellar Testnet source/destination hashes; exact recipient/amount/finality; retry/restart/stale-reservation evidence. Vercel requires fork authorization and did not run a build.
+- Keep draft until all live evidence is attached. Re-read the exact current source/tests before relying on this snapshot.
 
 ### PR #44 — Stellar CCTP, Issue #12
 
-- Head branch feat/st-12-stellar-cctp; PR #48 is stacked on it.
-- Contains Stellar-side burn/mint-forward, destination verification, durable operations, idempotency and recovery.
-- Keep draft until fully integrated with #48 and both cross-chain directions pass the evidence gates.
+- Current head: `af68df4` on feat/st-12-stellar-cctp; PR #48 is stacked on it. Draft.
+- Contains Stellar-side burn/mint-forward, exact destination verification, guarded Payment/operation transitions, idempotency, crash recovery and failure protection. Configured PostgreSQL regressions passed; GitGuardian and Vercel passed.
+- Keep draft until fully integrated with #48 and both cross-chain directions pass the live evidence gates.
 
 ### PR #46 — Onboarding/auth/username, Issue #5
 
-- Current observed head at last refresh: Prudentdev-xyz/telya branch feat/FE-02-onboarding, commit c04347cf6497eb1a1be593967454e831eb3c555c. Draft.
-- Reported improvements: shared production username validator; mock availability fallback removed; missing/failed DB returns 503; POST username claim and GET username lookup endpoints added; fake Base connection toggle removed. Prudent reported 58 tests plus typecheck/build passing; GitGuardian was reported green.
-- **Critical remaining blocker found by code audit:** claim route trusts a request-body smartAccountAddress, manufactures a did:privy:stellar:<address> value, and marks the supplied wallet verified without proving caller identity or passkey/account ownership. This is not an authenticated claim. Database docs require a verified auth/session identity, and the server-side Privy helper on the Base/Circle branch verifies real bearer-token claims and session state. Do not fabricate a Privy DID from an address. Use a genuine verified session/auth design or a documented cryptographic proof-of-control design approved for Telya.
-- Make user + wallet ownership + username claim atomic. Reject an address already bound to another user. Do not mark any wallet verified just because the browser supplied it.
-- Add tests for missing/invalid/expired auth, ownership mismatch, DB failure, race, case-insensitive uniqueness and reconnect. Mocked SQL calls alone are not database proof.
-- Vercel currently requires team authorization. This is not a code build result.
-- A blocking review comment has been posted on PR #46. Refresh it and resolve every thread before marking ready.
+- Current head: `dd69a3d` on Prudentdev-xyz/telya:feat/FE-02-onboarding. Draft.
+- Stellar claims require a verified Privy session and a fresh passkey assertion against the live Testnet smart account. Base binding re-fetches Privy's exact verified Ethereum wallets server-side. The username boundary calls the atomic claim only through the authenticated user's exact verified Stellar wallet.
+- Neon proves another user cannot claim or reserve a name through the owner's verified smart account while the owner succeeds case-insensitively. Secure suite: 72/72; plain: 69/3 skipped; both TypeScript checks, build, diff check and GitGuardian passed.
+- Still outstanding: real Privy sign-in and Base wallet link/switch, passkey binding, authenticated claim/reconnect and a deployed preview. Vercel requires fork authorization and did not run a build. Keep draft.
 
 ### PR #49 — Conversational home and payment-review UI, Issue #6
 
-- Current observed head at last refresh: Prudentdev-xyz/telya branch feat/FE-03-conversational-home, commit 56553d6312e3185a5c9410353e540e95124ecf7d. Draft.
-- Reported improvements: timer-based fake success removed, txHash required by card, insufficient-funds result added, unregistered handles rejected, voice-unavailable no longer inserts sample payment intent. Prudent reported 70 tests, typecheck/build passing; GitGuardian was reported green.
-- **Critical remaining blockers found by code audit:**
-  1. Stellar and Base balances initialize to 0.00 and are not fetched/updated from any real balance source, while connected users are told their balances are verified.
-  2. handleConfirmPayment posts { func: "payment_transfer", auth: [] } to the existing Stellar relayer. That endpoint expects a base64 Soroban HostFunction XDR plus valid signed authorization XDR entries. The body has no valid XDR, actual recipient, amount, payment ID or passkey authorization. It cannot be treated as a real payment implementation.
-  3. Username availability is checked, but the resolved verified wallet address is not used; the route still receives the @handle string as destination.
-  4. Route fee values, including zero CCTP/provider fees, are hardcoded in the client decision function.
-  5. The relayer may return a transaction hash for reconciliation even when post-submit verification did not finish. A hash alone must not make the card show successful/completed. Fetch the durable receipt and show completion only on verified state.
-- Reuse the existing proven direct-Stellar payment path from merged PR #41 and current relayer/receipt contracts. Do not construct guessed XDR or bypass passkey signing.
-- PR #49 includes onboarding files from #46. Fix/merge #46, then rebase/reconcile #49 so it no longer duplicates outdated onboarding code.
-- A blocking review comment has been posted on PR #49. Refresh it and resolve every thread before marking ready.
-- Vercel currently requires team authorization. This is not a code build result.
+- Current head: `64ab352` on Prudentdev-xyz/telya:feat/FE-03-conversational-home. Draft.
+- Current PR #46 was merged into the branch without duplicate onboarding code. All four routes use protected server-bound authorization/recovery; Base routes require the exact server-authorized Privy wallet/provider; direct Stellar uses the reviewed Payment and passkey path; no hash alone completes a payment.
+- Secure suite: 294/294; plain: 280/14 skipped; both TypeScript checks, build, diff check and GitGuardian passed.
+- Still outstanding: real authenticated browser, passkey/Base wallet ownership, real provider balances/fees and signed Testnet routes. Vercel requires fork authorization and did not run a build. Keep draft.
 
-### PR #50 — Buildathon documentation
+### PR #53, PR #65 and PR #66 — integrated backend and consumer stack
 
-- Our documentation branch docs/buildathon-critical-path.
-- Contains the dated execution plan and refreshed status/README. Vercel previously passed.
-- Continue adding this playbook and tracker on the same PR; keep it documentation-only. Merge after the documents are checked and link targets verified.
+- PR #53 `d20dddd` mounts owner-scoped contacts/conversations, deterministic routing/quotes, all four protected execution/recovery paths and guarded finalized failure persistence. Secure 224/224; its latest Vercel and GitGuardian checks passed.
+- PR #65 `8f64801` adds owner-scoped history/detail, persisted event timelines, refresh reconciliation and exact receipt gating. Secure 310/310; plain 296/14 skipped; GitGuardian passed. Vercel requires fork authorization.
+- PR #66 `65ff241` adds protected deployment, verified contacts, owner-bound Agent Pass administration, current-ledger expiry, exact reviewed Agent Pass payments, secret-safe environment/public-network probes and truthful unavailable UI. Secure 370/370; plain 352/18 skipped; both TypeScript checks, build, frozen install, clean production dependency audit and GitGuardian passed. Vercel requires fork authorization.
+- These branches are integrated code evidence, not authenticated wallet or signed Testnet proof. Keep drafts until the exact live acceptance gates pass.
+
+### Documentation
+
+- PR #50 merged the master playbook, execution tracker, status, README links and execution plan.
+- PR #115 is the current documentation branch. It contains the submission package, evidence manifest, independent tester runbook, Mainnet roadmap and refreshed live readiness records. GitGuardian passes; Vercel is temporarily rate-limited. Keep documentation factual and link every claim to current evidence.
 
 ## 7. Remaining issue backlog and work ownership
 
@@ -267,41 +261,30 @@ This sequence is the default. Update the tracker when actual dependencies change
 - No feature work before the live state is understood.
 
 ### Phase 1 — close CCTP code and database correctness
-- Re-review commit 481cbba and all of PR #48's CCTP verifier tests.
+- Re-review the exact current PR #44/#48 heads and all CCTP verifier, guarded-transition and recovery tests; do not anchor review to an obsolete commit.
 - Run tests and both TypeScript checks from a clean checkout.
-- Apply 0007 and 0008 to the intended Neon Testnet database via the migration runner. Confirm 0006/0007/0008 are recorded with correct checksums.
-- Run the database-backed Base address-casing test; do not count a skipped test as passed.
+- Migrations through `0012` and their PostgreSQL regressions are currently verified. Re-run the migration ledger/checksum and database tests after any schema or persistence change; do not count a skipped test as passed.
 - Execute both directions on Testnet with controlled small amounts, capture all source/destination hashes, expected/actual addresses, expected/actual amounts, finality, CCTP message/attestation and retry/restart idempotency.
 - Verify PR #44 and #48 together. Source burn must remain nonterminal.
 - Keep both draft until live evidence is in the PR.
 
 ### Phase 2 — secure identity and onboarding (PR #46)
-- Inspect DB migrations, current server auth and the Smart Account Kit passkey lifecycle.
-- Resolve the identity model without fabricating a Privy DID. If Privy auth is used, verify a real access token server-side and derive the app user from verified claims. If passkey proof-of-control is used, implement a nonce/challenge and cryptographically verify the account signature using the approved SDK/contract verification. Document the decision.
-- Bind each Stellar smart account to one authenticated user and reject cross-user address collisions.
-- Make claim transaction-safe and database authoritative.
-- Implement case-insensitive resolution and permanent retirement rules from the database design.
-- Prove new account, reconnect, case collision, unauthorized claim, wallet mismatch, DB outage and concurrent claim behavior.
+- Preserve the implemented server-verified Privy identity, fresh passkey proof and exact verified-wallet binding; never replace them with a fabricated DID or browser-trusted wallet claim.
+- Preserve the transaction-safe, database-authoritative, case-insensitive username rules and cross-user wallet/address rejection already covered by Neon regressions.
+- Prove the remaining live browser paths: Privy sign-in and Base wallet link/switch, passkey binding, authenticated username claim/reconnect, DB outage handling and session recovery.
 - Resolve GitGuardian and CI/preview authorization properly.
 
 ### Phase 3 — real backend payment journey (Issue #15)
-- Inspect and reuse existing direct Stellar service, relayer, receipt API, DB models and CCTP seam.
-- Add/use server-owned API contracts for current wallet balances, recipient resolution, route/fee quote, payment creation, confirmation and payment status.
-- Use decimals safely and deterministic routing.
-- Bind every API call to authenticated user and payment idempotency key.
-- Ensure the API returns a structured quote and payment ID; client never constructs chain execution XDR or claims it is authorized.
-- Add unit, route and database tests for both normal and failure behavior.
+- Preserve PR #53's mounted direct-Stellar, Base-direct and both CCTP route contracts, owner-scoped contacts/conversations, deterministic quote creation, persisted confirmation handoffs, recovery and guarded finality.
+- Re-run unit, route and PostgreSQL regressions after changes, including owner isolation, decimal conversion, fee ceilings, idempotency conflicts, finalized mismatch and restart recovery.
+- Prove those contracts with real authenticated wallets, provider balances/quotes and signed Testnet execution; automated/database evidence alone is not live route acceptance.
 
 ### Phase 4 — connect conversational frontend (PR #49)
-- Fix the existing PR branch directly after confirming write permission.
-- Load actual Stellar balance for the authenticated Smart Account Kit C-address and actual Base balance only when a genuine Base wallet is connected. If Base wallet is not implemented/connected, say unavailable; do not show a fake Base account.
-- Resolve usernames to verified addresses and destination network before route preview.
-- Use server quote values and real fee sponsorship status. Never use client hardcoded fee tables as final financial quotes.
-- Reuse the production direct Stellar wallet authorization flow. The existing relayer requires a correctly encoded HostFunction XDR and passkey authorization entries, not a placeholder string or empty authorization.
-- The confirm action must create/reuse one durable payment ID and be idempotent.
-- If a relayer returns only a transaction hash after a verification error, show submitted/verification-pending and fetch the durable receipt. Show completed only if the server receipt reports final verification.
-- Keep voice optional. Voice failure must not inject a sample request or prevent text entry.
-- Reconcile the PR branch after PR #46 is merged; do not retain stale duplicate onboarding code.
+- Preserve the current protected four-route flow: server-resolved recipients/quotes, durable payment IDs, exact wallet/passkey authorization, single-flight confirmation and non-signing recovery from persisted state.
+- Prove real Stellar and Base balances only for authenticated verified wallets, real server fees/sponsorship state and signed Testnet route execution. Keep absent providers explicitly unavailable.
+- Verify that hash-only or interrupted responses remain submitted/unknown until the durable receipt proves exact final recipient, amount and destination evidence.
+- Keep voice optional and non-financial on failure; input changes must invalidate an old review.
+- Reconcile the integrated PR #46/#53 history after dependencies merge without retaining stale duplicates.
 
 ### Phase 5 — payment history and progress (Issue #7)
 - Build timeline/receipts from Payment + PaymentEvent API responses.

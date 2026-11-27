@@ -105,6 +105,8 @@ Issue #19's README now gives strangers a no-wallet health/explorer/evidence path
 
 [JUDGING-AND-GRANT-READINESS.md](JUDGING-AND-GRANT-READINESS.md) now reflects merged main `2531820` and integrated PR #66 `65ff241` instead of the obsolete November 25 implementation snapshot. It records PR #48/#53 orchestration, migrations through `0012`, current automated/database/public-network evidence and the remaining authenticated/live-provider gates without claiming Base or CCTP completion.
 
+[CODEX-MASTER-PLAYBOOK.md](CODEX-MASTER-PLAYBOOK.md) now uses the current PR #44/#46/#48/#49/#53/#65/#66 heads and verified migration state. Its phase instructions no longer direct operators to repeat migrations `0007`/`0008` or rebuild already-integrated identity, orchestration and conversational primitives; live authenticated wallet, signed Testnet and destination-finality evidence remains the next acceptance gate.
+
 ## November 26 backend progress
 
 Draft [PR #53](https://github.com/Alike001/telya/pull/53) stacks PR #48 without duplication and is at `d20dddd`. All four routes have fail-closed reviews and persisted authorization/first-hash recovery. Definitive finalized Base direct, source-burn and destination-mint mismatches now atomically fail only the exact saved operation/Payment/hash and record the true verification stage; Neon parsed all three guarded transitions. Exact finality, recipient and amount still gate completion. No live browser wallet walkthrough or transaction was performed.
