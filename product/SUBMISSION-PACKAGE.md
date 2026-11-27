@@ -61,7 +61,7 @@ pnpm dev
 
 Open `http://localhost:3000`. Do not paste credentials into an issue, PR, recording or browser-visible `NEXT_PUBLIC_*` variable unless `.env.example` explicitly marks the value public.
 
-The local secure environment now passes Privy and localhost WebAuthn configuration checks, but the sponsor remains a placeholder and no real login or wallet/passkey acceptance has been recorded. Use the public evidence register rather than claiming the draft conversational journey works end to end.
+The local secure environment passes Privy and localhost WebAuthn configuration checks, and Vercel lists Privy/sponsor key presence without exposing values. The local sponsor remains a placeholder; secret validity and real login/wallet/passkey acceptance have not been recorded. Use the public evidence register rather than claiming the draft conversational journey works end to end.
 
 ## Testnet funding
 
@@ -153,7 +153,7 @@ Do not record this as a working journey until the integrated browser acceptance 
 ## Known limitations and blockers
 
 - The current public `main` deployment does not contain the unmerged integrated frontend stack.
-- Local Privy configuration passes preflight, but production parity and a real browser wallet/passkey acceptance session are still required for onboarding, contacts, conversational payment, timeline and current Agent Pass UI proof; the sponsor remains a placeholder.
+- Local Privy configuration passes preflight and Vercel key presence is confirmed, but secret validity, fork-preview deployment and a real browser wallet/passkey acceptance session are still required for onboarding, contacts, conversational payment, timeline and current Agent Pass UI proof; the local sponsor remains a placeholder.
 - Base direct and both CCTP directions have extensive automated/database safeguards but no accepted signed end-to-end Testnet settlement evidence. They must not appear as completed in the demo.
 - The public Base/Stellar endpoints and configured CCTP contracts pass the draft read-only probe, but this does not establish a funded or authenticated wallet, source burn, attestation, destination mint or finality.
 - MoneyGram is unavailable pending partner sandbox access and written Smart Account Kit contract-wallet compatibility confirmation.
