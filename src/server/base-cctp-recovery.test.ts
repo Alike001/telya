@@ -86,7 +86,7 @@ describe("Base-to-Stellar destination recovery", () => {
     const result = await reconcileBaseToStellarCctp({
       paymentId, sourceTransactionHash: sourceHash, rpc: { request: vi.fn() },
     });
-    expect(result).toEqual({ status: "in_progress" });
+    expect(result).toEqual({ status: "in_progress", sourceTransactionHash: sourceHash });
     expect(mocks.queries.some((query) => query.includes("UPDATE base_cctp_operations SET status = 'completed'"))).toBe(false);
   });
 });
