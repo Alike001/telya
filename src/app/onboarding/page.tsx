@@ -33,6 +33,11 @@ import {
 import { validateUsername } from "../../domain/username";
 import { authenticatedFetch } from "../authenticated-fetch";
 import { reconcileBaseWalletSession } from "../onboarding-base-wallet";
+import {
+  captureSessionAccessToken,
+  createSessionRequestGuard,
+  type SessionRequestGuard,
+} from "../session-request-guard";
 import { authorizeStellarDeployment } from "../stellar-deployment-authorization";
 
 type OnboardingStep = "welcome" | "username" | "creating" | "ready" | "returning";
@@ -84,6 +89,7 @@ function OnboardingFlow() {
   const kitRef = useRef<SmartAccountKit | null>(null);
   const configRef = useRef<SmartAccountPublicConfig | null>(null);
   const creationRef = useRef(false);
+  const sessionGuardRef = useRef<SessionRequestGuard | null>(null);
 
   useEffect(() => {
     const reconciled = reconcileBaseWalletSession({
@@ -110,9 +116,17 @@ function OnboardingFlow() {
     }
     setBaseWalletBusy(true);
     setBaseWalletError(null);
+    const guard = sessionGuardRef.current;
+    if (!guard?.isActive()) {
+      setBaseWalletBusy(false);
+      return;
+    }
     try {
+      const tokenProvider = await captureSessionAccessToken(getAccessToken, guard);
       await wallet.loginOrLink();
+      if (!guard.isActive()) return;
       await wallet.switchChain(84_532);
+      if (!guard.isActive()) return;
       const provider = await wallet.getEthereumProvider();
       const accounts = await provider.request({ method: "eth_accounts" });
       if (!Array.isArray(accounts) || !accounts.some((address) =>
@@ -123,8 +137,9 @@ function OnboardingFlow() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ address: wallet.address }),
-      }, getAccessToken);
+      }, tokenProvider);
       const payload = await response.json() as { verified?: unknown; address?: unknown; error?: unknown };
+      if (!guard.isActive()) return;
       if (!response.ok || payload.verified !== true || typeof payload.address !== "string" ||
           payload.address.toLowerCase() !== wallet.address.toLowerCase()) {
         throw new Error(typeof payload.error === "string"
@@ -133,13 +148,19 @@ function OnboardingFlow() {
       }
       setVerifiedBaseWallet(payload.address.toLowerCase());
     } catch (error) {
+      if (!guard.isActive()) return;
       setVerifiedBaseWallet(null);
       setBaseWalletError(error instanceof Error ? error.message : "Base wallet verification was not completed.");
     } finally {
-      setBaseWalletBusy(false);
+      if (guard.isActive()) setBaseWalletBusy(false);
     }
   }
-  async function bindWalletToIdentity(connected: ConnectedSmartAccount): Promise<void> {
+  async function bindWalletToIdentity(
+    connected: ConnectedSmartAccount,
+    tokenProvider: () => Promise<string>,
+    guard: SessionRequestGuard,
+  ): Promise<void> {
+    if (!guard.isActive()) throw new Error("Authenticated session changed.");
     const challengeResponse = await authenticatedFetch(
       "/api/wallets/stellar/challenge",
       {
@@ -147,8 +168,9 @@ function OnboardingFlow() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ contractId: connected.contractId, credentialId: connected.credentialId }),
       },
-      getAccessToken,
+      tokenProvider,
     );
+    if (!guard.isActive()) throw new Error("Authenticated session changed.");
     if (!challengeResponse.ok) throw new Error("Wallet verification is unavailable. Your account was not linked to your sign-in.");
     const challenge = await challengeResponse.json() as {
       challenge: string; proofToken: string; rpId: string;
@@ -162,6 +184,7 @@ function OnboardingFlow() {
         timeout: 120_000,
       },
     });
+    if (!guard.isActive()) throw new Error("Authenticated session changed.");
     if (!(credential instanceof PublicKeyCredential) ||
         !(credential.response instanceof AuthenticatorAssertionResponse)) {
       throw new Error("Passkey verification was not completed.");
@@ -181,47 +204,68 @@ function OnboardingFlow() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ proofToken: challenge.proofToken, assertion }),
       },
-      getAccessToken,
+      tokenProvider,
     );
+    if (!guard.isActive()) throw new Error("Authenticated session changed.");
     if (!bindResponse.ok) throw new Error("Passkey ownership could not be verified for this sign-in.");
   }
 
   useEffect(() => {
-    if (authReady && !authenticated) {
-      setAccount(null);
-      setClaimedUsername("");
-      setBaseWalletError(null);
-      kitRef.current = null;
-      configRef.current = null;
-      setStep("welcome");
-    }
+    sessionGuardRef.current?.cancel();
+    sessionGuardRef.current = null;
+    creationRef.current = false;
+    setAccount(null);
+    setClaimedUsername("");
+    setUsernameInput("");
+    setDebouncedUsername("");
+    setUsernameStatus("idle");
+    setUsernameFeedback("");
+    setSelectedBaseWallet("");
+    setVerifiedBaseWallet(null);
+    setBaseWalletBusy(false);
+    setBaseWalletError(null);
+    setErrorMessage(null);
+    kitRef.current = null;
+    configRef.current = null;
+    setStep("welcome");
+    if (!authReady || !authenticated) return;
+    const guard = createSessionRequestGuard();
+    sessionGuardRef.current = guard;
+    return () => {
+      guard.cancel();
+      if (sessionGuardRef.current === guard) sessionGuardRef.current = null;
+    };
   }, [authReady, authenticated]);
 
   // Initialize SmartAccountKit
   useEffect(() => {
     if (!authReady || !authenticated) return;
-    let active = true;
+    const currentGuard = sessionGuardRef.current;
+    if (!currentGuard?.isActive()) return;
+    const guard = currentGuard;
 
     async function init() {
       try {
+        const tokenProvider = await captureSessionAccessToken(getAccessToken, guard);
         const response = await fetch("/api/stellar/config", { cache: "no-store" });
         if (!response.ok) return;
         const config = (await response.json()) as SmartAccountPublicConfig;
+        if (!guard.isActive()) return;
         configRef.current = config;
         const kit = createBrowserSmartAccountKit(config);
         kitRef.current = kit;
 
         // Check if there is an existing restored account with a durable claim on server
         const restored = await restoreSmartAccount(kit);
-        if (active && restored) {
+        if (guard.isActive() && restored) {
           try {
             const lookupRes = await authenticatedFetch(
               `/api/usernames/lookup?account=${encodeURIComponent(restored.contractId)}`,
               { cache: "no-store" },
-              getAccessToken,
+              tokenProvider,
             );
             const lookupData = await lookupRes.json();
-            if (active && lookupRes.ok && lookupData.found && lookupData.username) {
+            if (guard.isActive() && lookupRes.ok && lookupData.found && lookupData.username) {
               setAccount(restored);
               setClaimedUsername(lookupData.username);
               setStep("ready");
@@ -236,9 +280,6 @@ function OnboardingFlow() {
     }
 
     void init();
-    return () => {
-      active = false;
-    };
   }, [authReady, authenticated, getAccessToken]);
 
   // Debounce username input
@@ -324,6 +365,8 @@ function OnboardingFlow() {
       login();
       return;
     }
+    const guard = sessionGuardRef.current;
+    if (!guard?.isActive()) return;
     setStep("creating");
     setErrorMessage(null);
 
@@ -358,6 +401,7 @@ function OnboardingFlow() {
     if (creationRef.current) return;
     creationRef.current = true;
     try {
+      const tokenProvider = await captureSessionAccessToken(getAccessToken, guard);
       const normalized = validation.normalized;
       // Reuse a deployed account after a claim/network failure; never deploy a
       // second account just because the user retries the same onboarding flow.
@@ -365,7 +409,8 @@ function OnboardingFlow() {
       if (!created) {
         const config = configRef.current;
         if (!config) throw new Error("Stellar account configuration is unavailable.");
-        const authorization = await authorizeStellarDeployment(getAccessToken);
+        const authorization = await authorizeStellarDeployment(tokenProvider);
+        if (!guard.isActive()) return;
         const deploymentKit = createBrowserSmartAccountKit({
           ...config,
           relayerUrl: authorization.relayerUrl,
@@ -374,10 +419,12 @@ function OnboardingFlow() {
         kit = deploymentKit;
         created = await createSmartAccount(deploymentKit, normalized);
       }
+      if (!guard.isActive()) return;
       setAccount(created);
 
       // 2. Bind the authenticated Privy user to the live on-chain passkey signer.
-      await bindWalletToIdentity(created);
+      await bindWalletToIdentity(created, tokenProvider, guard);
+      if (!guard.isActive()) return;
 
       // 3. Persist the atomic username claim only after wallet proof succeeds.
       const claimRes = await authenticatedFetch("/api/usernames/claim", {
@@ -387,9 +434,10 @@ function OnboardingFlow() {
           username: normalized,
           smartAccountAddress: created.contractId,
         }),
-      }, getAccessToken);
+      }, tokenProvider);
 
       const claimData = await claimRes.json();
+      if (!guard.isActive()) return;
       if (!claimRes.ok || !claimData.success) {
         throw new Error(claimData.error || "Failed to persist username claim to registry.");
       }
@@ -398,6 +446,7 @@ function OnboardingFlow() {
       setClaimedUsername(claimData.username || normalized);
       setStep("ready");
     } catch (err) {
+      if (!guard.isActive()) return;
       const msg = err instanceof Error ? err.message : "Passkey authorization or username claim failed.";
       setErrorMessage(msg);
       setStep("username");
@@ -414,6 +463,8 @@ function OnboardingFlow() {
       login();
       return;
     }
+    const guard = sessionGuardRef.current;
+    if (!guard?.isActive()) return;
     let kit = kitRef.current;
     if (!kit) {
       try {
@@ -435,16 +486,19 @@ function OnboardingFlow() {
     }
 
     try {
+      const tokenProvider = await captureSessionAccessToken(getAccessToken, guard);
       setStep("creating");
       const connected = await connectSmartAccount(kit);
+      if (!guard.isActive()) return;
 
       // Restore durable handle from server
       const lookupRes = await authenticatedFetch(
         `/api/usernames/lookup?account=${encodeURIComponent(connected.contractId)}`,
         { cache: "no-store" },
-        getAccessToken,
+        tokenProvider,
       );
       const lookupData = await lookupRes.json();
+      if (!guard.isActive()) return;
 
       if (!lookupRes.ok) {
         throw new Error("Account identity lookup is temporarily unavailable. Please try again.");
@@ -454,7 +508,8 @@ function OnboardingFlow() {
         setClaimedUsername(lookupData.username);
         setStep("ready");
       } else {
-        await bindWalletToIdentity(connected);
+        await bindWalletToIdentity(connected, tokenProvider, guard);
+        if (!guard.isActive()) return;
         setAccount(connected);
         setClaimedUsername("");
         setErrorMessage(
@@ -463,6 +518,7 @@ function OnboardingFlow() {
         setStep("username");
       }
     } catch (err) {
+      if (!guard.isActive()) return;
       const msg = err instanceof Error ? err.message : "Sign-in passkey authorization was cancelled.";
       setErrorMessage(msg);
       setStep("welcome");
