@@ -17,7 +17,7 @@
 
 The persistent [Codex Master Playbook](CODEX-MASTER-PLAYBOOK.md), [Execution Tracker](EXECUTION-TRACKER.md), agent rules and universal handoff were merged to main in PR #50 (merge commit ab8d4f51ef43754568e10cb99e89a7266fb0d87b). New Codex sessions must read these documents before changing code. The tracker is the live continuation ledger.
 
-PR #67 merged as `d87ae75`, recording the safety corrections on draft PRs #65/#66. PR #48's CCTP migrations `0001`–`0008` and PR #53's Payment-relayer/execution-session migrations `0009`–`0010` are recorded in Neon. Their PostgreSQL regressions passed.
+PR #67 merged as `d87ae75`, recording the safety corrections on draft PRs #65/#66. PR #48's CCTP migrations `0001`–`0008`, PR #53's Payment handoff migrations `0009`–`0010`, and PR #66's Agent Pass/deployment handoffs `0011`–`0012` are recorded in Neon. Their PostgreSQL regressions passed.
 
 ## Readiness verdict
 
@@ -55,7 +55,7 @@ Open draft on Prudentdev-xyz/telya at `64ab352`. All four routes retain protecte
 
 [PR #65](https://github.com/Alike001/telya/pull/65) is now at `8f64801`. Authenticated owner-scoped history, persisted timelines, non-signing refresh, exact receipt gating and current PR #49 are integrated. Secure-env passed 310/310; plain passed 296 with 14 skips; full build gates and GitGuardian passed. [PR evidence](https://github.com/Alike001/telya/pull/65#issuecomment-7208509190). Live failed/completed browser refresh and Testnet receipt remain unverified. Keep draft.
 
-[PR #66](https://github.com/Alike001/telya/pull/66) is now at `f794b6b`. Authenticated ledger-observed Agent Pass status, one-use owner-bound sponsorship, Neon-proven contacts and current PR #65 including wallet-bound username claims are integrated without duplication. A new secret-safe preflight diagnoses environment readiness without printing values. Secure-env passed 346/346; plain passed 330 with 16 skips; both TypeScript checks, build and diff check passed. [PR evidence](https://github.com/Alike001/telya/pull/66#issuecomment-7208734305). The local browser correctly stopped at sign-in unavailable because Privy values are empty and the sponsor remains a placeholder. No live contacts, owner-passkey Agent Pass or Testnet acceptance proof exists. Keep draft and do not close Issue #8.
+[PR #66](https://github.com/Alike001/telya/pull/66) is now at `341d8f0`. A Privy-bound one-use handoff protects Smart Account deployment, while the generic relayer rejects deployment/direct-USDC/CCTP before reservation. The duplicate legacy wallet/payment/agent surface is removed. Migration `0012` is recorded in Neon and its replay/revocation/existing-wallet test passed. Secure-env passed 358/358; plain passed 341 with 17 skips; both TypeScript checks, build and diff check passed. [PR evidence](https://github.com/Alike001/telya/pull/66#issuecomment-7209033226). The unauthenticated 390px browser had no active financial controls/overflow. Privy and sponsor remain unusable locally; no live authenticated action occurred. Agent spending now correctly remains absent until bound to payment orchestration. Keep draft.
 
 ### PR #50 — execution documentation
 Merged as `ab8d4f5`; the playbook, tracker and execution plan are available on main. The latest tracker audit was merged in PR #52.
@@ -83,7 +83,7 @@ MoneyGram's documented non-custodial Stellar widget flow uses a G-address. Telya
 3. Prove PR #49's four payment-bound routes in a real browser: Privy authentication, exact Stellar passkey/Base wallet, direct/Circle submission, persisted source recovery and verified final recipient/amount. The Base-source authorizations are now wired without duplication.
 4. Prove PR #49's protected direct-Stellar confirmation in a real Privy/passkey browser session and signed Testnet payment; it refuses hash-only success and recovers duplicate/interrupted actions without resubmission.
 5. Prove PR #65 authenticated browser pagination/refresh and a real Testnet submitted-to-completed timeline/receipt; its integrated head is `8f64801`.
-6. Replace the empty Privy values and placeholder sponsor through the secure environment, then prove PR #66 authenticated contacts and owner-passkey Agent Pass create/expiry/revoke in a real browser/Testnet session; the integrated stack is at `f794b6b`, while MoneyGram remains externally blocked.
+6. Replace the empty Privy values and placeholder sponsor, then prove PR #66 onboarding, contacts and owner-passkey Agent Pass create/expiry/revoke at `341d8f0`. Implement/prove agent spending only through authenticated payment orchestration; MoneyGram remains externally blocked.
 7. Continue Issue #18 end-to-end route/recovery matrix. Automated AI/manual, voice/text and duplicate/interrupted-response recovery are proven; real browser/provider outage and route evidence remain open.
 8. Complete Issue #19/#22, independent teammate testing, bug fixes, demo and submission.
 
