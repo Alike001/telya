@@ -5,6 +5,7 @@ import { usePrivy, useWallets } from "@privy-io/react-auth";
 import { CheckCircle2 } from "lucide-react";
 
 import { authenticatedFetch } from "../authenticated-fetch";
+import { createSessionRequestGuard, type SessionRequestGuard } from "../session-request-guard";
 import {
   createBrowserSmartAccountKit,
   restoreSmartAccount,
@@ -68,18 +69,22 @@ function AuthenticatedConversation() {
   const { wallets } = useWallets();
   const [smartAccount, setSmartAccount] = useState<ConnectedSmartAccount | null>(null);
   const [balances, setBalances] = useState<readonly VerifiedBalance[]>([]);
-  const initialSession = resetConversationSession();
-  const [messages, setMessages] = useState<readonly ChatMessage[]>(initialSession.messages);
+  const [messages, setMessages] = useState<readonly ChatMessage[]>(
+    () => resetConversationSession().messages,
+  );
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const streamEndRef = useRef<HTMLDivElement>(null);
   const configRef = useRef<SmartAccountPublicConfig | null>(null);
+  const sessionGuardRef = useRef<SessionRequestGuard | null>(null);
 
   useEffect(() => {
     streamEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
   useEffect(() => {
+    sessionGuardRef.current?.cancel();
+    sessionGuardRef.current = null;
     if (!authReady || !authenticated) {
       const reset = resetConversationSession();
       setSmartAccount(null);
@@ -93,12 +98,14 @@ function AuthenticatedConversation() {
     setSmartAccount(null);
     setBalances([]);
     configRef.current = null;
-    let active = true;
+    const guard = createSessionRequestGuard();
+    sessionGuardRef.current = guard;
     async function restore() {
       try {
         const configResponse = await fetch("/api/stellar/config", { cache: "no-store" });
         if (configResponse.ok) {
           const config = await configResponse.json() as SmartAccountPublicConfig;
+          if (!guard.isActive()) return;
           configRef.current = config;
           const account = await restoreSmartAccount(createBrowserSmartAccountKit(config));
           if (account) {
@@ -106,14 +113,15 @@ function AuthenticatedConversation() {
               account,
               (input, init) => authenticatedFetch(input, init, getAccessToken),
             );
-            if (active) setSmartAccount(owned ? account : null);
-          } else if (active) {
+            if (guard.isActive()) setSmartAccount(owned ? account : null);
+          } else if (guard.isActive()) {
             setSmartAccount(null);
           }
         }
       } catch {
-        if (active) setSmartAccount(null);
+        if (guard.isActive()) setSmartAccount(null);
       }
+      if (!guard.isActive()) return;
       let verifiedBalances: readonly VerifiedBalance[] = [];
       try {
         const stellarBalanceResponse = await authenticatedFetch(
@@ -143,13 +151,22 @@ function AuthenticatedConversation() {
         // Keep the independently verified Stellar snapshot and the explicit
         // unavailable Base entries returned by /api/balances.
       }
-      if (active) setBalances(verifiedBalances);
+      if (guard.isActive()) setBalances(verifiedBalances);
     }
     void restore();
-    return () => { active = false; };
+    return () => {
+      guard.cancel();
+      if (sessionGuardRef.current === guard) sessionGuardRef.current = null;
+    };
   }, [authReady, authenticated, getAccessToken]);
 
-  function appendTelya(text: string, review?: PaymentReview, recipientLabel?: string) {
+  function appendTelya(
+    text: string,
+    review?: PaymentReview,
+    recipientLabel?: string,
+    guard?: SessionRequestGuard,
+  ) {
+    if (guard && !guard.isActive()) return;
     setMessages((previous) => [...previous, {
       id: crypto.randomUUID(), sender: "telya", text, timestamp: "Just now",
       ...(review ? { review } : {}),
@@ -157,7 +174,10 @@ function AuthenticatedConversation() {
     }]);
   }
 
-  async function persistUserMessage(text: string): Promise<{ conversationId: string; messageId: string }> {
+  async function persistUserMessage(
+    text: string,
+    guard: SessionRequestGuard,
+  ): Promise<{ conversationId: string; messageId: string } | null> {
     const response = await authenticatedFetch("/api/conversations", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -167,6 +187,7 @@ function AuthenticatedConversation() {
       conversation?: { id?: unknown };
       message?: { id?: unknown };
     };
+    if (!guard.isActive()) return null;
     const nextConversationId = conversationId ?? payload.conversation?.id;
     if (!response.ok || typeof nextConversationId !== "string" || typeof payload.message?.id !== "string") {
       throw new Error("The authenticated conversation could not be saved.");
@@ -270,14 +291,18 @@ function AuthenticatedConversation() {
       if (authReady) login();
       return;
     }
+    const guard = sessionGuardRef.current;
+    if (!guard?.isActive()) return;
     setIsProcessing(true);
     try {
-      const saved = await persistUserMessage(text);
+      const saved = await persistUserMessage(text, guard);
+      if (!saved || !guard.isActive()) return;
       const parsed = await resolveConversationIntent(
         text,
         inputMode,
         (input, init) => authenticatedFetch(input, init, getAccessToken),
       );
+      if (!guard.isActive()) return;
       if (parsed.kind === "balance_check") {
         const stellar = balances.find((balance) => balance.network === "stellar" && balance.status === "verified");
         const base = balances.find((balance) => balance.network === "base" && balance.status === "verified");
@@ -287,35 +312,35 @@ function AuthenticatedConversation() {
         const baseMessage = base?.amount != null
           ? `Your server-verified Base Sepolia balance is ${base.amount} USDC.`
           : "Your Base USDC balance is unavailable; no zero balance is being assumed.";
-        appendTelya(`${stellarMessage} ${baseMessage}`);
+        appendTelya(`${stellarMessage} ${baseMessage}`, undefined, undefined, guard);
         return;
       }
       if (parsed.kind === "activity_check") {
-        appendTelya("Your authenticated payment history and persisted event timelines are available in Activity below. Refresh there to reconcile a submitted Stellar payment without resubmitting it.");
+        appendTelya("Your authenticated payment history and persisted event timelines are available in Activity below. Refresh there to reconcile a submitted Stellar payment without resubmitting it.", undefined, undefined, guard);
         return;
       }
       if (parsed.kind === "contacts_check") {
-        appendTelya("Your authenticated, owner-scoped contacts are available below. Selecting one only prefills a payment request; passkey confirmation is still required.");
+        appendTelya("Your authenticated, owner-scoped contacts are available below. Selecting one only prefills a payment request; passkey confirmation is still required.", undefined, undefined, guard);
         return;
       }
       if (parsed.kind === "ramp_check") {
-        appendTelya("MoneyGram Ramps is unavailable while partner access and Stellar smart-account compatibility remain unconfirmed. No quote, reference or cash transaction has been created.");
+        appendTelya("MoneyGram Ramps is unavailable while partner access and Stellar smart-account compatibility remain unconfirmed. No quote, reference or cash transaction has been created.", undefined, undefined, guard);
         return;
       }
       if (parsed.kind === "judge_check") {
-        appendTelya("Use the Testnet guide below to inspect current evidence and known unavailable routes. It does not mark a provider or payment successful.");
+        appendTelya("Use the Testnet guide below to inspect current evidence and known unavailable routes. It does not mark a provider or payment successful.", undefined, undefined, guard);
         return;
       }
       if (parsed.kind === "agent_pass_check") {
-        appendTelya("Agent Pass management is available below from persisted Stellar Testnet rule evidence. Creating or revoking a rule still requires the owner passkey.");
+        appendTelya("Agent Pass management is available below from persisted Stellar Testnet rule evidence. Creating or revoking a rule still requires the owner passkey.", undefined, undefined, guard);
         return;
       }
       if (parsed.kind === "clarification") {
-        appendTelya(parsed.clarificationQuestion ?? "Please clarify the payment details.");
+        appendTelya(parsed.clarificationQuestion ?? "Please clarify the payment details.", undefined, undefined, guard);
         return;
       }
       if (parsed.kind !== "payment" || !parsed.amount || !parsed.recipientInput) {
-        appendTelya("Enter an amount and recipient, such as ‘Send 5 USDC to @alice’.");
+        appendTelya("Enter an amount and recipient, such as ‘Send 5 USDC to @alice’.", undefined, undefined, guard);
         return;
       }
 
@@ -343,9 +368,10 @@ function AuthenticatedConversation() {
         }),
       }, getAccessToken);
       const payload: unknown = await response.json();
+      if (!guard.isActive()) return;
       const review = response.ok ? parsePaymentReview(payload) : null;
       if (review) {
-        appendTelya(review.explanation, review, parsed.recipientInput);
+        appendTelya(review.explanation, review, parsed.recipientInput, guard);
         return;
       }
       appendTelya(apiMessage(
@@ -353,13 +379,13 @@ function AuthenticatedConversation() {
         response.status === 503
           ? "Payment review is temporarily unavailable because a required provider could not be verified. No payment has been submitted."
           : "Telya could not create a verified payment review. No payment has been submitted.",
-      ));
+      ), undefined, undefined, guard);
     } catch (error) {
       appendTelya(error instanceof Error
         ? `${error.message} No payment has been submitted.`
-        : "The request could not be verified. No payment has been submitted.");
+        : "The request could not be verified. No payment has been submitted.", undefined, undefined, guard);
     } finally {
-      setIsProcessing(false);
+      if (guard.isActive()) setIsProcessing(false);
     }
   }
 
