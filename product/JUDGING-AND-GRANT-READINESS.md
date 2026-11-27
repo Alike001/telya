@@ -268,7 +268,7 @@ On integrated draft PR #66 head `70e944e`:
 - secure environment: 77 files / 384 tests passed with no skips;
 - plain environment: 66 files / 366 tests passed, while 11 files / 18 credential/database-gated tests were explicitly skipped;
 - client TypeScript, server TypeScript, production build and `git diff --check` passed; the prior dependency-only head also passed frozen install;
-- exact-head GitHub checks are pending; GitGuardian passed on the prior head;
+- exact-head GitGuardian passed; Vercel did not run because the teammate fork requires team authorization;
 - `pnpm audit --prod` reported no known vulnerabilities after resolving transitive Zod to patched `4.6.7`;
 - the read-only public-network probe passed at Stellar ledger `5,946,104`; and
 - mobile/desktop unauthenticated acceptance proved no financial controls or substituted data appear without sign-in, while protected reads return 401; and
