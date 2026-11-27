@@ -346,6 +346,7 @@ export async function recordStellarCctpDestinationSubmitted(input: {
   readonly recipientAmount: string;
   readonly recipientAmountAtomic: string;
 }): Promise<void> {
+  const canonicalBaseSourceHash = `0x${input.sourceTransactionHash}`;
   const sql = getSqlClient();
   const rows = await sql`
     WITH eligible AS MATERIALIZED (
@@ -356,6 +357,7 @@ export async function recordStellarCctpDestinationSubmitted(input: {
         AND p.status IN ('source_confirmed', 'awaiting_attestation', 'destination_submitted')
         AND p.recipient_address = ${input.recipientAddress}
         AND p.expected_recipient_amount = ${input.recipientAmount}::numeric
+        AND p.source_transaction_hash = ${canonicalBaseSourceHash}
         AND (p.destination_transaction_hash IS NULL
           OR p.destination_transaction_hash = ${input.destinationTransactionHash})
         AND o.route_id = 'base_to_stellar'
@@ -377,7 +379,6 @@ export async function recordStellarCctpDestinationSubmitted(input: {
       RETURNING o.payment_id
     ), payment AS (
       UPDATE payments p SET status = 'destination_submitted',
-        source_transaction_hash = ${input.sourceTransactionHash},
         destination_transaction_hash = ${input.destinationTransactionHash},
         updated_at = now()
       FROM operation o WHERE p.id = o.payment_id

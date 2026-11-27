@@ -68,6 +68,13 @@ describe("Base-to-Stellar destination progress persistence", () => {
     expect(mocks.query).toContain("FROM payment p JOIN operation o ON o.payment_id = p.id");
   });
 
+  it("preserves the canonical 0x Base source hash when submitting the Stellar destination", async () => {
+    mocks.rows = [{ id: paymentId }];
+    await recordStellarCctpDestinationSubmitted(submissionInput);
+    expect(mocks.query).toContain("p.source_transaction_hash = ");
+    expect(mocks.query).not.toContain("UPDATE payments p SET status = 'destination_submitted', source_transaction_hash = ");
+  });
+
   it("does not mark a concurrently completed Payment failed", async () => {
     await expect(recordStellarCctpDestinationFailure(failureInput))
       .rejects.toThrow("changed while destination failure was being recorded");
