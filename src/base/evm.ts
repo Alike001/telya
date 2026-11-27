@@ -276,8 +276,10 @@ async function waitForWalletTransaction(
       params: [transactionHash],
     });
     if (receipt !== null && typeof receipt === "object") {
-      const status = (receipt as { readonly status?: unknown }).status;
-      if (status !== "0x1") {
+      const result = receipt as { readonly status?: unknown; readonly transactionHash?: unknown; readonly blockNumber?: unknown };
+      if (typeof result.transactionHash !== "string" || result.transactionHash.toLowerCase() !== transactionHash ||
+          typeof result.blockNumber !== "string" || !/^0x[0-9a-f]+$/i.test(result.blockNumber) ||
+          result.status !== "0x1") {
         throw new BaseEvmError("TRANSACTION_FAILED", "Base USDC approval did not succeed");
       }
       return;
@@ -285,6 +287,51 @@ async function waitForWalletTransaction(
     await new Promise((resolve) => setTimeout(resolve, 1_000));
   }
   throw new BaseEvmError("TRANSACTION_FAILED", "Base USDC approval confirmation timed out");
+}
+
+function walletRpc(provider: Eip1193Provider): BaseRpc {
+  return { request: <T>(method: string, params: readonly unknown[]) =>
+    provider.request({ method, params }) as Promise<T> };
+}
+
+export async function estimateBaseCctpApprovalFee(input: {
+  readonly provider: Eip1193Provider;
+  readonly sender: string;
+  readonly amount: DecimalAmount;
+}) {
+  return estimateBaseTransactionFee({
+    rpc: walletRpc(input.provider),
+    from: input.sender,
+    to: BASE_SEPOLIA_USDC,
+    data: encodeErc20Approve(BASE_SEPOLIA_TOKEN_MESSENGER, input.amount),
+  });
+}
+
+/** Approve only the reviewed USDC amount; caller retains the hash if confirmation is interrupted. */
+export async function approveBaseCctpAllowance(input: {
+  readonly provider: Eip1193Provider;
+  readonly sender: string;
+  readonly amount: DecimalAmount;
+  readonly onSubmitted?: (hash: string) => void;
+}): Promise<{ readonly status: "already_approved" | "approved"; readonly transactionHash?: string }> {
+  const sender = requireEvmAddress(input.sender, "sender");
+  const amount = normalizeBaseUsdcAmount(input.amount);
+  const rpc = walletRpc(input.provider);
+  if (await readBaseUsdcAllowance({ rpc, owner: sender }) >= amount) {
+    return { status: "already_approved" };
+  }
+  const transactionHash = await sendBaseTransaction({
+    provider: input.provider,
+    from: sender,
+    to: BASE_SEPOLIA_USDC,
+    data: encodeErc20Approve(BASE_SEPOLIA_TOKEN_MESSENGER, input.amount),
+  });
+  input.onSubmitted?.(transactionHash);
+  await waitForWalletTransaction(input.provider, transactionHash);
+  if (await readBaseUsdcAllowance({ rpc, owner: sender }) < amount) {
+    throw new BaseEvmError("TRANSACTION_FAILED", "Confirmed approval does not cover the reviewed USDC amount");
+  }
+  return { status: "approved", transactionHash };
 }
 
 /** Submit a Circle burn using the connected wallet; no private key enters Telya. */
@@ -298,26 +345,8 @@ export async function submitBaseCctpBurn(input: {
 }): Promise<{ readonly transactionHash: string; readonly approvalTransactionHash?: string }> {
   const sender = requireEvmAddress(input.sender, "sender");
   const amount = normalizeBaseUsdcAmount(input.burnAmount);
-  const allowanceData = await input.provider.request({
-    method: "eth_call",
-    params: [{
-      from: sender,
-      to: BASE_SEPOLIA_USDC,
-      data: encodeErc20Allowance(sender, BASE_SEPOLIA_TOKEN_MESSENGER),
-    }, "latest"],
-  });
-  if (typeof allowanceData !== "string" || !/^0x[0-9a-f]+$/i.test(allowanceData)) {
-    throw new BaseEvmError("TRANSACTION_FAILED", "Wallet could not read the USDC allowance");
-  }
-  let approvalTransactionHash: string | undefined;
-  if (BigInt(allowanceData) < amount) {
-    approvalTransactionHash = await sendBaseTransaction({
-      provider: input.provider,
-      from: sender,
-      to: BASE_SEPOLIA_USDC,
-      data: encodeErc20Approve(BASE_SEPOLIA_TOKEN_MESSENGER, input.burnAmount),
-    });
-    await waitForWalletTransaction(input.provider, approvalTransactionHash);
+  if (await readBaseUsdcAllowance({ rpc: walletRpc(input.provider), owner: sender }) < amount) {
+    throw new BaseEvmError("TRANSACTION_FAILED", "Circle USDC allowance changed. Approve the exact amount and request a fresh payment review.");
   }
   const transactionHash = await sendBaseTransaction({
     provider: input.provider,
@@ -330,9 +359,7 @@ export async function submitBaseCctpBurn(input: {
       mintRecipient: input.mintRecipient,
     }),
   });
-  return approvalTransactionHash
-    ? { transactionHash, approvalTransactionHash }
-    : { transactionHash };
+  return { transactionHash };
 }
 
 export interface BaseRpc {

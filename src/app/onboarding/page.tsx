@@ -31,6 +31,13 @@ import {
   type SmartAccountPublicConfig,
 } from "../../stellar/smart-account";
 import { validateUsername } from "../../domain/username";
+import {
+  BASE_SEPOLIA_TOKEN_MESSENGER,
+  approveBaseCctpAllowance,
+  estimateBaseCctpApprovalFee,
+  normalizeBaseUsdcAmount,
+  type Eip1193Provider,
+} from "../../base/evm";
 import { authenticatedFetch } from "../authenticated-fetch";
 import { reconcileBaseWalletSession } from "../onboarding-base-wallet";
 import {
@@ -52,6 +59,13 @@ function decodeBase64Url(value: string): Uint8Array<ArrayBuffer> {
 function encodeBase64Url(value: ArrayBuffer): string {
   const raw = String.fromCharCode(...new Uint8Array(value));
   return btoa(raw).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function baseProvider(provider: { request(input: { method: string; params?: unknown[] }): Promise<unknown> }): Eip1193Provider {
+  return { request: (input) => provider.request({
+    method: input.method,
+    ...(input.params ? { params: [...input.params] } : {}),
+  }) };
 }
 
 export default function OnboardingPage() {
@@ -85,6 +99,12 @@ function OnboardingFlow() {
   const [verifiedBaseWallet, setVerifiedBaseWallet] = useState<string | null>(null);
   const [baseWalletBusy, setBaseWalletBusy] = useState(false);
   const [baseWalletError, setBaseWalletError] = useState<string | null>(null);
+  const [approvalAmount, setApprovalAmount] = useState("0.1");
+  const [approvalReview, setApprovalReview] = useState<{ address: string; amount: string; feeEth: string } | null>(null);
+  const [approvalBusy, setApprovalBusy] = useState(false);
+  const [approvalHash, setApprovalHash] = useState<string | null>(null);
+  const [approvalConfirmed, setApprovalConfirmed] = useState(false);
+  const [approvalMessage, setApprovalMessage] = useState<string | null>(null);
 
   const kitRef = useRef<SmartAccountKit | null>(null);
   const configRef = useRef<SmartAccountPublicConfig | null>(null);
@@ -102,6 +122,10 @@ function OnboardingFlow() {
     }
     if (reconciled.verifiedAddress !== verifiedBaseWallet) {
       setVerifiedBaseWallet(reconciled.verifiedAddress);
+      setApprovalReview(null);
+      setApprovalHash(null);
+      setApprovalConfirmed(false);
+      setApprovalMessage(null);
     }
   }, [authenticated, selectedBaseWallet, verifiedBaseWallet, wallets]);
 
@@ -153,6 +177,69 @@ function OnboardingFlow() {
       setBaseWalletError(error instanceof Error ? error.message : "Base wallet verification was not completed.");
     } finally {
       if (guard.isActive()) setBaseWalletBusy(false);
+    }
+  }
+
+  async function reviewBaseApproval(): Promise<void> {
+    const guard = sessionGuardRef.current;
+    const wallet = wallets.find((candidate) => candidate.address.toLowerCase() === verifiedBaseWallet?.toLowerCase());
+    if (!guard?.isActive() || !wallet || !verifiedBaseWallet) return;
+    setApprovalBusy(true);
+    setApprovalReview(null);
+    setApprovalMessage(null);
+    try {
+      normalizeBaseUsdcAmount(approvalAmount);
+      await wallet.switchChain(84_532);
+      const provider = await wallet.getEthereumProvider();
+      const accounts = await provider.request({ method: "eth_accounts" });
+      if (!Array.isArray(accounts) || !accounts.some((address) =>
+        typeof address === "string" && address.toLowerCase() === verifiedBaseWallet.toLowerCase())) {
+        throw new Error("The verified Base wallet is not the active provider account.");
+      }
+      const quote = await estimateBaseCctpApprovalFee({ provider: baseProvider(provider), sender: verifiedBaseWallet, amount: approvalAmount });
+      if (guard.isActive()) setApprovalReview({ address: verifiedBaseWallet, amount: approvalAmount, feeEth: quote.feeEth });
+    } catch (error) {
+      if (guard.isActive()) setApprovalMessage(error instanceof Error ? error.message : "Base approval quote is unavailable.");
+    } finally {
+      if (guard.isActive()) setApprovalBusy(false);
+    }
+  }
+
+  async function confirmBaseApproval(): Promise<void> {
+    const guard = sessionGuardRef.current;
+    const review = approvalReview;
+    const wallet = wallets.find((candidate) => candidate.address.toLowerCase() === review?.address.toLowerCase());
+    if (!guard?.isActive() || !wallet || !review || review.address !== verifiedBaseWallet || approvalHash) return;
+    setApprovalBusy(true);
+    setApprovalMessage(null);
+    let submittedHash: string | null = null;
+    try {
+      await wallet.switchChain(84_532);
+      const provider = await wallet.getEthereumProvider();
+      const accounts = await provider.request({ method: "eth_accounts" });
+      if (!Array.isArray(accounts) || !accounts.some((address) =>
+        typeof address === "string" && address.toLowerCase() === review.address.toLowerCase())) {
+        throw new Error("The reviewed Base wallet is not the active provider account.");
+      }
+      const result = await approveBaseCctpAllowance({
+        provider: baseProvider(provider), sender: review.address, amount: review.amount,
+        onSubmitted: (hash) => {
+          submittedHash = hash;
+          if (guard.isActive()) setApprovalHash(hash);
+        },
+      });
+      if (!guard.isActive()) return;
+      setApprovalConfirmed(true);
+      setApprovalMessage(result.status === "already_approved"
+        ? "Circle already has enough on-chain USDC allowance. Request a fresh Base-to-Stellar payment review."
+        : "The exact USDC approval is confirmed on Base Sepolia. Request a fresh Base-to-Stellar payment review.");
+    } catch (error) {
+      if (!guard.isActive()) return;
+      setApprovalMessage(submittedHash
+        ? "Approval was submitted but its on-chain allowance could not be verified. Check its transaction before trying again."
+        : error instanceof Error ? error.message : "Base approval was not completed.");
+    } finally {
+      if (guard.isActive()) setApprovalBusy(false);
     }
   }
   async function bindWalletToIdentity(
@@ -224,6 +311,12 @@ function OnboardingFlow() {
     setVerifiedBaseWallet(null);
     setBaseWalletBusy(false);
     setBaseWalletError(null);
+    setApprovalAmount("0.1");
+    setApprovalReview(null);
+    setApprovalBusy(false);
+    setApprovalHash(null);
+    setApprovalConfirmed(false);
+    setApprovalMessage(null);
     setErrorMessage(null);
     kitRef.current = null;
     configRef.current = null;
@@ -794,6 +887,53 @@ function OnboardingFlow() {
                 )}
               </div>
               {baseWalletError && <div className="onboarding-error-banner" role="alert">{baseWalletError}</div>}
+              {verifiedBaseWallet && (
+                <div className="optional-base-box">
+                  <div className="optional-base-content">
+                    <ShieldCheck className="base-icon" />
+                    <div>
+                      <strong>Circle Testnet USDC approval</strong>
+                      <p>Approve only the amount you plan to send from Base Sepolia. This approval does not send USDC.</p>
+                    </div>
+                  </div>
+                  <label htmlFor="base-cctp-approval-amount">USDC amount to approve</label>
+                  <input
+                    id="base-cctp-approval-amount"
+                    inputMode="decimal"
+                    value={approvalAmount}
+                    onChange={(event) => {
+                      setApprovalAmount(event.target.value);
+                      setApprovalReview(null);
+                      setApprovalMessage(null);
+                      if (approvalConfirmed) { setApprovalHash(null); setApprovalConfirmed(false); }
+                    }}
+                    disabled={approvalBusy || Boolean(approvalHash && !approvalConfirmed)}
+                  />
+                  <button type="button" className="base-status-tag" onClick={() => { void reviewBaseApproval(); }}
+                    disabled={approvalBusy || Boolean(approvalHash && !approvalConfirmed)}>
+                    {approvalBusy ? "Checking…" : "Review exact approval"}
+                  </button>
+                  {approvalReview && !approvalConfirmed && (
+                    <div role="group" aria-label="Circle approval review">
+                      <p>Wallet: {approvalReview.address}</p>
+                      <p>Network: Base Sepolia (84532)</p>
+                      <p>Token spender: {BASE_SEPOLIA_TOKEN_MESSENGER}</p>
+                      <p>Maximum USDC allowance for this approval: {approvalReview.amount}</p>
+                      <p>Estimated approval gas: {approvalReview.feeEth} ETH. Check the wallet&apos;s current fee before signing.</p>
+                      <button type="button" className="base-status-tag" onClick={() => { void confirmBaseApproval(); }}
+                        disabled={approvalBusy || Boolean(approvalHash)}>
+                        Approve exact amount with wallet
+                      </button>
+                    </div>
+                  )}
+                  {approvalHash && (
+                    <a href={`https://sepolia.basescan.org/tx/${approvalHash}`} target="_blank" rel="noreferrer">
+                      Approval transaction {approvalHash.slice(0, 10)}…{approvalHash.slice(-6)} ↗
+                    </a>
+                  )}
+                  {approvalMessage && <p role="status">{approvalMessage}</p>}
+                </div>
+              )}
             </div>
 
             <div className="onboarding-actions">

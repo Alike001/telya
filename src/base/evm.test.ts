@@ -4,6 +4,7 @@ import {
   BASE_SEPOLIA_MESSAGE_TRANSMITTER,
   BASE_SEPOLIA_CHAIN_ID,
   BASE_SEPOLIA_USDC,
+  approveBaseCctpAllowance,
   encodeCctpDepositForBurn,
   encodeCctpReceiveMessage,
   encodeErc20Transfer,
@@ -13,6 +14,7 @@ import {
   normalizeBaseUsdcAmount,
   readBaseUsdcAllowance,
   readBaseUsdcBalance,
+  submitBaseCctpBurn,
   parseCctpMessage,
   verifyBaseCctpMint,
   verifyBaseUsdcTransfer,
@@ -104,6 +106,62 @@ describe("Base Sepolia transaction encoding and verification", () => {
       to: BASE_SEPOLIA_USDC.toLowerCase(),
       data: expect.stringMatching(/^0xdd62ed3e/),
     }, "latest"]);
+  });
+
+  it("requires separately reviewed allowance before a CCTP burn and never submits on zero allowance", async () => {
+    const provider = { request: vi.fn(async ({ method }: { method: string }) => {
+      if (method === "eth_chainId") return "0x14a34";
+      if (method === "eth_call") return `0x${word(0n)}`;
+      throw new Error(`Unexpected wallet method: ${method}`);
+    }) };
+    await expect(submitBaseCctpBurn({
+      provider, sender: SENDER, burnAmount: "0.1", maxFee: "0",
+      destinationDomain: 27, mintRecipient: `0x${"2".repeat(64)}`,
+    })).rejects.toThrow("allowance changed");
+    expect(provider.request.mock.calls.some(([input]) => input.method === "eth_sendTransaction")).toBe(false);
+  });
+
+  it("approves only the exact amount and confirms the on-chain allowance before reporting success", async () => {
+    let allowance = 0n;
+    const onSubmitted = vi.fn();
+    const provider = { request: vi.fn(async ({ method, params }: { method: string; params?: readonly unknown[] }) => {
+      if (method === "eth_chainId") return "0x14a34";
+      if (method === "eth_call") return `0x${word(allowance)}`;
+      if (method === "eth_sendTransaction") {
+        expect(params?.[0]).toEqual(expect.objectContaining({
+          from: SENDER.toLowerCase(), to: BASE_SEPOLIA_USDC.toLowerCase(),
+          data: expect.stringMatching(/^0x095ea7b3/),
+        }));
+        return TX_HASH;
+      }
+      if (method === "eth_getTransactionReceipt") {
+        allowance = 100_000n;
+        return { transactionHash: TX_HASH, blockNumber: "0x10", status: "0x1" };
+      }
+      throw new Error(`Unexpected wallet method: ${method}`);
+    }) };
+    await expect(approveBaseCctpAllowance({
+      provider, sender: SENDER, amount: "0.1", onSubmitted,
+    })).resolves.toEqual({ status: "approved", transactionHash: TX_HASH });
+    expect(onSubmitted).toHaveBeenCalledWith(TX_HASH);
+    expect(provider.request.mock.calls.filter(([input]) => input.method === "eth_sendTransaction")).toHaveLength(1);
+    await expect(approveBaseCctpAllowance({ provider, sender: SENDER, amount: "0.1" }))
+      .resolves.toEqual({ status: "already_approved" });
+    expect(provider.request.mock.calls.filter(([input]) => input.method === "eth_sendTransaction")).toHaveLength(1);
+  });
+
+  it("does not report approval success from a receipt when the exact allowance is still absent", async () => {
+    const provider = { request: vi.fn(async ({ method }: { method: string }) => {
+      if (method === "eth_chainId") return "0x14a34";
+      if (method === "eth_call") return `0x${word(0n)}`;
+      if (method === "eth_sendTransaction") return TX_HASH;
+      if (method === "eth_getTransactionReceipt") {
+        return { transactionHash: TX_HASH, blockNumber: "0x10", status: "0x1" };
+      }
+      throw new Error(`Unexpected wallet method: ${method}`);
+    }) };
+    await expect(approveBaseCctpAllowance({ provider, sender: SENDER, amount: "0.1" }))
+      .rejects.toThrow("does not cover");
   });
 
   it("formats summed wei quotes exactly without floating point", () => {
