@@ -33,6 +33,10 @@ describe("Agent Pass payment feedback", () => {
     expect(agentPassStatusView(null, true)).toBe("loading");
   });
 
+  it("never renders no-pass or create controls when status verification failed", () => {
+    expect(agentPassStatusView(null, false, true)).toBe("unavailable");
+  });
+
   it("does not discard rejection feedback for a needless status refresh", () => {
     expect(shouldRefreshAgentPassAfterPayment({
       status: "failed",

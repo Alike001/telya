@@ -92,6 +92,7 @@ function AgentPassManagement({
 }) {
   const [pass, setPass] = useState<PersistedAgentPass | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [statusUnavailable, setStatusUnavailable] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successNotice, setSuccessNotice] = useState<string | null>(null);
@@ -120,6 +121,7 @@ function AgentPassManagement({
     setPass(null);
     setAgentSpendSession(null);
     setError(null);
+    setStatusUnavailable(false);
     setSuccessNotice(null);
     setShowCreateModal(false);
     setIsLoading(false);
@@ -142,6 +144,7 @@ function AgentPassManagement({
     if (!accountAddress || !guard?.isActive()) return;
     setIsLoading(true);
     setError(null);
+    setStatusUnavailable(false);
     try {
       const request = operationRequest ?? await captureOperationRequest(guard);
       const res = await request(`/api/stellar/agent-passes/${accountAddress}`, {
@@ -154,10 +157,12 @@ function AgentPassManagement({
           throw new Error("Agent Pass status evidence could not be verified.");
         }
         if (!guard.isActive()) return;
+        setStatusUnavailable(false);
         setPass(parsed);
         if (parsed.status !== "active") setAgentSpendSession(null);
       } else if (res.status === 404) {
         if (!guard.isActive()) return;
+        setStatusUnavailable(false);
         setPass(null);
         setAgentSpendSession(null);
       } else {
@@ -166,6 +171,8 @@ function AgentPassManagement({
     } catch {
       if (!guard.isActive()) return;
       setPass(null);
+      setAgentSpendSession(null);
+      setStatusUnavailable(true);
       setError("Agent Pass status could not be verified. Please retry.");
     } finally {
       if (guard.isActive()) setIsLoading(false);
@@ -302,7 +309,7 @@ function AgentPassManagement({
     }
   }
 
-  const view = agentPassStatusView(pass, isLoading);
+  const view = agentPassStatusView(pass, isLoading, statusUnavailable);
   const progressPercent = pass
     ? Number((pass.spentAmountAtomic * 100n) / pass.spendingLimitAtomic)
     : 0;
@@ -362,6 +369,21 @@ function AgentPassManagement({
         <div className="pass-loading-state">
           <Loader2 className="spinner" />
           <span>Loading Agent Pass status from Stellar Testnet...</span>
+        </div>
+      ) : view === "unavailable" ? (
+        <div className="no-pass-card" role="status">
+          <ShieldAlert className="shield-icon-lg" />
+          <h3>Agent Pass status unavailable</h3>
+          <p>Telya could not verify the current rule. Pass creation and spending are paused until status is restored.</p>
+          <button
+            type="button"
+            className="cta-button primary create-pass-trigger-btn"
+            onClick={() => { void fetchPass(); }}
+            disabled={isLoading}
+          >
+            <RefreshCw className="btn-icon" />
+            <span>Retry status verification</span>
+          </button>
         </div>
       ) : view === "active" && pass ? (
         <div className="active-pass-card">

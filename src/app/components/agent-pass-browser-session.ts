@@ -13,7 +13,9 @@ export function agentPassBrowserSessionKey(pass: ActiveAgentPass | null): string
 export function agentPassStatusView(
   pass: Pick<PersistedAgentPass, "status"> | null,
   isLoading: boolean,
-): "loading" | "active" | "expired" | "none" {
+  statusUnavailable = false,
+): "loading" | "active" | "expired" | "none" | "unavailable" {
+  if (statusUnavailable) return "unavailable";
   if (isLoading && !pass) return "loading";
   if (pass?.status === "active") return "active";
   if (pass?.status === "expired") return "expired";
