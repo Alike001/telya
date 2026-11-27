@@ -30,7 +30,7 @@ Hammed is taking primary implementation ownership. Teammate availability is not 
 
 ### CI/deployment interpretation
 
-At this refresh, PRs #44 and #53 have successful Vercel and GitGuardian checks. PR #48 head `05531f5` requires Vercel fork authorization and GitGuardian passed. Its earlier preview redirected to Vercel SSO. Fork PRs #46/#49/#65/#66 also lead to Git authorization URLs. This is an authorization barrier, not an application build result. Recheck all statuses on current heads before merging.
+At this refresh, PRs #44 and #53 have successful Vercel and GitGuardian checks. PR #48 head `05531f5` requires Vercel fork authorization and GitGuardian passed. Its earlier preview redirected to Vercel SSO. Fork PRs #46/#49/#65/#66 also lead to Git authorization URLs. This is an authorization barrier, not an application build result. The main project is linked to the authenticated Vercel CLI; `https://telya.vercel.app/api/health` returned application/database ready on Testnet. New deployments are currently rate-limited for 24 hours. Recheck all statuses on current heads before merging.
 
 Prudent reported GitGuardian green on #46/#49. Webghost reported GitGuardian green on #48. Verify the latest commit's actual security status before merge.
 
@@ -70,6 +70,7 @@ The main-branch baseline previously recorded was 5 test files / 40 tests, with t
 - Partner registration requires a company-domain email; Telya is not incorporated and must not misrepresent that fact.
 - The documented widget onboarding requires partner access and sandbox credentials. The documented non-custodial Stellar web quickstart uses a G-address; Telya uses a Smart Account Kit C-address.
 - Codex must record every response and requirement. Do not submit duplicate enquiries without reason. Do not fake provider responses or weaken wallet architecture. Continue all other work while waiting.
+- Vercel now has the canonical production WebAuthn RP ID/origin for `telya.vercel.app` and the official credential-free Base Sepolia RPC URL for Production, Preview and Development. A direct `eth_chainId` read returned `0x14a34` (84532). Privy app ID/secret are still absent, and Vercel's encrypted sponsor value cannot be exported for local testing.
 
 ## 6. Next execution queue
 
@@ -93,6 +94,7 @@ Codex must not ask Hammed to paste secrets into chat. Request a secure environme
 - share MoneyGram/admin office-hour replies and any provider credentials through a secure environment;
 - confirm official submission cutoff and required artifacts;
 - run the final product with teammates as independent testers.
+- create/configure the Privy app for `https://telya.vercel.app`, then add `NEXT_PUBLIC_PRIVY_APP_ID` and `PRIVY_APP_SECRET` to the Vercel project and secure local test environment; never paste either value into chat.
 
 ## 8. November 26 live audit and handoff
 
@@ -148,4 +150,5 @@ Codex must not ask Hammed to paste secrets into chat. Request a secure environme
 - PR #53 received `21ea8dd`: a pending Base→Stellar reconciliation now returns the persisted Base burn hash so an interrupted browser response can resume the same operation without signing or submitting again. Focused Neon and both TypeScript checks passed. This is recovery plumbing, not live Testnet evidence.
 - PR #49 received `a320c3b`: Base→Base and Base→Stellar now select the exact server-authorized Privy wallet, validate the reviewed transfer/burn/fee before provider access, submit through Base Sepolia and immediately reconcile the persisted hash. Refresh reads persisted hashes and never treats a wallet hash as completion. Secure-env suite passed 286/286; plain passed 274 with 12 credential-gated skips; both TypeScript checks, production build and diff check passed. No browser signature or Testnet transfer was performed. [Evidence](https://github.com/Alike001/telya/pull/49#issuecomment-7207571857).
 - PR #65 merged current PR #49 as `fb00bc7`; secure-env passed 300/300 and plain passed 288 with 12 credential-gated skips. PR #66 then merged current PR #65 as `b93e5c8`; secure-env passed 315/315 and plain passed 303 with 12 skips. Both branches passed both TypeScript checks, production builds and diff checks. The existing FE stack is consistent without duplicate Base execution code; live browser/Testnet proof remains open. [PR #65 evidence](https://github.com/Alike001/telya/pull/65#issuecomment-7207628015), [PR #66 evidence](https://github.com/Alike001/telya/pull/66#issuecomment-7207657057).
+- The Vercel project was linked through the existing authenticated CLI session. Production WebAuthn RP ID/origin were configured for `telya.vercel.app`; the official `https://sepolia.base.org` RPC was added as readable config for all environments and returned chain ID `0x14a34`. The live health endpoint returned application/database ready. Privy credentials remain absent, encrypted sponsor material is not locally exportable, and the team deployment quota is rate-limited for 24 hours; no wallet action was attempted.
 Keep the product moving on unblocked tasks while these actions are pending.
