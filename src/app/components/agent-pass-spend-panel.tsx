@@ -16,7 +16,10 @@ import {
   prepareAgentPassPayment,
 } from "./agent-pass-payment-execution";
 import { runPaymentActionOnce } from "./payment-action-guard";
-import { agentPassBrowserSessionKey } from "./agent-pass-browser-session";
+import {
+  agentPassBrowserSessionKey,
+  shouldRefreshAgentPassAfterPayment,
+} from "./agent-pass-browser-session";
 import { createSessionRequestGuard, type SessionRequestGuard } from "../session-request-guard";
 
 type Request = (input: string, init?: RequestInit) => Promise<Response>;
@@ -110,7 +113,7 @@ export function AgentPassSpendPanel({
       });
       if (!guard.isActive()) return;
       setExecution(result);
-      await onStatusChanged();
+      if (shouldRefreshAgentPassAfterPayment(result)) await onStatusChanged();
     } catch (cause) {
       if (!guard.isActive()) return;
       setError(cause instanceof Error ? cause.message : "The Agent Pass payment could not be authorized.");
@@ -137,7 +140,7 @@ export function AgentPassSpendPanel({
       );
       if (!guard.isActive()) return;
       setExecution(result);
-      await onStatusChanged();
+      if (shouldRefreshAgentPassAfterPayment(result)) await onStatusChanged();
     } catch (cause) {
       if (!guard.isActive()) return;
       setError(cause instanceof Error

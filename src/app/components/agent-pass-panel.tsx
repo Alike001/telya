@@ -40,6 +40,7 @@ import {
   X,
 } from "lucide-react";
 import { AgentPassSpendPanel } from "./agent-pass-spend-panel";
+import { agentPassStatusView } from "./agent-pass-browser-session";
 
 interface AgentPassPanelProps {
   readonly smartAccountAddress: string | null;
@@ -301,7 +302,7 @@ function AgentPassManagement({
     }
   }
 
-  const isPassActive = pass?.status === "active";
+  const view = agentPassStatusView(pass, isLoading);
   const progressPercent = pass
     ? Number((pass.spentAmountAtomic * 100n) / pass.spendingLimitAtomic)
     : 0;
@@ -357,12 +358,12 @@ function AgentPassManagement({
             Connect Passkey
           </a>
         </div>
-      ) : isLoading ? (
+      ) : view === "loading" ? (
         <div className="pass-loading-state">
           <Loader2 className="spinner" />
           <span>Loading Agent Pass status from Stellar Testnet...</span>
         </div>
-      ) : isPassActive ? (
+      ) : view === "active" && pass ? (
         <div className="active-pass-card">
           {/* Card Top */}
           <div className="active-pass-top">
@@ -465,7 +466,7 @@ function AgentPassManagement({
             </button>
           </div>
         </div>
-      ) : pass?.status === "expired" ? (
+      ) : view === "expired" && pass ? (
         <div className="no-pass-card">
           <div className="no-pass-icon-box">
             <ShieldAlert className="shield-icon-lg" />
