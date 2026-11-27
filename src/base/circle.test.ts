@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { getCircleCctpStatus } from "./circle";
+import { getCircleCctpStandardFeeQuote, getCircleCctpStatus } from "./circle";
 
 const SOURCE_TX = `0x${"a".repeat(64)}`;
 const MESSAGE = `0x${"01".repeat(200)}`;
@@ -59,5 +59,58 @@ describe("Circle CCTP Testnet status", () => {
       apiBaseUrl: "https://iris-api.circle.com",
       fetcher: vi.fn(),
     })).rejects.toThrow("restricted to Circle Testnet");
+  });
+});
+
+describe("Circle CCTP Standard Transfer fee quote", () => {
+  it.each([
+    { sourceDomain: 6, destinationDomain: 27 },
+    { sourceDomain: 27, destinationDomain: 6 },
+  ])("returns the exact Standard quote for $sourceDomain -> $destinationDomain", async (route) => {
+    const fetcher = vi.fn().mockResolvedValue(Response.json([
+      { finalityThreshold: 1_000, minimumFee: 1.3 },
+      { finalityThreshold: 2_000, minimumFee: 0 },
+    ]));
+    await expect(getCircleCctpStandardFeeQuote({ ...route, fetcher })).resolves.toEqual({
+      ...route,
+      finalityThreshold: 2_000,
+      minimumFeeBps: "0",
+    });
+    expect(String(fetcher.mock.calls[0]?.[0])).toBe(
+      `https://iris-api-sandbox.circle.com/v2/burn/USDC/fees/${route.sourceDomain}/${route.destinationDomain}`,
+    );
+  });
+
+  it.each([
+    { name: "no standard entry", payload: [{ finalityThreshold: 1_000, minimumFee: 1 }] },
+    { name: "duplicate standard entries", payload: [
+      { finalityThreshold: 2_000, minimumFee: 0 },
+      { finalityThreshold: 2_000, minimumFee: 0 },
+    ] },
+    { name: "negative fee", payload: [{ finalityThreshold: 2_000, minimumFee: -1 }] },
+    { name: "fee over 100 percent", payload: [{ finalityThreshold: 2_000, minimumFee: 10_001 }] },
+    { name: "non-list response", payload: { finalityThreshold: 2_000, minimumFee: 0 } },
+  ])("rejects $name", async ({ payload }) => {
+    await expect(getCircleCctpStandardFeeQuote({
+      sourceDomain: 6,
+      destinationDomain: 27,
+      fetcher: vi.fn().mockResolvedValue(Response.json(payload)),
+    })).rejects.toThrow();
+  });
+
+  it("rejects unsupported routes and non-Testnet API hosts before fetching", async () => {
+    const fetcher = vi.fn();
+    await expect(getCircleCctpStandardFeeQuote({
+      sourceDomain: 6,
+      destinationDomain: 0,
+      fetcher,
+    })).rejects.toThrow("Unsupported Telya CCTP fee route");
+    await expect(getCircleCctpStandardFeeQuote({
+      sourceDomain: 6,
+      destinationDomain: 27,
+      apiBaseUrl: "https://iris-api.circle.com",
+      fetcher,
+    })).rejects.toThrow("restricted to Circle Testnet");
+    expect(fetcher).not.toHaveBeenCalled();
   });
 });
