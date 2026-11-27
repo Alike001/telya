@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { usePrivy } from "@privy-io/react-auth";
+import { useConnectWallet, usePrivy, useWallets } from "@privy-io/react-auth";
 import {
   ArrowRight,
   Check,
@@ -64,6 +64,8 @@ export default function OnboardingPage() {
 
 function OnboardingFlow() {
   const { ready: authReady, authenticated, login, getAccessToken } = usePrivy();
+  const { connectWallet } = useConnectWallet();
+  const { ready: walletsReady, wallets } = useWallets();
   const [step, setStep] = useState<OnboardingStep>("welcome");
   const [usernameInput, setUsernameInput] = useState("");
   const [debouncedUsername, setDebouncedUsername] = useState("");
@@ -72,11 +74,63 @@ function OnboardingFlow() {
   const [account, setAccount] = useState<ConnectedSmartAccount | null>(null);
   const [claimedUsername, setClaimedUsername] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [selectedBaseWallet, setSelectedBaseWallet] = useState("");
+  const [verifiedBaseWallet, setVerifiedBaseWallet] = useState<string | null>(null);
+  const [baseWalletBusy, setBaseWalletBusy] = useState(false);
+  const [baseWalletError, setBaseWalletError] = useState<string | null>(null);
 
   const kitRef = useRef<SmartAccountKit | null>(null);
   const configRef = useRef<SmartAccountPublicConfig | null>(null);
   const creationRef = useRef(false);
 
+  useEffect(() => {
+    if (wallets.length === 1 && !selectedBaseWallet) setSelectedBaseWallet(wallets[0]!.address);
+    if (selectedBaseWallet && !wallets.some((wallet) => wallet.address.toLowerCase() === selectedBaseWallet.toLowerCase())) {
+      setSelectedBaseWallet("");
+      setVerifiedBaseWallet(null);
+    }
+  }, [selectedBaseWallet, wallets]);
+
+  async function verifyBaseWallet(): Promise<void> {
+    const wallet = wallets.find((candidate) =>
+      candidate.address.toLowerCase() === selectedBaseWallet.toLowerCase());
+    if (!wallet) {
+      setBaseWalletError(wallets.length > 1
+        ? "Choose the exact Base wallet you want Telya to use."
+        : "Connect an Ethereum wallet before verification.");
+      return;
+    }
+    setBaseWalletBusy(true);
+    setBaseWalletError(null);
+    try {
+      await wallet.loginOrLink();
+      await wallet.switchChain(84_532);
+      const provider = await wallet.getEthereumProvider();
+      const accounts = await provider.request({ method: "eth_accounts" });
+      if (!Array.isArray(accounts) || !accounts.some((address) =>
+        typeof address === "string" && address.toLowerCase() === wallet.address.toLowerCase())) {
+        throw new Error("The selected wallet did not expose the verified Base account.");
+      }
+      const response = await authenticatedFetch("/api/wallets/base/bind", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ address: wallet.address }),
+      }, getAccessToken);
+      const payload = await response.json() as { verified?: unknown; address?: unknown; error?: unknown };
+      if (!response.ok || payload.verified !== true || typeof payload.address !== "string" ||
+          payload.address.toLowerCase() !== wallet.address.toLowerCase()) {
+        throw new Error(typeof payload.error === "string"
+          ? `Base wallet verification failed: ${payload.error}`
+          : "Base wallet verification failed.");
+      }
+      setVerifiedBaseWallet(payload.address.toLowerCase());
+    } catch (error) {
+      setVerifiedBaseWallet(null);
+      setBaseWalletError(error instanceof Error ? error.message : "Base wallet verification was not completed.");
+    } finally {
+      setBaseWalletBusy(false);
+    }
+  }
   async function bindWalletToIdentity(connected: ConnectedSmartAccount): Promise<void> {
     const challengeResponse = await authenticatedFetch(
       "/api/wallets/stellar/challenge",
@@ -622,13 +676,45 @@ function OnboardingFlow() {
                   <Wallet className="base-icon" />
                   <div>
                     <strong>Base Cross-Chain Wallet</strong>
-                    <p>Connect a Base wallet anytime to send and receive cross-chain USDC via Circle CCTP.</p>
+                    <p>Link an exact Privy-verified Ethereum wallet, then switch it to Base Sepolia for Testnet USDC.</p>
                   </div>
                 </div>
-                <span className="base-status-tag" aria-label="Base cross-chain support">
-                  Coming with Circle CCTP
-                </span>
+                {verifiedBaseWallet ? (
+                  <span className="base-status-tag" aria-label="Verified Base wallet">
+                    Verified {verifiedBaseWallet.slice(0, 8)}…{verifiedBaseWallet.slice(-6)}
+                  </span>
+                ) : wallets.length === 0 ? (
+                  <button type="button" className="base-status-tag" onClick={() => connectWallet()} disabled={!walletsReady}>
+                    Connect wallet
+                  </button>
+                ) : (
+                  <div>
+                    {wallets.length > 1 && (
+                      <select
+                        aria-label="Base wallet"
+                        value={selectedBaseWallet}
+                        onChange={(event) => setSelectedBaseWallet(event.target.value)}
+                      >
+                        <option value="">Choose wallet</option>
+                        {wallets.map((wallet) => (
+                          <option key={wallet.address} value={wallet.address}>
+                            {wallet.address.slice(0, 8)}…{wallet.address.slice(-6)}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                    <button
+                      type="button"
+                      className="base-status-tag"
+                      onClick={() => { void verifyBaseWallet(); }}
+                      disabled={baseWalletBusy || !selectedBaseWallet}
+                    >
+                      {baseWalletBusy ? "Verifying…" : "Verify for Base Sepolia"}
+                    </button>
+                  </div>
+                )}
               </div>
+              {baseWalletError && <div className="onboarding-error-banner" role="alert">{baseWalletError}</div>}
             </div>
 
             <div className="onboarding-actions">

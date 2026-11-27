@@ -3,7 +3,10 @@ import {
   PaymentConflictError,
   PaymentNotFoundError,
   PaymentProviderUnavailableError,
+  getPaymentWithEvents,
 } from "../payments/service.ts";
+import { reserveBaseCctpOperation } from "../../src/server/base-cctp.ts";
+import { trustedCctpBurnIntent } from "./base-payments.ts";
 import {
   createStellarPaymentExecutionSession,
   stellarPaymentSessionCookie,
@@ -15,6 +18,8 @@ import type { AuthenticateRequest } from "./http.ts";
 
 type ReconcileStellarPayment = typeof reconcileStellarDirectPayment;
 type CreateExecutionSession = typeof createStellarPaymentExecutionSession;
+type GetPayment = typeof getPaymentWithEvents;
+type ReserveCctp = typeof reserveBaseCctpOperation;
 
 export function createStellarPaymentAuthorizationHandler(
   options: {
@@ -38,6 +43,48 @@ export function createStellarPaymentAuthorizationHandler(
         status: "authorization_ready",
         relayerUrl: STELLAR_PAYMENT_RELAYER_PATH,
         expiresAt: session.expiresAt,
+      }, 201);
+      response.headers.set("set-cookie", stellarPaymentSessionCookie(session.token));
+      return response;
+    },
+    paymentErrorResponse,
+  );
+}
+
+export function createStellarCctpPaymentAuthorizationHandler(
+  options: {
+    readonly authenticate?: AuthenticateRequest;
+    readonly createSession?: CreateExecutionSession;
+    readonly getPayment?: GetPayment;
+    readonly reserveCctp?: ReserveCctp;
+  } = {},
+) {
+  return createAuthenticatedHandler(
+    options.authenticate ?? authenticateRequest,
+    async (request, user) => {
+      if (request.method !== "POST") return jsonResponse({ error: "method_not_allowed" }, 405);
+      const body = await readJson(request);
+      if (!isRecord(body) || typeof body.paymentId !== "string") {
+        return jsonResponse({ error: "payment_id_required" }, 400);
+      }
+      const payment = await (options.getPayment ?? getPaymentWithEvents)(user, body.paymentId);
+      if (payment.route_id !== "stellar_to_base") {
+        return jsonResponse({ error: "unsupported_payment_route" }, 409);
+      }
+      const burn = trustedCctpBurnIntent(payment);
+      await (options.reserveCctp ?? reserveBaseCctpOperation)({
+        paymentId: body.paymentId,
+        ...burn,
+      });
+      const session = await (options.createSession ?? createStellarPaymentExecutionSession)(
+        user,
+        body.paymentId,
+      );
+      const response = jsonResponse({
+        status: "authorization_ready",
+        relayerUrl: STELLAR_PAYMENT_RELAYER_PATH,
+        expiresAt: session.expiresAt,
+        burn,
       }, 201);
       response.headers.set("set-cookie", stellarPaymentSessionCookie(session.token));
       return response;

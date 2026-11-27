@@ -8,11 +8,18 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 
 import {
+  linkStellarCctpPaymentAuthorization,
   linkStellarPaymentAuthorization,
+  recordStellarCctpBurnSubmission,
   recordStellarUsdcTransferSubmission,
+  validateStellarCctpPaymentAuthorization,
   validateStellarPaymentAuthorization,
 } from "../../src/server/stellar-relayer-requests.ts";
-import type { ValidatedStellarUsdcTransfer } from "../../src/stellar/relayer.ts";
+import type {
+  ValidatedStellarCctpBurn,
+  ValidatedStellarUsdcTransfer,
+} from "../../src/stellar/relayer.ts";
+import { reserveBaseCctpOperation } from "../../src/server/base-cctp.ts";
 import {
   consumeStellarPaymentExecutionSession,
   createStellarPaymentExecutionSession,
@@ -218,6 +225,152 @@ describe("linked Stellar direct payment execution on PostgreSQL", () => {
           sql`DELETE FROM stellar_direct_payment_events WHERE request_hash = ${requestHash}`,
           sql`DELETE FROM stellar_relayer_requests WHERE request_hash = ${requestHash}`,
           sql`DELETE FROM stellar_payment_execution_sessions WHERE payment_id = ${paymentId}::uuid`,
+          sql`DELETE FROM payments WHERE id = ${paymentId}::uuid`,
+          sql`DELETE FROM messages WHERE id = ${messageId}::uuid`,
+          sql`DELETE FROM conversations WHERE id = ${conversationId}::uuid`,
+          sql`DELETE FROM wallets WHERE id = ${walletId}::uuid`,
+          sql`DELETE FROM auth_sessions WHERE privy_session_id = ${authSessionId}`,
+          sql`DELETE FROM users WHERE id IN (${userId}::uuid, ${otherUserId}::uuid)`,
+        ]);
+      }
+    },
+    30_000,
+  );
+
+  it.skipIf(!process.env.DATABASE_URL)(
+    "binds a one-use handoff to the exact reviewed Stellar CCTP burn",
+    async () => {
+      useNeonHttpsTransport();
+      const sql = neon(process.env.DATABASE_URL!);
+      const userId = randomUUID();
+      const otherUserId = randomUUID();
+      const authSessionId = `telya-cctp-linked-${randomUUID()}`;
+      const walletId = randomUUID();
+      const conversationId = randomUUID();
+      const messageId = randomUUID();
+      const paymentId = randomUUID();
+      const requestHash = randomBytes(32).toString("hex");
+      const clientHash = randomBytes(32).toString("hex");
+      const sender = StrKey.encodeContract(randomBytes(32));
+      const recipient = `0x${randomBytes(20).toString("hex")}`;
+      const tokenContract = StrKey.encodeContract(randomBytes(32));
+      const burn = {
+        kind: "cctp_burn",
+        func: null as never,
+        auth: [],
+        smartAccount: sender,
+        tokenMessenger: StrKey.encodeContract(randomBytes(32)),
+        burnToken: tokenContract,
+        recipient,
+        amountRaw: 50_526_830n,
+        maxFeeRaw: 526_830n,
+      } satisfies ValidatedStellarCctpBurn;
+
+      try {
+        await sql.transaction([
+          sql`INSERT INTO users (id, privy_did) VALUES
+            (${userId}::uuid, ${`did:privy:telya_cctp_payment_${userId}`}),
+            (${otherUserId}::uuid, ${`did:privy:telya_cctp_payment_${otherUserId}`})`,
+          sql`INSERT INTO auth_sessions (
+              privy_session_id, user_id, verified_at, expires_at
+            ) VALUES (
+              ${authSessionId}, ${userId}::uuid, now(), now() + interval '1 hour'
+            )`,
+          sql`INSERT INTO wallets (
+              id, user_id, network, address, normalized_address,
+              verification_status, verified_at
+            ) VALUES (
+              ${walletId}::uuid, ${userId}::uuid, 'stellar', ${sender}, ${sender},
+              'verified', now()
+            )`,
+          sql`INSERT INTO conversations (id, user_id)
+            VALUES (${conversationId}::uuid, ${userId}::uuid)`,
+          sql`INSERT INTO messages (
+              id, conversation_id, role, content, structured_intent
+            ) VALUES (
+              ${messageId}::uuid, ${conversationId}::uuid, 'user',
+              ${`Send 5 USDC from Stellar to ${recipient} on Base`},
+              ${JSON.stringify({ selectedSourceWallet: { id: walletId, network: "stellar", address: sender } })}::jsonb
+            )`,
+          sql`INSERT INTO payments (
+              id, user_id, conversation_id, intent_message_id, idempotency_key,
+              route_id, source_network, destination_network, rail,
+              recipient_address, expected_recipient_amount, status, fees
+            ) VALUES (
+              ${paymentId}::uuid, ${userId}::uuid, ${conversationId}::uuid,
+              ${messageId}::uuid, ${`dbtest:${randomUUID()}`}, 'stellar_to_base',
+              'stellar', 'base', 'circle_cctp_standard', ${recipient}, 5,
+              'awaiting_confirmation',
+              ${JSON.stringify([{ kind: "provider", payer: "sender", asset: "USDC", amount: "0.052683", label: "Circle destination forwarding fee" }])}::jsonb
+            )`,
+        ]);
+        await reserveBaseCctpOperation({
+          paymentId,
+          burnAmount: "5.052683",
+          maxFee: "0.052683",
+        });
+        await sql`INSERT INTO stellar_relayer_requests (
+            request_hash, client_key_hash, status, operation_kind,
+            authorization_kind, context_rule_id, signer_address,
+            token_contract, sender_address, recipient_address,
+            expected_amount_atomic, cctp_destination_domain, cctp_max_fee_atomic
+          ) VALUES (
+            ${requestHash}, ${clientHash}, 'pending', 'cctp_burn',
+            'owner', 0, ${sender}, ${tokenContract}, ${sender}, ${recipient},
+            ${burn.amountRaw.toString()}::numeric, 6, ${burn.maxFeeRaw.toString()}::numeric
+          )`;
+
+        await expect(validateStellarCctpPaymentAuthorization(
+          otherUserId,
+          paymentId,
+          burn,
+        )).rejects.toThrow("does not match the owned payment review");
+        await expect(validateStellarCctpPaymentAuthorization(
+          userId,
+          paymentId,
+          { ...burn, maxFeeRaw: burn.maxFeeRaw + 1n },
+        )).rejects.toThrow("does not match the owned payment review");
+        const handoff = await createStellarPaymentExecutionSession({
+          id: userId,
+          privyUserId: `did:privy:telya_cctp_payment_${userId}`,
+          sessionId: authSessionId,
+          expiresAt: new Date(Date.now() + 60 * 60 * 1_000),
+        }, paymentId);
+        await expect(consumeStellarPaymentExecutionSession(handoff.token)).resolves.toEqual({
+          userId,
+          paymentId,
+        });
+        await validateStellarCctpPaymentAuthorization(userId, paymentId, burn);
+        await linkStellarCctpPaymentAuthorization(userId, paymentId, requestHash, burn);
+        const transactionHash = randomBytes(32).toString("hex");
+        await recordStellarCctpBurnSubmission(requestHash, {
+          transactionHash,
+          ledger: 123,
+        });
+
+        const linked = await sql`
+          SELECT p.status, p.source_transaction_hash, r.payment_id
+          FROM payments p JOIN stellar_relayer_requests r ON r.request_hash = ${requestHash}
+          WHERE p.id = ${paymentId}::uuid
+        `;
+        expect(linked[0]).toMatchObject({
+          status: "submitted",
+          source_transaction_hash: transactionHash,
+          payment_id: paymentId,
+        });
+        const events = await sql`
+          SELECT event_key FROM payment_events WHERE payment_id = ${paymentId}::uuid
+        `;
+        expect(events.map((event) => event.event_key)).toEqual([
+          "stellar_cctp_owner_authorized",
+          "stellar_cctp_submitted",
+        ]);
+      } finally {
+        await sql.transaction([
+          sql`DELETE FROM payment_events WHERE payment_id = ${paymentId}::uuid`,
+          sql`DELETE FROM stellar_relayer_requests WHERE request_hash = ${requestHash}`,
+          sql`DELETE FROM stellar_payment_execution_sessions WHERE payment_id = ${paymentId}::uuid`,
+          sql`DELETE FROM base_cctp_operations WHERE payment_id = ${paymentId}::uuid`,
           sql`DELETE FROM payments WHERE id = ${paymentId}::uuid`,
           sql`DELETE FROM messages WHERE id = ${messageId}::uuid`,
           sql`DELETE FROM conversations WHERE id = ${conversationId}::uuid`,

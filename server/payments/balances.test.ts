@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { Networks, StrKey } from "@stellar/stellar-sdk";
 
+import type { BaseRpc } from "../../src/base/evm.ts";
 import { readStellarUsdcBalance, readVerifiedWalletBalances, type TokenBalanceReader } from "./balances.ts";
 
 const tokenContract = StrKey.encodeContract(Buffer.alloc(32, 1));
@@ -35,18 +36,44 @@ describe("Stellar USDC balance reader", () => {
     expect(reader.queryContract).not.toHaveBeenCalled();
   });
 
-  it("uses live reads for verified Stellar wallets and leaves Base unknown", async () => {
+  it("uses exact live reads for verified Stellar and Base wallets", async () => {
     const queryContract = vi.fn().mockResolvedValue({ result: 45_000_000n, isReadCall: true });
+    const baseRpc = { request: vi.fn()
+      .mockResolvedValueOnce("0x14a34")
+      .mockResolvedValueOnce(`0x${5_000_000n.toString(16).padStart(64, "0")}`) } as BaseRpc;
     const wallets = [
       { id: "stellar-wallet", network: "stellar" as const, address },
       { id: "base-wallet", network: "base" as const, address: `0x${"1".repeat(40)}` },
     ];
     const loadReader = vi.fn(() => ({ reader: { queryContract }, tokenContract }));
-    await expect(readVerifiedWalletBalances({ id: "user" }, wallets, loadReader)).resolves.toEqual({
+    await expect(readVerifiedWalletBalances(
+      { id: "user" },
+      wallets,
+      loadReader,
+      () => baseRpc,
+    )).resolves.toEqual({
+      "stellar-wallet": "4.5",
+      "base-wallet": "5",
+    });
+    expect(queryContract).toHaveBeenCalledOnce();
+    expect(baseRpc.request).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps Base unknown without erasing a verified Stellar balance when Base RPC fails", async () => {
+    const queryContract = vi.fn().mockResolvedValue({ result: 45_000_000n, isReadCall: true });
+    const wallets = [
+      { id: "stellar-wallet", network: "stellar" as const, address },
+      { id: "base-wallet", network: "base" as const, address: `0x${"1".repeat(40)}` },
+    ];
+    await expect(readVerifiedWalletBalances(
+      { id: "user" },
+      wallets,
+      () => ({ reader: { queryContract }, tokenContract }),
+      () => { throw new Error("Base RPC unavailable"); },
+    )).resolves.toEqual({
       "stellar-wallet": "4.5",
       "base-wallet": null,
     });
-    expect(queryContract).toHaveBeenCalledOnce();
   });
 
   it("fails the whole balance snapshot if a Stellar read is unavailable", async () => {

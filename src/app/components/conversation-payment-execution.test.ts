@@ -1,3 +1,6 @@
+import { Buffer } from "node:buffer";
+
+import { Networks, StrKey } from "@stellar/stellar-sdk";
 import { describe, expect, it, vi } from "vitest";
 
 import type { SmartAccountPublicConfig } from "../../stellar/smart-account.ts";
@@ -29,12 +32,127 @@ const config = {
   relayerUrl: "/api/stellar/relayer",
 } satisfies SmartAccountPublicConfig;
 const smartAccount = { contractId: "CSENDER", credentialId: "credential" };
+const sourceHash = "b".repeat(64);
+const destinationHash = `0x${"d".repeat(64)}`;
+const cctpReview: PaymentReview = {
+  ...review,
+  routeId: "stellar_to_base",
+  destinationNetwork: "base",
+  rail: "circle_cctp_standard",
+  recipientAddress: `0x${"1".repeat(40)}`,
+  expectedRecipientAmount: "5",
+  fees: [{
+    kind: "provider",
+    amount: "0.052683",
+    asset: "USDC",
+    payer: "sender",
+    label: "Circle destination forwarding fee",
+  }],
+};
+const contract = (byte: number) => StrKey.encodeContract(Buffer.alloc(32, byte));
+const cctpConfig = {
+  rpcUrl: "https://soroban-testnet.stellar.org",
+  networkPassphrase: Networks.TESTNET,
+  usdcContract: contract(1),
+  tokenMessenger: contract(2),
+  messageTransmitter: contract(3),
+  forwarder: contract(4),
+  baseDomain: 6,
+  stellarDomain: 27,
+};
 
 function json(body: unknown, status = 200): Response {
   return Response.json(body, { status });
 }
 
 describe("conversation payment execution", () => {
+  it("authorizes the exact Stellar CCTP burn and completes only from the forwarded Base receipt", async () => {
+    const request = vi.fn()
+      .mockResolvedValueOnce(json({
+        status: "authorization_ready",
+        relayerUrl: "/api/stellar/relayer/payment",
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        burn: { burnAmount: "5.052683", maxFee: "0.052683" },
+      }, 201))
+      .mockResolvedValueOnce(json({ config: cctpConfig }))
+      .mockResolvedValueOnce(json({
+        status: "completed",
+        destinationTransactionHash: destinationHash,
+      }))
+      .mockResolvedValueOnce(json({ payment: {
+        id: cctpReview.id,
+        status: "completed",
+        recipientAddress: cctpReview.recipientAddress.toUpperCase().replace("0X", "0x"),
+        expectedRecipientAmount: "5.000000000000000000",
+        verifiedRecipientAddress: cctpReview.recipientAddress,
+        verifiedRecipientAmount: "5.000000000000000000",
+        destinationTransactionHash: destinationHash,
+        events: [
+          { stage: "recipient_verification", status: "recipient_verified", txHash: destinationHash },
+          { stage: "completion", status: "completed", txHash: destinationHash },
+        ],
+      } }));
+    const submitCctpBurn = vi.fn().mockResolvedValue({ txHash: sourceHash });
+
+    await expect(executeConversationPayment(cctpReview, {
+      config,
+      smartAccount,
+      request,
+      createKit: vi.fn().mockReturnValue({}),
+      restoreAccount: vi.fn().mockResolvedValue(smartAccount),
+      submitTransfer: vi.fn(),
+      submitCctpBurn,
+    })).resolves.toEqual({
+      status: "completed",
+      transactionHash: destinationHash,
+      verifiedRecipient: cctpReview.recipientAddress,
+      verifiedAmount: "5.000000000000000000",
+    });
+    expect(submitCctpBurn).toHaveBeenCalledWith(expect.objectContaining({
+      config: { ...cctpConfig, rpcUrl: `${cctpConfig.rpcUrl}/` },
+      recipient: cctpReview.recipientAddress,
+      burnAmount: "5.052683",
+      maxFee: "0.052683",
+    }));
+    expect(request.mock.calls.map(([url]) => url)).toEqual([
+      "/api/payments/stellar/cctp/authorize",
+      "/api/stellar/cctp/config",
+      `/api/payments/base/cctp/source?id=${cctpReview.id}`,
+      `/api/payments?id=${cctpReview.id}`,
+    ]);
+  });
+
+  it("recovers an interrupted CCTP response from the persisted source hash without resubmission", async () => {
+    const request = vi.fn()
+      .mockResolvedValueOnce(json({
+        status: "authorization_ready",
+        relayerUrl: "/api/stellar/relayer/payment",
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        burn: { burnAmount: "5.052683", maxFee: "0.052683" },
+      }, 201))
+      .mockResolvedValueOnce(json({ config: cctpConfig }))
+      .mockResolvedValueOnce(json({
+        status: "pending",
+        sourceTransactionHash: sourceHash,
+      }, 202));
+    const submitCctpBurn = vi.fn().mockRejectedValue(new Error("response lost"));
+
+    await expect(executeConversationPayment(cctpReview, {
+      config,
+      smartAccount,
+      request,
+      createKit: vi.fn().mockReturnValue({}),
+      restoreAccount: vi.fn().mockResolvedValue(smartAccount),
+      submitTransfer: vi.fn(),
+      submitCctpBurn,
+    })).resolves.toEqual({
+      status: "pending",
+      transactionHash: sourceHash,
+      message: "The Stellar burn is recorded. Circle attestation, Base finality, and exact recipient verification are still pending.",
+    });
+    expect(submitCctpBurn).toHaveBeenCalledTimes(1);
+  });
+
   it("uses the fixed protected relayer and completes only from exact persisted receipt evidence", async () => {
     const request = vi.fn()
       .mockResolvedValueOnce(json({

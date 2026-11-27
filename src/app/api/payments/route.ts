@@ -6,8 +6,8 @@ import { quoteSupportedPaymentFees } from "../../../../server/payments/quotes";
 
 export const dynamic = "force-dynamic";
 
-// Only sponsored Stellar direct previews have both a live source balance and
-// a known sender-paid fee policy. Other routes remain unavailable until quoted.
+// Both supported networks use owner-scoped live USDC reads. Fee policy still
+// keeps Base/CCTP reviews unavailable until every sender-paid cost is quoted.
 const handle = createPaymentHandler({
   getBalances: readVerifiedWalletBalances,
   quoteFees: quoteSupportedPaymentFees,
