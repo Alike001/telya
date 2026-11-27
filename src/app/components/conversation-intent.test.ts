@@ -120,6 +120,21 @@ describe("conversation intent boundary", () => {
     )).resolves.toMatchObject({ kind: "payment", amount: "5", recipientInput: "@alice" });
   });
 
+  it("keeps the exact Stellar-to-Base route during AI outage", async () => {
+    const address = "0xde67a35b322e5a31e8215b5245ca4e48d7977f71";
+    await expect(resolveConversationIntent(
+      `Send 0.1 USDC from Stellar to ${address} on Base Sepolia`,
+      "text",
+      vi.fn().mockRejectedValue(new Error("offline")),
+    )).resolves.toMatchObject({
+      kind: "payment",
+      amount: "0.1",
+      recipientInput: address,
+      requestedSourceNetwork: "stellar",
+      requestedDestinationNetwork: "base",
+    });
+  });
+
   it("does not call AI for deterministic account queries", async () => {
     const request = vi.fn();
     await expect(resolveConversationIntent("Check my balance", "text", request))

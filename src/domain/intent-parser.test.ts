@@ -41,6 +41,18 @@ describe("Deterministic Intent Parser", () => {
     expect(result.requestedSourceNetwork).toBe("base");
   });
 
+  it("keeps Stellar as source when an EVM recipient is on Base Sepolia", () => {
+    const address = "0xde67a35b322e5a31e8215b5245ca4e48d7977f71";
+    const result = parseNaturalLanguageIntent(`Send 0.1 USDC from Stellar to ${address} on Base Sepolia`);
+    expect(result).toMatchObject({
+      kind: "payment",
+      amount: "0.1",
+      recipientInput: address,
+      requestedSourceNetwork: "stellar",
+      requestedDestinationNetwork: "base",
+    });
+  });
+
   it("preserves seven-decimal amounts without rounding", () => {
     const result = parseNaturalLanguageIntent("Send 0.0000001 USDC to @alice");
     expect(result.kind).toBe("payment");

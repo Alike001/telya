@@ -119,17 +119,23 @@ export function parseNaturalLanguageIntent(
   // Extract explicit network instructions
   let requestedSourceNetwork: Network | undefined;
   let requestedDestinationNetwork: Network | undefined;
+  const pair = trimmed.match(/\b(stellar|base)\s*(?:to|->)\s*(stellar|base)\b/i) ??
+    trimmed.match(/\bfrom\s+(stellar|base)\b[\s\S]{0,100}?\bon\s+(stellar|base)\b/i);
+  if (pair?.[1] && pair[2]) {
+    requestedSourceNetwork = pair[1].toLowerCase() as Network;
+    requestedDestinationNetwork = pair[2].toLowerCase() as Network;
+  } else {
+    if (/\b(?:from|on|via)\s+base\b/i.test(trimmed)) {
+      requestedSourceNetwork = "base";
+    } else if (/\b(?:from|on|via)\s+stellar\b/i.test(trimmed)) {
+      requestedSourceNetwork = "stellar";
+    }
 
-  if (/\b(?:from|on|via)\s+base\b/i.test(trimmed)) {
-    requestedSourceNetwork = "base";
-  } else if (/\b(?:from|on|via)\s+stellar\b/i.test(trimmed)) {
-    requestedSourceNetwork = "stellar";
-  }
-
-  if (/\b(?:to|into)\s+base\b/i.test(trimmed)) {
-    requestedDestinationNetwork = "base";
-  } else if (/\b(?:to|into)\s+stellar\b/i.test(trimmed)) {
-    requestedDestinationNetwork = "stellar";
+    if (/\b(?:to|into)\s+base\b/i.test(trimmed)) {
+      requestedDestinationNetwork = "base";
+    } else if (/\b(?:to|into)\s+stellar\b/i.test(trimmed)) {
+      requestedDestinationNetwork = "stellar";
+    }
   }
 
   const rawAmount = amountMatch ? amountMatch[1] : undefined;
