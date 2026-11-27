@@ -121,6 +121,19 @@ export function parseVerifiedBalances(value: unknown): readonly VerifiedBalance[
   return parsed;
 }
 
+/** Merge independently verified network snapshots without inventing a missing balance. */
+export function mergeVerifiedBalanceSnapshots(
+  ...snapshots: readonly (readonly VerifiedBalance[])[]
+): readonly VerifiedBalance[] {
+  const merged = new Map<string, VerifiedBalance>();
+  for (const snapshot of snapshots) {
+    for (const balance of snapshot) {
+      merged.set(`${balance.network}:${balance.walletId}`, balance);
+    }
+  }
+  return [...merged.values()];
+}
+
 export function parsePaymentReview(value: unknown): PaymentReview | null {
   const payload = record(value);
   const payment = record(payload?.payment);

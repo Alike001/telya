@@ -20,6 +20,7 @@ import {
 } from "../../base/evm";
 import {
   apiMessage,
+  mergeVerifiedBalanceSnapshots,
   parsePaymentReview,
   parsePersistedPaymentHashes,
   parseVerifiedBalances,
@@ -107,19 +108,36 @@ function AuthenticatedConversation() {
       } catch {
         if (active) setSmartAccount(null);
       }
+      let verifiedBalances: readonly VerifiedBalance[] = [];
       try {
-        const balanceResponse = await authenticatedFetch(
+        const stellarBalanceResponse = await authenticatedFetch(
           "/api/balances",
           { cache: "no-store" },
           getAccessToken,
         );
-        if (balanceResponse.ok) {
-          const parsed = parseVerifiedBalances(await balanceResponse.json());
-          if (active) setBalances(parsed);
+        if (stellarBalanceResponse.ok) {
+          verifiedBalances = parseVerifiedBalances(await stellarBalanceResponse.json());
         }
       } catch {
-        if (active) setBalances([]);
+        verifiedBalances = [];
       }
+      try {
+        const baseBalanceResponse = await authenticatedFetch(
+          "/api/base/balances",
+          { cache: "no-store" },
+          getAccessToken,
+        );
+        if (baseBalanceResponse.ok) {
+          verifiedBalances = mergeVerifiedBalanceSnapshots(
+            verifiedBalances,
+            parseVerifiedBalances(await baseBalanceResponse.json()),
+          );
+        }
+      } catch {
+        // Keep the independently verified Stellar snapshot and the explicit
+        // unavailable Base entries returned by /api/balances.
+      }
+      if (active) setBalances(verifiedBalances);
     }
     void restore();
     return () => { active = false; };
@@ -256,9 +274,14 @@ function AuthenticatedConversation() {
       );
       if (parsed.kind === "balance_check") {
         const stellar = balances.find((balance) => balance.network === "stellar" && balance.status === "verified");
-        appendTelya(stellar?.amount
-          ? `Your server-verified Stellar Testnet balance is ${stellar.amount} USDC. Base balance is unavailable.`
-          : "A verified USDC balance is unavailable right now. No zero balance is being assumed.");
+        const base = balances.find((balance) => balance.network === "base" && balance.status === "verified");
+        const stellarMessage = stellar?.amount != null
+          ? `Your server-verified Stellar Testnet balance is ${stellar.amount} USDC.`
+          : "Your Stellar USDC balance is unavailable; no zero balance is being assumed.";
+        const baseMessage = base?.amount != null
+          ? `Your server-verified Base Sepolia balance is ${base.amount} USDC.`
+          : "Your Base USDC balance is unavailable; no zero balance is being assumed.";
+        appendTelya(`${stellarMessage} ${baseMessage}`);
         return;
       }
       if (parsed.kind === "activity_check") {

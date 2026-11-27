@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   parseAuthorizationReady,
   parseCompletedPaymentReceipt,
+  mergeVerifiedBalanceSnapshots,
   parsePaymentReview,
   parseReconciliation,
   parseVerifiedBalances,
@@ -17,6 +18,22 @@ describe("conversation financial response parsing", () => {
     expect(parseVerifiedBalances({ balances: [{
       walletId: "wallet-1", network: "stellar", address: "CACCOUNT", amount: null, status: "verified",
     }] })).toEqual([]);
+  });
+
+  it("replaces only the matching unavailable Base wallet with its independently verified balance", () => {
+    const primary = parseVerifiedBalances({ balances: [
+      { walletId: "stellar-1", network: "stellar", address: "CACCOUNT", amount: "4.5", status: "verified" },
+      { walletId: "base-1", network: "base", address: "0x01", amount: null, status: "unavailable" },
+    ] });
+    const base = parseVerifiedBalances({ balances: [
+      { walletId: "base-1", network: "base", address: "0x01", amount: "2.75", status: "verified" },
+    ] });
+
+    expect(mergeVerifiedBalanceSnapshots(primary, base)).toEqual([
+      { walletId: "stellar-1", network: "stellar", address: "CACCOUNT", amount: "4.5", status: "verified" },
+      { walletId: "base-1", network: "base", address: "0x01", amount: "2.75", status: "verified" },
+    ]);
+    expect(mergeVerifiedBalanceSnapshots(primary, [])).toEqual(primary);
   });
 
   it("accepts only an awaiting-confirmation review and never promotes a hash to success", () => {
