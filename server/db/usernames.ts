@@ -1,5 +1,5 @@
-import { getSqlClient } from "./client.js";
-import type { AuthenticatedUser } from "../auth/privy.js";
+import { getSqlClient } from "./client.ts";
+import type { AuthenticatedUser } from "../auth/privy.ts";
 import { StrKey } from "@stellar/stellar-sdk/base";
 
 export class UsernameUnavailableError extends Error {
