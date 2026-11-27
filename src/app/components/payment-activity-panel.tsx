@@ -193,13 +193,21 @@ function AuthenticatedPaymentActivity() {
           <p className="empty-title">Loading persisted activity…</p>
         </div>
       ) : selected ? (
-        <PaymentProgressTimeline
-          payment={selected}
-          events={selected.events}
-          onRefresh={refreshSelected}
-          {...(receipt ? { onViewReceipt: () => setShowReceipt(true) } : {})}
-          onClose={() => { setSelected(null); setShowReceipt(false); }}
-        />
+        <>
+          <PaymentProgressTimeline
+            payment={selected}
+            events={selected.events}
+            onRefresh={refreshSelected}
+            {...(receipt ? { onViewReceipt: () => setShowReceipt(true) } : {})}
+            onClose={() => { setSelected(null); setShowReceipt(false); }}
+          />
+          {selected.status === "authorized" && selected.route.id === "base_to_stellar_cctp" &&
+            selected.sourceTransaction === null && selected.destinationTransaction === null && (
+              <a className="cta-button primary" href={`/?resumePayment=${encodeURIComponent(selected.id)}`}>
+                Resume this authorized Base payment
+              </a>
+            )}
+        </>
       ) : (
         <>
           <ActivityHistory

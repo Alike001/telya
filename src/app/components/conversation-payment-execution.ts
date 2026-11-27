@@ -42,9 +42,13 @@ function equalAmount(left: string, right: string): boolean {
 }
 
 function baseUsdcUnits(value: string): bigint | null {
-  const match = /^(0|[1-9]\d*)(?:\.(\d{1,6}))?$/.exec(value);
+  const match = /^(0|[1-9]\d*)(?:\.(\d{1,18}))?$/.exec(value);
   if (!match) return null;
-  return BigInt(match[1]!) * 1_000_000n + BigInt((match[2] ?? "").padEnd(6, "0") || "0");
+  const fraction = match[2] ?? "";
+  // PostgreSQL renders numeric(38,18) with trailing zeroes. Accept those
+  // canonical zeroes without rounding a nonzero sub-micro-USDC amount.
+  if (fraction.length > 6 && /[1-9]/.test(fraction.slice(6))) return null;
+  return BigInt(match[1]!) * 1_000_000n + BigInt(fraction.slice(0, 6).padEnd(6, "0") || "0");
 }
 
 function baseCctpAuthorizationMatchesReview(

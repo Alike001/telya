@@ -201,6 +201,64 @@ describe("conversation payment execution", () => {
     });
   });
 
+  it("accepts exact Base CCTP authorization against Neon-padded 18-decimal review amounts", async () => {
+    const mintRecipient = `0x${"4".repeat(64)}`;
+    const request = vi.fn()
+      .mockResolvedValueOnce(json({
+        status: "authorization_ready",
+        transaction: {
+          chainId: BASE_SEPOLIA_CHAIN_ID,
+          sender: baseSender,
+          token: BASE_SEPOLIA_USDC,
+          tokenMessenger: BASE_SEPOLIA_TOKEN_MESSENGER,
+          burnAmount: "0.1",
+          maxFee: "0",
+          destinationDomain: 27,
+          mintRecipient,
+        },
+      }))
+      .mockResolvedValueOnce(json({ status: "pending", sourceTransactionHash: baseHash }, 202));
+    const submitBaseCctpBurn = vi.fn().mockResolvedValue({ transactionHash: baseHash });
+    await expect(executeConversationPayment({
+      ...baseCctpReview,
+      expectedRecipientAmount: "0.100000000000000000",
+      fees: [{ kind: "provider", amount: "0.000000000000000000", asset: "USDC", payer: "sender", label: "Circle CCTP Standard fee" }],
+    }, {
+      config: null,
+      smartAccount: null,
+      request,
+      createKit: vi.fn(),
+      restoreAccount: vi.fn(),
+      submitTransfer: vi.fn(),
+      getBaseProvider: vi.fn().mockResolvedValue({ request: vi.fn() }),
+      submitBaseCctpBurn,
+    })).resolves.toMatchObject({ status: "pending", transactionHash: baseHash });
+    expect(submitBaseCctpBurn).toHaveBeenCalledOnce();
+  });
+
+  it("rejects a nonzero sub-micro-USDC review amount before Base wallet access", async () => {
+    const getBaseProvider = vi.fn();
+    await expect(executeConversationPayment({
+      ...baseCctpReview,
+      expectedRecipientAmount: "0.100000100000000000",
+    }, {
+      config: null,
+      smartAccount: null,
+      request: vi.fn().mockResolvedValue(json({
+        status: "authorization_ready",
+        transaction: {
+          chainId: BASE_SEPOLIA_CHAIN_ID, sender: baseSender,
+          token: BASE_SEPOLIA_USDC, tokenMessenger: BASE_SEPOLIA_TOKEN_MESSENGER,
+          burnAmount: "0.1", maxFee: "0", destinationDomain: 27,
+          mintRecipient: `0x${"4".repeat(64)}`,
+        },
+      })),
+      createKit: vi.fn(), restoreAccount: vi.fn(), submitTransfer: vi.fn(),
+      getBaseProvider, submitBaseCctpBurn: vi.fn(),
+    })).rejects.toThrow("The Base CCTP authorization does not match this review.");
+    expect(getBaseProvider).not.toHaveBeenCalled();
+  });
+
   it("rejects a Base CCTP authorization with an unreviewed fee before wallet access", async () => {
     const getBaseProvider = vi.fn();
     const submitBaseCctpBurn = vi.fn();

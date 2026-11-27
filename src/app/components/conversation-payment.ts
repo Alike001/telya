@@ -18,7 +18,7 @@ export type VerifiedBalance = {
 
 export type PaymentReview = {
   readonly id: string;
-  readonly status: "awaiting_confirmation";
+  readonly status: "awaiting_confirmation" | "authorized";
   readonly routeId: string;
   readonly sourceNetwork: "stellar" | "base";
   readonly destinationNetwork: "stellar" | "base";
@@ -184,6 +184,26 @@ export function parsePaymentReview(value: unknown): PaymentReview | null {
     reasons: payment.reasons,
     explanation: payload.explanation,
   };
+}
+
+/** Restore only an owner-scoped, already-authorized Base CCTP payment with no burn hash. */
+export function parseResumableBaseCctpReview(value: unknown, requestedId: string): PaymentReview | null {
+  const payload = record(value);
+  const payment = record(payload?.payment);
+  if (!payment || payment.id !== requestedId || payment.status !== "authorized" ||
+      payment.routeId !== "base_to_stellar" ||
+      payment.sourceNetwork !== "base" || payment.destinationNetwork !== "stellar" ||
+      payment.sourceTransactionHash !== null || payment.destinationTransactionHash !== null ||
+      !Array.isArray(payment.events) || !payment.events.some((event) => {
+        const row = record(event);
+        return row?.stage === "authorization" && row.status === "authorized";
+      })) return null;
+  const review = parsePaymentReview({
+    status: "awaiting_confirmation",
+    explanation: "This exact authorized payment has no recorded burn hash. Review it again before asking your Base wallet to submit.",
+    payment: { ...payment, status: "awaiting_confirmation" },
+  });
+  return review ? { ...review, status: "authorized" } : null;
 }
 
 export function parseAuthorizationReady(value: unknown): {

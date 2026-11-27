@@ -5,11 +5,34 @@ import {
   parseCompletedPaymentReceipt,
   mergeVerifiedBalanceSnapshots,
   parsePaymentReview,
+  parseResumableBaseCctpReview,
   parseReconciliation,
   parseVerifiedBalances,
 } from "./conversation-payment.ts";
 
 describe("conversation financial response parsing", () => {
+  it("restores only the exact authorized Base CCTP review with no recorded burn", () => {
+    const id = "e6829ba5-616a-4696-96a4-6a252d1ac5d2";
+    const persisted = { payment: {
+      id, status: "authorized", routeId: "base_to_stellar",
+      sourceNetwork: "base", destinationNetwork: "stellar", rail: "circle_cctp_standard",
+      recipientAddress: "CB5KD4DQCBNQ7NEJESE5CUBNAZSNEAROEGKN6G4HGO5D265QNHWMSG3R",
+      expectedRecipientAmount: "0.100000000000000000",
+      fees: [{ kind: "provider", amount: "0", asset: "USDC", payer: "sender", label: "Circle CCTP Standard fee" }],
+      reasons: ["explicit_user_instruction"],
+      sourceTransactionHash: null, destinationTransactionHash: null,
+      events: [{ stage: "authorization", status: "authorized" }],
+    } };
+    expect(parseResumableBaseCctpReview(persisted, id)).toMatchObject({
+      id, status: "authorized", routeId: "base_to_stellar",
+      expectedRecipientAmount: "0.100000000000000000",
+    });
+    expect(parseResumableBaseCctpReview(persisted, "another-id")).toBeNull();
+    expect(parseResumableBaseCctpReview({ payment: { ...persisted.payment, sourceTransactionHash: "a".repeat(64) } }, id)).toBeNull();
+    expect(parseResumableBaseCctpReview({ payment: { ...persisted.payment, status: "completed" } }, id)).toBeNull();
+    expect(parseResumableBaseCctpReview({ payment: { ...persisted.payment, events: [] } }, id)).toBeNull();
+  });
+
   it("accepts only server-verified balances and preserves unavailable networks", () => {
     expect(parseVerifiedBalances({ balances: [
       { walletId: "wallet-1", network: "stellar", address: "CACCOUNT", amount: "4.5", status: "verified" },

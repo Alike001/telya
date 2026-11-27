@@ -27,6 +27,7 @@ import {
   apiMessage,
   mergeVerifiedBalanceSnapshots,
   parsePaymentReview,
+  parseResumableBaseCctpReview,
   parsePersistedPaymentHashes,
   parseVerifiedBalances,
 } from "./conversation-payment";
@@ -82,6 +83,7 @@ function AuthenticatedConversation() {
   const streamEndRef = useRef<HTMLDivElement>(null);
   const configRef = useRef<SmartAccountPublicConfig | null>(null);
   const sessionGuardRef = useRef<SessionRequestGuard | null>(null);
+  const resumedPaymentRef = useRef<string | null>(null);
 
   useEffect(() => {
     streamEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -91,6 +93,7 @@ function AuthenticatedConversation() {
     sessionGuardRef.current?.cancel();
     sessionGuardRef.current = null;
     if (!authReady || !authenticated) {
+      resumedPaymentRef.current = null;
       const reset = resetConversationSession();
       setSmartAccount(null);
       setBalances([]);
@@ -165,6 +168,24 @@ function AuthenticatedConversation() {
         // unavailable Base entries returned by /api/balances.
       }
       if (guard.isActive()) setBalances(verifiedBalances);
+      const resumeId = new URLSearchParams(window.location.search).get("resumePayment");
+      if (resumeId && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(resumeId) &&
+          resumedPaymentRef.current !== resumeId) {
+        resumedPaymentRef.current = resumeId;
+        try {
+          const response = await request(`/api/payments?id=${encodeURIComponent(resumeId)}`, { cache: "no-store" });
+          const payload: unknown = await response.json();
+          if (!guard.isActive()) return;
+          const review = response.ok ? parseResumableBaseCctpReview(payload, resumeId) : null;
+          if (review) {
+            appendTelya(review.explanation, review, review.recipientAddress, guard);
+          } else {
+            appendTelya("This existing payment cannot be authorized again from its current recorded state. Check Activity before taking another action.", undefined, undefined, guard);
+          }
+        } catch {
+          appendTelya("The existing payment could not be restored right now. Check Activity before taking another action.", undefined, undefined, guard);
+        }
+      }
     }
     void restore();
     return () => {
