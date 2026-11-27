@@ -17,7 +17,7 @@ import {
   type SessionRequestGuard,
 } from "../session-request-guard";
 import { ActivityHistory } from "./activity-history";
-import { reconcileSubmittedActivityPayment } from "./payment-activity-refresh";
+import { reconcileAndReloadActivityPayment } from "./payment-activity-refresh";
 import { PaymentProgressTimeline } from "./payment-progress-timeline";
 import { PaymentReceiptModal } from "./payment-receipt-modal";
 
@@ -147,9 +147,11 @@ function AuthenticatedPaymentActivity() {
     setError(null);
     try {
       const request = await captureRequest(guard);
-      await reconcileSubmittedActivityPayment(selected, request);
-      if (!guard.isActive()) return;
-      await fetchDetail(selected.id, guard, request);
+      await reconcileAndReloadActivityPayment(
+        selected,
+        request,
+        () => fetchDetail(selected.id, guard, request),
+      );
     } catch (reason) {
       if (!guard.isActive()) return;
       setError(reason instanceof Error ? reason.message : "Payment refresh is temporarily unavailable.");

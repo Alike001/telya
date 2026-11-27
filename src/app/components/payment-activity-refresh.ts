@@ -38,3 +38,20 @@ export async function reconcileSubmittedActivityPayment(
     ? "Stellar payment verification is temporarily unavailable. The recorded payment was not resubmitted; retry Refresh when service returns."
     : "The recorded Stellar payment could not be verified. The payment was not resubmitted; retry Refresh or sign in again.");
 }
+
+/** Always read durable state after reconciliation, including a recorded failure. */
+export async function reconcileAndReloadActivityPayment(
+  payment: Pick<PersistedPayment, "id" | "route" | "status" | "sourceTransaction">,
+  request: Request,
+  loadDetail: () => Promise<PersistedPayment | null>,
+): Promise<PersistedPayment | null> {
+  let reconciliationError: unknown;
+  try {
+    await reconcileSubmittedActivityPayment(payment, request);
+  } catch (error) {
+    reconciliationError = error;
+  }
+  const persisted = await loadDetail();
+  if (reconciliationError && persisted?.status !== "failed") throw reconciliationError;
+  return persisted;
+}
