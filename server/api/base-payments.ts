@@ -2,6 +2,10 @@ import { rpc } from "@stellar/stellar-sdk";
 
 import {
   BaseEvmError,
+  BASE_SEPOLIA_CHAIN_ID,
+  BASE_SEPOLIA_TOKEN_MESSENGER,
+  BASE_SEPOLIA_USDC,
+  CCTP_STELLAR_DOMAIN,
   baseEvmConfigFromEnvironment,
   createBaseRpc,
   normalizeBaseUsdcAmount,
@@ -11,13 +15,17 @@ import { CircleCctpError } from "../../src/base/circle.ts";
 import { BaseCctpPersistenceError } from "../../src/server/base-cctp.ts";
 import {
   reconcileBaseDirectPayment,
+  authorizeBaseCctpOperation,
+  authorizeBaseDirectOperation,
   reconcileBaseToStellarCctp,
   prepareStellarToBaseCctpDestination,
   reconcileStellarToBaseDestination,
   recordStellarToBaseDestinationSubmitted,
-  reserveBaseCctpOperation,
 } from "../../src/server/base-cctp.ts";
-import { stellarCctpConfigFromEnvironment } from "../../src/stellar/cctp.ts";
+import {
+  stellarCctpConfigFromEnvironment,
+  stellarContractToBytes32,
+} from "../../src/stellar/cctp.ts";
 import {
   PaymentConflictError,
   PaymentInputError,
@@ -142,7 +150,23 @@ export function createBaseDirectPaymentHandler(options: { authenticate?: Authent
       if (payment.route_id !== "base_to_base") return jsonResponse({ error: "unsupported_payment_route" }, 409);
       const body = await readJson(request, 2_048);
       const transactionHash = isRecord(body) ? parseTransactionHash(body.transactionHash, true) : null;
-      if (!transactionHash) return jsonResponse({ error: "invalid_transaction_hash" }, 400);
+      if (!transactionHash) {
+        if (!isRecord(body) || Object.keys(body).length !== 0) {
+          return jsonResponse({ error: "invalid_transaction_hash" }, 400);
+        }
+        const intent = await authorizeBaseDirectOperation({ paymentId: id });
+        return jsonResponse({
+          paymentId: id,
+          status: "authorization_ready",
+          transaction: {
+            chainId: BASE_SEPOLIA_CHAIN_ID,
+            sender: intent.sourceAddress,
+            token: BASE_SEPOLIA_USDC,
+            recipient: intent.recipientAddress,
+            amount: intent.amount,
+          },
+        });
+      }
       const config = baseEvmConfigFromEnvironment();
       const result = await reconcileBaseDirectPayment({
         paymentId: id,
@@ -167,8 +191,22 @@ export function createBaseCctpAuthorizationHandler(options: { authenticate?: Aut
         return jsonResponse({ error: "payment_not_authorized" }, 409);
       }
       const intent = trustedCctpBurnIntent(payment);
-      const operation = await reserveBaseCctpOperation({ paymentId: id, ...intent });
-      return jsonResponse({ paymentId: id, status: "authorized", ...operation }, 200);
+      const operation = await authorizeBaseCctpOperation({ paymentId: id, ...intent });
+      const stellar = stellarCctpConfigFromEnvironment();
+      return jsonResponse({
+        paymentId: id,
+        status: "authorization_ready",
+        transaction: {
+          chainId: BASE_SEPOLIA_CHAIN_ID,
+          sender: operation.sourceAddress,
+          token: BASE_SEPOLIA_USDC,
+          tokenMessenger: BASE_SEPOLIA_TOKEN_MESSENGER,
+          burnAmount: intent.burnAmount,
+          maxFee: intent.maxFee,
+          destinationDomain: CCTP_STELLAR_DOMAIN,
+          mintRecipient: stellarContractToBytes32(stellar.forwarder),
+        },
+      }, 200);
     },
     mapBasePaymentError,
   );

@@ -339,6 +339,105 @@ export async function reserveBaseCctpOperation(input: {
   };
 }
 
+/** Mark an exact Base-source CCTP review authorized before the wallet signs. */
+export async function authorizeBaseCctpOperation(input: {
+  readonly paymentId: string;
+  readonly burnAmount: string;
+  readonly maxFee: string;
+}): Promise<{ readonly sourceAddress: string; readonly burnAmountAtomic: string; readonly maxFeeAtomic: string }> {
+  const reserved = await reserveBaseCctpOperation(input);
+  const paymentId = requirePaymentId(input.paymentId);
+  const { sql, payment } = await getPaymentOperation(paymentId, ["base_to_stellar"]);
+  if (!["awaiting_confirmation", "authorized"].includes(payment.status) ||
+      typeof payment.source_address !== "string") {
+    throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "Base CCTP payment is not ready for wallet authorization");
+  }
+  const rows = await sql`
+    WITH operation AS (
+      UPDATE base_cctp_operations SET status = 'authorized', updated_at = now()
+      WHERE payment_id = ${paymentId}::uuid AND route_id = 'base_to_stellar'
+        AND burn_amount_atomic = ${reserved.burnAmountAtomic}::numeric
+        AND max_fee_atomic = ${reserved.maxFeeAtomic}::numeric
+      RETURNING payment_id
+    ), payment AS (
+      UPDATE payments SET status = 'authorized', updated_at = now()
+      WHERE id IN (SELECT payment_id FROM operation)
+        AND route_id = 'base_to_stellar'
+        AND status IN ('awaiting_confirmation', 'authorized')
+      RETURNING id
+    ), event AS (
+      INSERT INTO payment_events (
+        payment_id, event_key, stage, status, network, public_message, completed_at
+      )
+      SELECT id, 'base_cctp_owner_authorized', 'authorization', 'authorized', 'base',
+        'The owner authorized the exact Base CCTP burn and fee limit.', now()
+      FROM payment
+      ON CONFLICT (payment_id, event_key) DO NOTHING
+      RETURNING payment_id
+    )
+    SELECT id FROM payment
+  `;
+  if (rows.length === 0) {
+    throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "Base CCTP authorization changed concurrently");
+  }
+  return { sourceAddress: payment.source_address, ...reserved };
+}
+
+/** Persist the exact Base direct intent before the wallet signs it. */
+export async function authorizeBaseDirectOperation(input: {
+  readonly paymentId: string;
+}): Promise<{ readonly sourceAddress: string; readonly recipientAddress: string; readonly amount: string }> {
+  const paymentId = requirePaymentId(input.paymentId);
+  const { sql, payment } = await getPaymentOperation(paymentId, ["base_to_base"]);
+  if (!["awaiting_confirmation", "authorized"].includes(payment.status) ||
+      typeof payment.source_address !== "string") {
+    throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "Base direct payment is not ready for wallet authorization");
+  }
+  const amount = canonicalDatabaseDecimal(payment.expected_amount);
+  const amountAtomic = decimalToBaseAtomic(amount);
+  const rows = await sql`
+    WITH operation AS (
+      INSERT INTO base_cctp_operations (
+        payment_id, route_id, status, expected_recipient_address, expected_amount_atomic
+      ) VALUES (
+        ${paymentId}::uuid, 'base_to_base', 'authorized',
+        ${payment.recipient_address}, ${amountAtomic}::numeric
+      )
+      ON CONFLICT (payment_id) DO UPDATE SET status = 'authorized', updated_at = now()
+      WHERE base_cctp_operations.route_id = 'base_to_base'
+        AND lower(base_cctp_operations.expected_recipient_address) = lower(EXCLUDED.expected_recipient_address)
+        AND base_cctp_operations.expected_amount_atomic = EXCLUDED.expected_amount_atomic
+      RETURNING payment_id
+    ), payment AS (
+      UPDATE payments SET status = 'authorized', updated_at = now()
+      WHERE id IN (SELECT payment_id FROM operation)
+        AND route_id = 'base_to_base'
+        AND status IN ('awaiting_confirmation', 'authorized')
+        AND lower(recipient_address) = lower(${payment.recipient_address})
+        AND expected_recipient_amount = ${amount}::numeric
+      RETURNING id
+    ), event AS (
+      INSERT INTO payment_events (
+        payment_id, event_key, stage, status, network, public_message, completed_at
+      )
+      SELECT id, 'base_direct_owner_authorized', 'authorization', 'authorized', 'base',
+        'The owner authorized the exact Base USDC recipient and amount.', now()
+      FROM payment
+      ON CONFLICT (payment_id, event_key) DO NOTHING
+      RETURNING payment_id
+    )
+    SELECT id FROM payment
+  `;
+  if (rows.length === 0) {
+    throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "Base direct authorization changed concurrently");
+  }
+  return {
+    sourceAddress: payment.source_address,
+    recipientAddress: payment.recipient_address,
+    amount,
+  };
+}
+
 /** Atomically persist Base source/Circle evidence with the Payment timeline. */
 export async function recordBaseCctpAttestation(input: {
   readonly paymentId: string;
@@ -444,6 +543,39 @@ export async function reconcileBaseDirectPayment(input: {
     throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "Base source wallet is missing");
   }
   const hash = input.transactionHash.trim().toLowerCase();
+  const submitted = await sql`
+    WITH operation AS (
+      UPDATE base_cctp_operations SET status = 'destination_submitted',
+        destination_transaction_hash = ${hash}, updated_at = now()
+      WHERE payment_id = ${paymentId}::uuid AND route_id = 'base_to_base'
+        AND status IN ('authorized', 'destination_submitted')
+        AND (destination_transaction_hash IS NULL OR destination_transaction_hash = ${hash})
+      RETURNING payment_id
+    ), payment AS (
+      UPDATE payments SET status = 'destination_submitted',
+        destination_transaction_hash = ${hash}, updated_at = now()
+      WHERE id IN (SELECT payment_id FROM operation)
+        AND route_id = 'base_to_base'
+        AND status IN ('authorized', 'submitted', 'destination_submitted')
+        AND (destination_transaction_hash IS NULL OR destination_transaction_hash = ${hash})
+      RETURNING id
+    ), event AS (
+      INSERT INTO payment_events (
+        payment_id, event_key, stage, status, network, transaction_hash,
+        public_message, completed_at
+      )
+      SELECT id, 'base_direct_submitted', 'destination_submission',
+        'destination_submitted', 'base', ${hash},
+        'The Base wallet submitted the USDC transfer. Finality and recipient verification are pending.', now()
+      FROM payment
+      ON CONFLICT (payment_id, event_key) DO NOTHING
+      RETURNING payment_id
+    )
+    SELECT id FROM payment
+  `;
+  if (submitted.length === 0) {
+    throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "Base direct submission conflicts with persisted payment state");
+  }
   const verification = await verifyBaseUsdcTransfer({
     rpc: input.rpc,
     txHash: hash,
@@ -595,6 +727,40 @@ export async function reconcileBaseToStellarCctp(input: {
   const operation = operations[0] as Record<string, unknown> | undefined;
   if (typeof operation?.burn_amount !== "string" || typeof operation.max_fee !== "string") {
     throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "Base CCTP burn amount and max fee must be reserved before signing");
+  }
+  const sourceHash = input.sourceTransactionHash.trim().toLowerCase();
+  const submitted = await sql`
+    WITH operation AS (
+      UPDATE base_cctp_operations SET status = 'source_submitted',
+        source_transaction_hash = ${sourceHash}, updated_at = now()
+      WHERE payment_id = ${paymentId}::uuid AND route_id = 'base_to_stellar'
+        AND status IN ('authorized', 'source_submitted', 'source_confirmed', 'awaiting_attestation')
+        AND (source_transaction_hash IS NULL OR source_transaction_hash = ${sourceHash})
+      RETURNING payment_id
+    ), payment AS (
+      UPDATE payments SET status = CASE
+          WHEN status = 'authorized' THEN 'submitted' ELSE status END,
+        source_transaction_hash = ${sourceHash}, updated_at = now()
+      WHERE id IN (SELECT payment_id FROM operation)
+        AND route_id = 'base_to_stellar'
+        AND status IN ('authorized', 'submitted', 'source_confirmed', 'awaiting_attestation')
+        AND (source_transaction_hash IS NULL OR source_transaction_hash = ${sourceHash})
+      RETURNING id
+    ), event AS (
+      INSERT INTO payment_events (
+        payment_id, event_key, stage, status, network, transaction_hash,
+        public_message, completed_at
+      )
+      SELECT id, 'base_cctp_submitted', 'source_submission', 'submitted', 'base',
+        ${sourceHash}, 'The Base wallet submitted the Circle USDC burn. Finality is pending.', now()
+      FROM payment
+      ON CONFLICT (payment_id, event_key) DO NOTHING
+      RETURNING payment_id
+    )
+    SELECT id FROM payment
+  `;
+  if (submitted.length === 0) {
+    throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "Base CCTP submission conflicts with persisted payment state");
   }
   const stellarConfig = stellarCctpConfigFromEnvironment();
   const verification = await verifyBaseCctpSource({
