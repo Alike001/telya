@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { usePrivy } from "@privy-io/react-auth";
 import { Loader2, RefreshCw } from "lucide-react";
 
@@ -40,14 +40,16 @@ function AuthenticatedPaymentActivity() {
   const [showReceipt, setShowReceipt] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const sessionGuardRef = useRef<SessionRequestGuard | null>(null);
 
   const request = useCallback(
     (input: string, init: RequestInit = {}) => authenticatedFetch(input, init, getAccessToken),
     [getAccessToken],
   );
 
-  const loadPage = useCallback(async (cursor?: string, guard?: SessionRequestGuard) => {
-    if (guard?.isActive() === false) return;
+  const loadPage = useCallback(async (cursor?: string, requestedGuard?: SessionRequestGuard) => {
+    const guard = requestedGuard ?? sessionGuardRef.current;
+    if (!guard?.isActive()) return;
     setLoading(true);
     setError(null);
     try {
@@ -58,18 +60,20 @@ function AuthenticatedPaymentActivity() {
       const payload: unknown = await response.json();
       const page = response.ok ? parsePaymentActivityPage(payload) : null;
       if (!page) throw new Error("The persisted payment history response could not be verified.");
-      if (guard?.isActive() === false) return;
+      if (!guard.isActive()) return;
       setPayments((previous) => cursor ? [...previous, ...page.payments] : page.payments);
       setNextCursor(page.nextCursor);
     } catch (reason) {
-      if (guard?.isActive() === false) return;
+      if (!guard.isActive()) return;
       setError(reason instanceof Error ? reason.message : "Payment history is temporarily unavailable.");
     } finally {
-      if (guard?.isActive() !== false) setLoading(false);
+      if (guard.isActive()) setLoading(false);
     }
   }, [request]);
 
   useEffect(() => {
+    sessionGuardRef.current?.cancel();
+    sessionGuardRef.current = null;
     if (!ready || !authenticated) {
       setPayments([]);
       setNextCursor(null);
@@ -85,34 +89,48 @@ function AuthenticatedPaymentActivity() {
     setShowReceipt(false);
     setError(null);
     const guard = createSessionRequestGuard();
+    sessionGuardRef.current = guard;
     void loadPage(undefined, guard);
-    return () => guard.cancel();
+    return () => {
+      guard.cancel();
+      if (sessionGuardRef.current === guard) sessionGuardRef.current = null;
+    };
   }, [authenticated, loadPage, ready]);
 
-  async function fetchDetail(paymentId: string): Promise<PersistedPayment> {
+  async function fetchDetail(
+    paymentId: string,
+    guard: SessionRequestGuard | null = sessionGuardRef.current,
+  ): Promise<PersistedPayment | null> {
+    if (!guard?.isActive()) return null;
     const response = await request(`/api/payments?id=${encodeURIComponent(paymentId)}`, {
       cache: "no-store",
     });
     const payload: unknown = await response.json();
     const payment = response.ok ? parsePaymentActivityDetail(payload) : null;
     if (!payment) throw new Error("The persisted payment timeline could not be verified.");
+    if (!guard.isActive()) return null;
     setSelected(payment);
     setPayments((previous) => previous.map((item) => item.id === payment.id ? payment : item));
     return payment;
   }
 
   async function openTimeline(payment: PersistedPayment) {
+    const guard = sessionGuardRef.current;
+    if (!guard?.isActive()) return;
     setError(null);
     setShowReceipt(false);
     try {
-      await fetchDetail(payment.id);
+      await fetchDetail(payment.id, guard);
     } catch (reason) {
+      if (!guard.isActive()) return;
       setError(reason instanceof Error ? reason.message : "Payment details are temporarily unavailable.");
     }
   }
 
   async function refreshSelected() {
     if (!selected) return;
+    const guard = sessionGuardRef.current;
+    if (!guard?.isActive()) return;
     setError(null);
     try {
       if (selected.route.id === "stellar_to_stellar" && selected.status === "submitted") {
@@ -121,8 +139,10 @@ function AuthenticatedPaymentActivity() {
           { method: "POST", credentials: "same-origin" },
         );
       }
-      await fetchDetail(selected.id);
+      if (!guard.isActive()) return;
+      await fetchDetail(selected.id, guard);
     } catch (reason) {
+      if (!guard.isActive()) return;
       setError(reason instanceof Error ? reason.message : "Payment refresh is temporarily unavailable.");
     }
   }

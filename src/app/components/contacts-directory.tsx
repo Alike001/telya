@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { usePrivy } from "@privy-io/react-auth";
 import { Loader2, Search, Send, Trash2, UserPlus, Users, X } from "lucide-react";
 
@@ -77,14 +77,15 @@ function AuthenticatedContacts({ onSelectPayContact, onClose }: ContactsDirector
   const [preferredNetwork, setPreferredNetwork] = useState<Network | "">("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const sessionGuardRef = useRef<SessionRequestGuard | null>(null);
 
   const request = useCallback(
     (input: string, init: RequestInit = {}) => authenticatedFetch(input, init, getAccessToken),
     [getAccessToken],
   );
 
-  const loadContacts = useCallback(async (guard?: SessionRequestGuard) => {
-    if (guard?.isActive() === false) return;
+  const loadContacts = useCallback(async (guard: SessionRequestGuard) => {
+    if (!guard.isActive()) return;
     setLoading(true);
     setError(null);
     try {
@@ -92,18 +93,20 @@ function AuthenticatedContacts({ onSelectPayContact, onClose }: ContactsDirector
       const payload: unknown = await response.json();
       const parsed = response.ok ? parseVerifiedContacts(payload) : null;
       if (!parsed) throw new Error("The authenticated contacts response could not be verified.");
-      if (guard?.isActive() === false) return;
+      if (!guard.isActive()) return;
       setContacts(parsed);
     } catch (reason) {
-      if (guard?.isActive() === false) return;
+      if (!guard.isActive()) return;
       setContacts([]);
       setError(reason instanceof Error ? reason.message : "Contacts are temporarily unavailable.");
     } finally {
-      if (guard?.isActive() !== false) setLoading(false);
+      if (guard.isActive()) setLoading(false);
     }
   }, [request]);
 
   useEffect(() => {
+    sessionGuardRef.current?.cancel();
+    sessionGuardRef.current = null;
     if (!ready || !authenticated) {
       setContacts([]);
       setSearch("");
@@ -117,12 +120,18 @@ function AuthenticatedContacts({ onSelectPayContact, onClose }: ContactsDirector
     setContacts([]);
     setError(null);
     const guard = createSessionRequestGuard();
+    sessionGuardRef.current = guard;
     void loadContacts(guard);
-    return () => guard.cancel();
+    return () => {
+      guard.cancel();
+      if (sessionGuardRef.current === guard) sessionGuardRef.current = null;
+    };
   }, [authenticated, loadContacts, ready]);
 
   async function saveContact(event: React.FormEvent) {
     event.preventDefault();
+    const guard = sessionGuardRef.current;
+    if (!guard?.isActive()) return;
     setLoading(true);
     setError(null);
     try {
@@ -137,28 +146,34 @@ function AuthenticatedContacts({ onSelectPayContact, onClose }: ContactsDirector
       const payload: unknown = await response.json();
       const saved = response.ok ? parseSavedContact(payload) : null;
       if (!saved) throw new Error("That username could not be saved as a verified contact.");
+      if (!guard.isActive()) return;
       setContacts((previous) => [saved, ...previous.filter((contact) => contact.id !== saved.id)]);
       setUsername("");
       setPreferredNetwork("");
       setShowAdd(false);
     } catch (reason) {
+      if (!guard.isActive()) return;
       setError(reason instanceof Error ? reason.message : "The contact could not be saved.");
     } finally {
-      setLoading(false);
+      if (guard.isActive()) setLoading(false);
     }
   }
 
   async function removeContact(contactId: string) {
+    const guard = sessionGuardRef.current;
+    if (!guard?.isActive()) return;
     setLoading(true);
     setError(null);
     try {
       const response = await request(`/api/contacts?id=${encodeURIComponent(contactId)}`, { method: "DELETE" });
       if (response.status !== 204) throw new Error("The contact could not be removed from persistence.");
+      if (!guard.isActive()) return;
       setContacts((previous) => previous.filter((contact) => contact.id !== contactId));
     } catch (reason) {
+      if (!guard.isActive()) return;
       setError(reason instanceof Error ? reason.message : "The contact could not be removed.");
     } finally {
-      setLoading(false);
+      if (guard.isActive()) setLoading(false);
     }
   }
 
