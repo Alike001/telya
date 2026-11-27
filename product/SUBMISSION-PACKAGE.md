@@ -154,12 +154,13 @@ Do not record this as a working journey until the integrated browser acceptance 
 
 - The current public `main` deployment does not contain the unmerged integrated frontend stack.
 - Local Privy configuration passes preflight and Vercel key presence is confirmed, but secret validity, fork-preview deployment and a real browser wallet/passkey acceptance session are still required for onboarding, contacts, conversational payment, timeline and current Agent Pass UI proof; the local sponsor remains a placeholder.
+- The integrated build's value-redacted client-secret scan passed across 215 emitted browser files; this guards packaging but does not validate the configured secrets.
 - Base direct and both CCTP directions have extensive automated/database safeguards but no accepted signed end-to-end Testnet settlement evidence. They must not appear as completed in the demo.
 - The public Base/Stellar endpoints and configured CCTP contracts pass the draft read-only probe, but this does not establish a funded or authenticated wallet, source burn, attestation, destination mint or finality.
 - MoneyGram is unavailable pending partner sandbox access and written Smart Account Kit contract-wallet compatibility confirmation.
 - Independent unfamiliar-user testing has not yet been recorded.
 - The organizer has not yet confirmed the exact cutoff/timezone, artifacts or video format. No duration is inferred here.
-- New Vercel deployments are temporarily rate-limited, and fork preview checks require Vercel GitHub authorization.
+- The documentation preview deploys successfully; teammate-fork previews still require explicit Vercel GitHub authorization.
 
 ## Mainnet roadmap
 
