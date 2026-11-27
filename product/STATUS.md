@@ -1,6 +1,6 @@
 # Telya Current Status
 
-**Date:** November 26, 2026  
+**Date:** November 27, 2026
 **Team:** Bravo  
 **Product:** Telya  
 **Repository:** Alike001/telya  
@@ -16,6 +16,8 @@
 ## Codex operating system
 
 The persistent [Codex Master Playbook](CODEX-MASTER-PLAYBOOK.md), [Execution Tracker](EXECUTION-TRACKER.md), agent rules and universal handoff were merged to main in PR #50 (merge commit ab8d4f51ef43754568e10cb99e89a7266fb0d87b). New Codex sessions must read these documents before changing code. The tracker is the live continuation ledger.
+
+PR #67 merged as `d87ae75`, recording the safety corrections on draft PRs #65/#66. PR #48's CCTP migrations `0001`–`0008` and PR #53's Payment-relayer/execution-session migrations `0009`–`0010` are recorded in Neon. Their PostgreSQL regressions passed.
 
 ## Readiness verdict
 
@@ -36,19 +38,25 @@ Hammed is taking primary implementation ownership. Codex is the day-to-day engin
 ## Current pull requests
 
 ### PR #44 — Stellar CCTP, Issue #12
-Open draft. It contains Stellar-side CCTP burn/mint-forward, destination verification, durable operation records, idempotency and recovery. It is stacked with PR #48. Keep draft until the complete Base/Circle integration and real bidirectional evidence exist.
+Open draft at `af68df4`. Stellar source, destination submission, verified mismatch/failure and completion now each require guarded Payment/operation writes before timeline events. Submission checks its active lease and saved Circle evidence; failure cannot overwrite a completed payment. Neon SQL probes and regressions passed; with `DATABASE_URL`, 67 tests passed across 10 files. Plain `pnpm test` passed 64 with three DB cases skipped. Typecheck, server TypeScript, build, GitGuardian and Vercel passed. [PR evidence](https://github.com/Alike001/telya/pull/44#issuecomment-7199926657). Real bidirectional settlement and retry/recovery proof remain before merge.
 
 ### PR #48 — Base/Circle CCTP, Issue #16
-Open draft on Webghost01-NG/telya, latest observed head 481cbba0f8dbda55fe06a05fe43ca0edf9c2c9a6. Circle attestation comparison now handles nonce, executed finality, executed fee and expiration block with strict immutable-byte comparison and zero source placeholders. Codex reported 104 passing tests and one PostgreSQL-backed test skipped because DATABASE_URL was unavailable; typecheck, build, server TypeScript and diff checks passed. Remaining acceptance: apply/verify migrations 0007/0008; run DB-backed address-casing test; prove Base Sepolia ↔ Stellar Testnet in both directions with exact source/destination hashes, recipient/amount and retry/restart idempotency. Vercel currently requires team authorization; this is not evidence of a code build failure.
+Open draft on Webghost01-NG/telya at `05531f5`. Guarded source/destination state, exact attestation/mint evidence, canonical Stellar hashes and authenticated owner-scoped Base balances remain in place. A strict Circle Testnet client now retrieves only Telya's supported Base domain 6 ↔ Stellar domain 27 Standard Transfer quote and rejects missing, duplicate, malformed, unsupported or non-Testnet responses. Live read-only responses at about 01:09 UTC reported Standard `0` bps in both directions; this is observed provider data, not a hard-coded future fee. With `DATABASE_URL`, 150 tests passed across 22 files, including five PostgreSQL cases; plain `pnpm test` passed 145 with those cases skipped. Client/server TypeScript, build and diff check passed. [Latest PR evidence](https://github.com/Alike001/telya/pull/48#issuecomment-7206252803). GitGuardian passed and Vercel requires fork authorization. The quote is not yet mounted in payment review, no Base RPC credential was available for live balance proof, and real bidirectional settlement/retry evidence remains unverified. Keep draft.
 
 ### PR #46 — onboarding/auth/username, Issue #5
-Open draft on Prudentdev-xyz/telya, now at `e8a4ca2`. Codex removed the fabricated Privy DID and browser-triggered wallet verification; claims require a real server-verified Privy session and an already verified Stellar wallet belonging to that user. The wallet check and username claim are one SQL statement. Independently rerun checks: 6 test files / 60 tests passed; typecheck, build, server TypeScript and diff check passed. **Still blocked:** the browser has no Privy token or proof-of-control wallet binding flow, so a new user's claim fails closed. Real database race/claim/reconnect tests and Vercel authorization are pending. Do not merge or close Issue #5.
+Open draft on Prudentdev-xyz/telya, now at `a69a28a`. Claims require a server-verified Privy session and a verified Stellar wallet belonging to that user. The wallet binding endpoint checks a fresh passkey assertion against the live Testnet contract's accepted WASM and active WebAuthn signer. The username claim is atomic and owner-bound. A read-only Testnet query confirmed the documented account's WASM/default-rule signer shape. The new Neon-backed regression raced differently cased claims by two temporary users, observed one winner, and verified that a failed rename preserved the original active username. With `DATABASE_URL` loaded, 68 tests passed; plain `pnpm test` passed 67 with the DB test skipped. Client/server TypeScript, production build and diff check passed. [PR evidence](https://github.com/Alike001/telya/pull/46#issuecomment-7199042701). **Still unverified:** real browser Privy/passkey sign-in, wallet binding, authenticated claim/reconnect and Vercel fork preview. Exact WebAuthn RP ID/origin and Privy settings are required in the secure environment. Do not merge or close Issue #5.
 
 ### PR #49 — conversational experience, Issue #6
-Open draft on Prudentdev-xyz/telya, latest observed head 56553d6312e3185a5c9410353e540e95124ecf7d. Prudent reported removal of timer-based success, transaction-hash requirement, insufficient-funds behavior, 70 tests and typecheck/build passing. **Critical blockers found in code audit:** balances remain initialized to 0.00 and are never fetched; payment confirm sends a placeholder function string and empty authorization to an XDR relayer; recipient handles are not resolved into verified addresses; route fees remain hardcoded; and a returned hash is not sufficient to claim verified completion. Review comment 7189270232 records the findings. This PR contains onboarding changes from #46 and must be reconciled after #46 is fixed/merged. Vercel is authorization-required, not a successful preview or a code build failure.
+Open draft on Prudentdev-xyz/telya, now at `e5fbc06`. AI/manual, voice/text and protected passkey recovery remain. A hashless sponsor/relayer failure reconciles once, then renders failed with no hash and no repeat Confirm when submitted state cannot be found; it preserves the provider message without guessing an undocumented low-balance code. With `DATABASE_URL`, 142 tests passed across 29 files; plain `pnpm test` passed 138 with four DB tests skipped. Client/server TypeScript, build and diff check passed. [PR evidence](https://github.com/Alike001/telya/pull/49#issuecomment-7205829550). No live low-sponsor, provider outage, browser Privy/passkey or signed Testnet proof; Vercel requires fork authorization. Keep draft.
+
+### PRs #65 and #66 — timeline, activity, Agent Pass and supporting UI, Issues #7/#8
+
+[PR #65](https://github.com/Alike001/telya/pull/65) is now at `b41d1db` and merges PR #49's hashless failure handling while retaining authenticated owner-scoped history, persisted timelines, non-signing refresh and exact receipt gating. With `DATABASE_URL`, 156 tests passed across 32 files; plain `pnpm test` passed 152 with four DB tests skipped. Client/server TypeScript, build and diff check passed. [PR evidence](https://github.com/Alike001/telya/pull/65#issuecomment-7205854344). Live sponsor/provider, browser refresh and Testnet receipt remain unverified; Vercel requires fork authorization. Keep draft.
+
+[PR #66](https://github.com/Alike001/telya/pull/66) is now at `b48b26a` after merging updated PR #65. Hashless sponsor/relayer failure plus AI/manual and voice/text fallbacks run through the full stack; contacts, exact Agent Pass state, owner-passkey operations and MoneyGram-unavailable truth remain intact. With `DATABASE_URL`, 171 tests passed across 38 files; plain `pnpm test` passed 167 with four DB tests skipped. Client/server TypeScript, build and diff check passed. [PR evidence](https://github.com/Alike001/telya/pull/66#issuecomment-7205875735). No live sponsor/AI/voice outage, Privy contacts, Agent Pass or Testnet acceptance proof. Keep draft and do not close Issue #8.
 
 ### PR #50 — execution documentation
-Merged as `ab8d4f5`; current main is `a611173` after a tracker reconciliation commit. The playbook, tracker and execution plan are available on main.
+Merged as `ab8d4f5`; the playbook, tracker and execution plan are available on main. The latest tracker audit was merged in PR #52.
 
 ## Remaining P0 issues
 
@@ -68,19 +76,17 @@ MoneyGram's documented non-custodial Stellar widget flow uses a G-address. Telya
 
 ## Immediate execution order
 
-1. Re-review PR #48 commit 481cbba, apply/verify Neon migrations 0007/0008, run the DB-backed test and prove real bidirectional CCTP/retry behavior.
-2. Fix PR #46 authenticated identity and proof-of-wallet-ownership; no fabricated Privy DID or client-trusted verification.
+1. Prove PR #48 real bidirectional CCTP, recipient/amount/finality and retry/restart behavior using authorized Testnet credentials. Neon migrations through `0008` and guarded source and Stellar destination SQL are verified. The newest guarded attestation and Base submission SQL passed regressions, the suite and read-only Neon `EXPLAIN` probes.
+2. Complete PR #46 browser Privy authentication and proof-of-wallet-ownership; no fabricated Privy DID or client-trusted verification.
 3. Implement Issue #15 service/API contracts using actual balances, recipient resolution, quotes, payment state and idempotency.
-4. Connect PR #49 to the real Smart Account Kit signed XDR and payment/receipt APIs; no hardcoded financial state or hash-only success.
-5. Complete Issue #7 payment timeline/history/receipts.
-6. Complete Issue #8 Agent Pass, contacts and Judge mode using real states.
-7. Run Issue #18 end-to-end route/recovery matrix.
+4. Prove PR #49's protected Smart Account Kit confirmation in a real Privy/passkey browser session and signed Testnet payment; it is reconciled with main, refuses hash-only success and recovers duplicate/interrupted actions without resubmission.
+5. Prove PR #65 authenticated browser pagination/refresh and a real Testnet submitted-to-completed timeline/receipt; its reconciled owner-scoped persisted integration is at `64d5b28`.
+6. Prove PR #66 authenticated contacts and owner-passkey Agent Pass create/revoke in a real browser/Testnet session; the corrected full UI stack is at `4050d7a`, while MoneyGram remains externally blocked.
+7. Continue Issue #18 end-to-end route/recovery matrix. Automated AI/manual, voice/text and duplicate/interrupted-response recovery are proven; real browser/provider outage and route evidence remain open.
 8. Complete Issue #19/#22, independent teammate testing, bug fixes, demo and submission.
 
 See the [Codex Master Playbook](CODEX-MASTER-PLAYBOOK.md) for the full start-to-finish instructions and the [Execution Tracker](EXECUTION-TRACKER.md) for current task status and human-controlled blockers.
 
-## Latest engineering progress — November 26
+## November 26 backend progress
 
-PR #46 has a fail-closed identity guard at `e8a4ca2`; it still needs browser authentication and wallet ownership proof before onboarding works. Issue #15 work in draft PR #53 exposes the existing authenticated contacts, conversations, AI intent, voice and payment status handlers through App Router. The public confirmation route was removed because it would mark a click `authorized` before passkey proof. Payment preview creation remains unavailable until trusted live balances and fees are supplied; no live payment claim follows from these checks.
-
-Draft PR #53 also adds a Stellar Testnet USDC balance reader for verified wallets and corrects the zero-balance routing classification. Base balances are displayed as unavailable, and fee quotes/payment creation remain blocked pending trusted providers. The latest local checks passed 48 tests, typecheck, build and server TypeScript. A public RPC read failed at the network request from this workspace; no live wallet balance was asserted.
+Draft [PR #53](https://github.com/Alike001/telya/pull/53) at `e2cd2ed` mounts authenticated contacts, conversations, intent, voice and payments, live Stellar USDC balances and owner-scoped history. Direct Stellar reviews are owner-bound and idempotent; exact passkey execution and saved-hash reconciliation advance canonical Payment/Event state only after verified finality, recipient and amount. Migration `0010` adds a five-minute one-time browser handoff: Privy-authenticated preparation sets a path-scoped HttpOnly/Secure/SameSite cookie, stores only its hash, and the dedicated relayer consumes it before reservation or broadcast. Originating Privy-session revocation invalidates it, and the SDK keeps its standard signed `func`/`auth` body while the server supplies the fixed payment context. Neon tests proved owner scope, hashed storage, one-time consumption, revocation, pending recovery, exact completion and replay. With `DATABASE_URL`, 82 tests passed across 19 files; plain `pnpm test` passed 79 with three DB tests skipped. Client/server TypeScript, build and diff check passed; fixtures were removed. A real browser Privy/passkey walkthrough and signed Testnet payment remain unverified. Base and CCTP previews remain unavailable without trusted providers.

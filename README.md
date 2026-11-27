@@ -2,15 +2,15 @@
 
 **Conversational money movement on Stellar.**
 
-Telya lets people speak or type what they want to do with USDC, then safely routes payments across Stellar and Base, exposes real transaction progress until finality, supports fiat ramp flows, and enables limited, revocable AI-agent spending through Stellar smart accounts.
+Telya is building a conversational USDC experience across Stellar and Base. The current public Testnet app has verified passkey smart accounts, direct Stellar USDC payments with durable receipts, and limited, revocable Agent Pass spending. The conversational journey, Base routes, bidirectional Circle CCTP, usernames, and MoneyGram ramp are still being integrated or externally verified. [Current state](product/EXECUTION-TRACKER.md)
 
 > Team Bravo — Stellar Buildathon 2026
 
 ## How to Test
 
-Telya is now in Build Week implementation. The public shell is intentionally
-honest about its current state: it shows the frozen Testnet route matrix and a
-route preview, but never displays a fake completed transaction.
+Telya is in Build Week implementation. The public main deployment supports the
+direct Stellar and Agent Pass Testnet flows below. Draft PR features are not part
+of this walkthrough until their live acceptance gates pass.
 
 Local development:
 
@@ -149,18 +149,15 @@ A simple stablecoin payment should not require users to understand wallets, netw
 
 AI agents also need safer wallet permissions than unrestricted access.
 
-## What Telya does
+## Planned P0 experience
 
-- Conversational text and voice payment intent.
-- Stellar passkey smart account.
-- Stellar USDC payments with fee sponsorship.
-- Base USDC payments.
-- Bidirectional Base <-> Stellar USDC through Circle CCTP Standard.
-- Visible money movement and finality.
-- Persistent history and receipts.
-- Unique human-readable usernames mapped to verified wallet records.
-- Agent Pass: limited, expiring, revocable Stellar agent spending.
-- Planned MoneyGram sandbox cash-in/cash-out integration; provider access is pending and the integration is not implemented.
+- Conversational text and voice payment intent (draft integration).
+- Stellar passkey smart account, direct sponsored Stellar USDC and durable receipts (verified on Testnet).
+- Base USDC and bidirectional Base ↔ Stellar USDC through Circle CCTP Standard (draft; final settlement evidence pending).
+- Visible payment movement, history and receipts across supported routes (draft integration).
+- Unique human-readable usernames tied to verified wallet records (draft; live claim proof pending).
+- Agent Pass: limited, expiring, revocable Stellar agent spending (verified on Testnet).
+- MoneyGram sandbox cash-in/cash-out (pending provider access and contract-wallet compatibility).
 
 ## Required payment routes
 
