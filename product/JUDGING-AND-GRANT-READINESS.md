@@ -284,5 +284,6 @@ On integrated draft PR #66 head `ce12a81`:
 - Agent Pass status/create/revoke and payment review/execute/reconcile capture initiating-owner requests; spend state is keyed by exact account/rule/public agent address and cleared when the memory-only signer changes.
 - Activity history/detail loads capture one initiating-owner request, and a direct-Stellar refresh uses that same token for reconciliation and the following persisted-detail read.
 - contact loads, saves and deletes capture the initiating auth epoch before sending; a session change during token resolution prevents the HTTP mutation entirely.
+- the configured local public Privy app now renders the signed-out home/onboarding and real email/wallet login modal with no console warnings/errors; authentication, server-secret validity and wallet actions remain unverified.
 
 Vercel did not build PR #66 because the teammate fork requires team authorization. The checks above prove automated, database, public-infrastructure and unavailable-state behavior only. They do not prove authenticated browser ownership, real balances, wallet signatures, Base/CCTP settlement, MoneyGram, independent-user acceptance or production readiness.
