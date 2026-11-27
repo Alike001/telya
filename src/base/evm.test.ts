@@ -7,6 +7,7 @@ import {
   encodeCctpDepositForBurn,
   encodeCctpReceiveMessage,
   encodeErc20Transfer,
+  estimateBaseTransactionFee,
   findBaseCctpMessage,
   normalizeBaseUsdcAmount,
   readBaseUsdcBalance,
@@ -65,6 +66,48 @@ describe("Base Sepolia transaction encoding and verification", () => {
       request: vi.fn(async (method: string) => method === "eth_chainId" ? `0x${BASE_SEPOLIA_CHAIN_ID.toString(16)}` : "0x1"),
     } as unknown as BaseRpc;
     await expect(readBaseUsdcBalance({ rpc: malformed, owner: SENDER })).rejects.toMatchObject({ code: "RPC_FAILED" });
+  });
+
+  it("quotes exact deterministic calldata using Base Sepolia gas quantities", async () => {
+    const rpc = { request: vi.fn()
+      .mockResolvedValueOnce("0x14a34")
+      .mockResolvedValueOnce("0x5208")
+      .mockResolvedValueOnce("0x3b9aca00") } as BaseRpc;
+    const data = encodeErc20Transfer(RECIPIENT, "5");
+    await expect(estimateBaseTransactionFee({
+      rpc,
+      from: SENDER,
+      to: BASE_SEPOLIA_USDC,
+      data,
+    })).resolves.toEqual({
+      gasLimit: 21_000n,
+      gasPriceWei: 1_000_000_000n,
+      feeWei: 21_000_000_000_000n,
+      feeEth: "0.000021",
+    });
+    expect(rpc.request).toHaveBeenNthCalledWith(2, "eth_estimateGas", [{
+      from: SENDER.toLowerCase(),
+      to: BASE_SEPOLIA_USDC.toLowerCase(),
+      data: data.toLowerCase(),
+    }, "latest"]);
+  });
+
+  it.each([
+    { chainId: "0x1", estimate: "0x5208", gasPrice: "0x1" },
+    { chainId: "0x14a34", estimate: "21000", gasPrice: "0x1" },
+    { chainId: "0x14a34", estimate: "0x0", gasPrice: "0x1" },
+    { chainId: "0x14a34", estimate: "0x5208", gasPrice: "0x0" },
+  ])("fails closed for invalid or wrong-network gas evidence %#", async ({ chainId, estimate, gasPrice }) => {
+    const rpc = { request: vi.fn()
+      .mockResolvedValueOnce(chainId)
+      .mockResolvedValueOnce(estimate)
+      .mockResolvedValueOnce(gasPrice) } as BaseRpc;
+    await expect(estimateBaseTransactionFee({
+      rpc,
+      from: SENDER,
+      to: BASE_SEPOLIA_USDC,
+      data: encodeErc20Transfer(RECIPIENT, "5"),
+    })).rejects.toThrow();
   });
 
   it("converts decimal USDC to six decimal places without floating point", () => {

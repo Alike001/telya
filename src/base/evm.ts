@@ -365,6 +365,57 @@ export async function readBaseUsdcBalance(input: {
   return fraction ? `${whole}.${fraction}` : whole.toString();
 }
 
+function parseHexQuantity(value: unknown, label: string): bigint {
+  if (typeof value !== "string" || !/^0x(?:0|[1-9a-f][0-9a-f]*)$/i.test(value)) {
+    throw new BaseEvmError("RPC_FAILED", `Base ${label} returned an invalid quantity`);
+  }
+  return BigInt(value);
+}
+
+function formatWeiAsEth(value: bigint): string {
+  const scale = 10n ** 18n;
+  const whole = value / scale;
+  const fraction = (value % scale).toString().padStart(18, "0").replace(/0+$/, "");
+  return fraction ? `${whole}.${fraction}` : whole.toString();
+}
+
+/** Quote current sender-paid Base gas for exact deterministic calldata; this never submits. */
+export async function estimateBaseTransactionFee(input: {
+  readonly rpc: BaseRpc;
+  readonly from: string;
+  readonly to: string;
+  readonly data: string;
+}): Promise<{
+  readonly gasLimit: bigint;
+  readonly gasPriceWei: bigint;
+  readonly feeWei: bigint;
+  readonly feeEth: string;
+}> {
+  const from = requireEvmAddress(input.from, "from");
+  const to = requireEvmAddress(input.to, "to");
+  if (!/^0x(?:[0-9a-fA-F]{2})+$/.test(input.data)) {
+    throw new BaseEvmError("TRANSACTION_MISMATCH", "Base transaction data must be hexadecimal bytes");
+  }
+  const chainId = parseHexQuantity(await input.rpc.request<unknown>("eth_chainId", []), "chain ID");
+  if (chainId !== BigInt(BASE_SEPOLIA_CHAIN_ID)) {
+    throw new BaseEvmError("WRONG_NETWORK", "Base fee RPC is not on Base Sepolia");
+  }
+  const transaction = { from, to, data: input.data.toLowerCase() };
+  const gasLimit = parseHexQuantity(
+    await input.rpc.request<unknown>("eth_estimateGas", [transaction, "latest"]),
+    "gas estimate",
+  );
+  const gasPriceWei = parseHexQuantity(
+    await input.rpc.request<unknown>("eth_gasPrice", []),
+    "gas price",
+  );
+  if (gasLimit <= 0n || gasPriceWei <= 0n) {
+    throw new BaseEvmError("RPC_FAILED", "Base gas quote must be greater than zero");
+  }
+  const feeWei = gasLimit * gasPriceWei;
+  return { gasLimit, gasPriceWei, feeWei, feeEth: formatWeiAsEth(feeWei) };
+}
+
 export function createBaseRpc(config: BaseEvmConfig, fetcher: typeof fetch = fetch): BaseRpc {
   let requestId = 0;
   return {
