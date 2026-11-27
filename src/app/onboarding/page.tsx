@@ -32,6 +32,7 @@ import {
 } from "../../stellar/smart-account";
 import { validateUsername } from "../../domain/username";
 import { authenticatedFetch } from "../authenticated-fetch";
+import { reconcileBaseWalletSession } from "../onboarding-base-wallet";
 import { authorizeStellarDeployment } from "../stellar-deployment-authorization";
 
 type OnboardingStep = "welcome" | "username" | "creating" | "ready" | "returning";
@@ -85,12 +86,18 @@ function OnboardingFlow() {
   const creationRef = useRef(false);
 
   useEffect(() => {
-    if (wallets.length === 1 && !selectedBaseWallet) setSelectedBaseWallet(wallets[0]!.address);
-    if (selectedBaseWallet && !wallets.some((wallet) => wallet.address.toLowerCase() === selectedBaseWallet.toLowerCase())) {
-      setSelectedBaseWallet("");
-      setVerifiedBaseWallet(null);
+    const reconciled = reconcileBaseWalletSession({
+      authenticated,
+      walletAddresses: wallets.map((wallet) => wallet.address),
+      state: { selectedAddress: selectedBaseWallet, verifiedAddress: verifiedBaseWallet },
+    });
+    if (reconciled.selectedAddress !== selectedBaseWallet) {
+      setSelectedBaseWallet(reconciled.selectedAddress);
     }
-  }, [selectedBaseWallet, wallets]);
+    if (reconciled.verifiedAddress !== verifiedBaseWallet) {
+      setVerifiedBaseWallet(reconciled.verifiedAddress);
+    }
+  }, [authenticated, selectedBaseWallet, verifiedBaseWallet, wallets]);
 
   async function verifyBaseWallet(): Promise<void> {
     const wallet = wallets.find((candidate) =>
@@ -183,6 +190,9 @@ function OnboardingFlow() {
     if (authReady && !authenticated) {
       setAccount(null);
       setClaimedUsername("");
+      setBaseWalletError(null);
+      kitRef.current = null;
+      configRef.current = null;
       setStep("welcome");
     }
   }, [authReady, authenticated]);
