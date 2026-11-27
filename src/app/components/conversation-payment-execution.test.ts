@@ -3,6 +3,11 @@ import { Buffer } from "node:buffer";
 import { Networks, StrKey } from "@stellar/stellar-sdk";
 import { describe, expect, it, vi } from "vitest";
 
+import {
+  BASE_SEPOLIA_CHAIN_ID,
+  BASE_SEPOLIA_TOKEN_MESSENGER,
+  BASE_SEPOLIA_USDC,
+} from "../../base/evm.ts";
 import type { SmartAccountPublicConfig } from "../../stellar/smart-account.ts";
 import type { PaymentReview } from "./conversation-payment.ts";
 import { executeConversationPayment } from "./conversation-payment-execution.ts";
@@ -49,7 +54,28 @@ const cctpReview: PaymentReview = {
     label: "Circle destination forwarding fee",
   }],
 };
+const baseSender = `0x${"2".repeat(40)}`;
+const baseRecipient = `0x${"3".repeat(40)}`;
+const baseHash = `0x${"c".repeat(64)}`;
 const contract = (byte: number) => StrKey.encodeContract(Buffer.alloc(32, byte));
+const baseDirectReview: PaymentReview = {
+  ...review,
+  routeId: "base_to_base",
+  sourceNetwork: "base",
+  destinationNetwork: "base",
+  rail: "base_direct",
+  recipientAddress: baseRecipient,
+  expectedRecipientAmount: "5",
+};
+const baseCctpReview: PaymentReview = {
+  ...review,
+  routeId: "base_to_stellar",
+  sourceNetwork: "base",
+  destinationNetwork: "stellar",
+  rail: "circle_cctp_standard",
+  recipientAddress: contract(9),
+  expectedRecipientAmount: "5",
+};
 const cctpConfig = {
   rpcUrl: "https://soroban-testnet.stellar.org",
   networkPassphrase: Networks.TESTNET,
@@ -66,6 +92,145 @@ function json(body: unknown, status = 200): Response {
 }
 
 describe("conversation payment execution", () => {
+  it("submits only the exact server-authorized Base direct transfer and keeps pending truthful", async () => {
+    const request = vi.fn()
+      .mockResolvedValueOnce(json({
+        status: "authorization_ready",
+        transaction: {
+          chainId: BASE_SEPOLIA_CHAIN_ID,
+          sender: baseSender,
+          token: BASE_SEPOLIA_USDC,
+          recipient: baseRecipient.toUpperCase().replace("0X", "0x"),
+          amount: "5.000000000000000000",
+        },
+      }))
+      .mockResolvedValueOnce(json({ status: "pending", transactionHash: baseHash }, 202));
+    const provider = { request: vi.fn() };
+    const submitBaseTransfer = vi.fn().mockResolvedValue(baseHash);
+
+    await expect(executeConversationPayment(baseDirectReview, {
+      config: null,
+      smartAccount: null,
+      request,
+      createKit: vi.fn(),
+      restoreAccount: vi.fn(),
+      submitTransfer: vi.fn(),
+      getBaseProvider: vi.fn().mockResolvedValue(provider),
+      submitBaseTransfer,
+    })).resolves.toEqual({
+      status: "pending",
+      transactionHash: baseHash,
+      message: "The Base USDC transfer is recorded. Finality and exact recipient verification are still pending.",
+    });
+    expect(submitBaseTransfer).toHaveBeenCalledWith({
+      provider,
+      sender: baseSender,
+      recipient: baseRecipient,
+      amount: "5.000000000000000000",
+    });
+  });
+
+  it("rejects a Base direct authorization for a different recipient before wallet access", async () => {
+    const getBaseProvider = vi.fn();
+    const submitBaseTransfer = vi.fn();
+
+    await expect(executeConversationPayment(baseDirectReview, {
+      config: null,
+      smartAccount: null,
+      request: vi.fn().mockResolvedValue(json({
+        status: "authorization_ready",
+        transaction: {
+          chainId: BASE_SEPOLIA_CHAIN_ID,
+          sender: baseSender,
+          token: BASE_SEPOLIA_USDC,
+          recipient: `0x${"4".repeat(40)}`,
+          amount: "5",
+        },
+      })),
+      createKit: vi.fn(),
+      restoreAccount: vi.fn(),
+      submitTransfer: vi.fn(),
+      getBaseProvider,
+      submitBaseTransfer,
+    })).rejects.toThrow("The Base payment authorization does not match this review.");
+    expect(getBaseProvider).not.toHaveBeenCalled();
+    expect(submitBaseTransfer).not.toHaveBeenCalled();
+  });
+
+  it("submits only the exact server-authorized Base CCTP burn and exposes the persisted burn hash", async () => {
+    const mintRecipient = `0x${"4".repeat(64)}`;
+    const request = vi.fn()
+      .mockResolvedValueOnce(json({
+        status: "authorization_ready",
+        transaction: {
+          chainId: BASE_SEPOLIA_CHAIN_ID,
+          sender: baseSender,
+          token: BASE_SEPOLIA_USDC,
+          tokenMessenger: BASE_SEPOLIA_TOKEN_MESSENGER,
+          burnAmount: "5",
+          maxFee: "0",
+          destinationDomain: 27,
+          mintRecipient,
+        },
+      }))
+      .mockResolvedValueOnce(json({ status: "pending", sourceTransactionHash: baseHash }, 202));
+    const provider = { request: vi.fn() };
+    const submitBaseCctpBurn = vi.fn().mockResolvedValue({ transactionHash: baseHash });
+
+    await expect(executeConversationPayment(baseCctpReview, {
+      config: null,
+      smartAccount: null,
+      request,
+      createKit: vi.fn(),
+      restoreAccount: vi.fn(),
+      submitTransfer: vi.fn(),
+      getBaseProvider: vi.fn().mockResolvedValue(provider),
+      submitBaseCctpBurn,
+    })).resolves.toEqual({
+      status: "pending",
+      transactionHash: baseHash,
+      message: "The Base burn is recorded. Base finality, Circle attestation, Stellar settlement, and recipient verification are still pending.",
+    });
+    expect(submitBaseCctpBurn).toHaveBeenCalledWith({
+      provider,
+      sender: baseSender,
+      burnAmount: "5",
+      maxFee: "0",
+      destinationDomain: 27,
+      mintRecipient,
+    });
+  });
+
+  it("rejects a Base CCTP authorization with an unreviewed fee before wallet access", async () => {
+    const getBaseProvider = vi.fn();
+    const submitBaseCctpBurn = vi.fn();
+
+    await expect(executeConversationPayment(baseCctpReview, {
+      config: null,
+      smartAccount: null,
+      request: vi.fn().mockResolvedValue(json({
+        status: "authorization_ready",
+        transaction: {
+          chainId: BASE_SEPOLIA_CHAIN_ID,
+          sender: baseSender,
+          token: BASE_SEPOLIA_USDC,
+          tokenMessenger: BASE_SEPOLIA_TOKEN_MESSENGER,
+          burnAmount: "5.1",
+          maxFee: "0.1",
+          destinationDomain: 27,
+          mintRecipient: `0x${"4".repeat(64)}`,
+        },
+      })),
+      createKit: vi.fn(),
+      restoreAccount: vi.fn(),
+      submitTransfer: vi.fn(),
+      getBaseProvider,
+      submitBaseCctpBurn,
+    })).rejects.toThrow("The Base CCTP authorization does not match this review.");
+    expect(getBaseProvider).not.toHaveBeenCalled();
+    expect(submitBaseCctpBurn).not.toHaveBeenCalled();
+  });
+
   it("authorizes the exact Stellar CCTP burn and completes only from the forwarded Base receipt", async () => {
     const request = vi.fn()
       .mockResolvedValueOnce(json({
