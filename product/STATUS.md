@@ -23,6 +23,8 @@ PR #67 merged as `d87ae75`, recording the safety corrections on draft PRs #65/#6
 
 Telya has independently inspectable Stellar Testnet foundations, but the complete P0 consumer journey and bidirectional cross-chain demo are not yet proven. The final submission date recorded in decision D-017 is **November 30, 2026**; exact cutoff/timezone remains unconfirmed in Issue #22.
 
+The canonical production host `https://telya.vercel.app` is healthy with application/database checks ready. Vercel now has the production WebAuthn RP ID/origin and the official Base Sepolia RPC (`84532`) for all environments. Privy app credentials are still absent, so authenticated browser acceptance remains blocked; new deployments are also temporarily rate-limited for 24 hours.
+
 Hammed is taking primary implementation ownership. Codex is the day-to-day engineering lead and should continue the remaining tasks without waiting for teammates. Teammates can contribute and provide independent testing when available.
 
 ## Verified on main
