@@ -81,6 +81,7 @@ export async function handleStellarRelayerRequest(
   request: Request,
   context?:
     | { readonly userId: string; readonly paymentId: string }
+    | { readonly deployment: { readonly userId: string } }
     | { readonly agentPass: {
         readonly userId: string;
         readonly kind: "create" | "revoke";
@@ -89,6 +90,7 @@ export async function handleStellarRelayerRequest(
       } },
 ): Promise<Response> {
   const paymentContext = context && "paymentId" in context ? context : undefined;
+  const deploymentContext = context && "deployment" in context ? context.deployment : undefined;
   const agentPassContext = context && "agentPass" in context ? context.agentPass : undefined;
   let reservedRequestHash: string | undefined;
   let submittedTransfer:
@@ -138,6 +140,12 @@ export async function handleStellarRelayerRequest(
     });
     const isAgentPassOperation = validated.kind === "agent_pass_create" ||
       validated.kind === "agent_pass_revoke";
+    if (validated.kind === "deployment" && !deploymentContext) {
+      throw new AuthenticationError("Authenticated deployment authorization is required");
+    }
+    if ((validated.kind === "usdc_transfer" || validated.kind === "cctp_burn") && !paymentContext) {
+      throw new AuthenticationError("Authenticated payment authorization is required");
+    }
     if (isAgentPassOperation && !agentPassContext) {
       throw new AuthenticationError("Authenticated Agent Pass authorization is required");
     }

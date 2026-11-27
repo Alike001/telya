@@ -8,9 +8,9 @@ Telya is building a conversational USDC experience across Stellar and Base. The 
 
 ## How to Test
 
-Telya is in Build Week implementation. The public main deployment supports the
-direct Stellar and Agent Pass Testnet flows below. Draft PR features are not part
-of this walkthrough until their live acceptance gates pass.
+Telya is in Build Week implementation. The public `main` deployment retains the
+previously accepted direct Stellar and Agent Pass Testnet evidence. The integrated
+branch walkthrough below remains a draft until its own browser acceptance gates pass.
 
 Local development:
 
@@ -30,48 +30,43 @@ Open `http://localhost:3000`. The readiness endpoint is available at
 `http://localhost:3000/api/health`; it returns HTTP `200` only when the app can
 reach Neon and HTTP `503` with a sanitized `degraded` response otherwise.
 
-Stellar passkey account flow:
+Integrated passkey/onboarding flow:
 
 1. Configure the public Stellar Testnet values from `.env.example` and keep
    `STELLAR_FEE_SPONSOR_SECRET` server-only. Never use a `NEXT_PUBLIC_*` name for
    the sponsor secret.
-2. Apply the database migrations with the direct Neon connection so relayer
-   reservations and rate limits fail closed: `pnpm db:migrate`.
-3. Open the passkey account panel on `http://localhost:3000` (localhost is a
-   valid WebAuthn secure context), enter a passkey label, and create the account.
-4. Verify that the resulting contract and deployment transaction links open on
-   Stellar Expert Testnet.
-5. Refresh the page and verify the same contract restores silently.
-6. Sign out on this browser, choose **Reconnect existing account**, complete the
-   passkey prompt, and verify the same contract reconnects.
-7. Fund the smart-account contract with Circle Testnet USDC, enter a distinct
-   Stellar Testnet recipient and amount, then choose **Authorize and send**.
-8. Approve the exact transfer with the account passkey. Verify the receipt shows
-   `completed` only after Stellar finality and exact recipient/amount matching.
-9. Refresh the page and verify the last receipt and its event timeline restore.
+2. Apply all migrations through `0012_stellar_deployment_execution_sessions.sql`
+   with the direct Neon connection: `pnpm db:migrate`.
+3. Open `http://localhost:3000/onboarding`, sign in through Privy and choose an
+   available username. The database remains authoritative for availability.
+4. Create the passkey account. Before Smart Account Kit submits, the browser
+   obtains a one-use authenticated deployment handoff stored only in a
+   path-scoped HttpOnly cookie. The generic relayer rejects deployment and
+   payment execution.
+5. Complete the second passkey assertion that binds the confirmed on-chain
+   account to the authenticated user, then verify the atomic username claim.
+6. Refresh and reconnect. The same authenticated user, username and `C...`
+   account must restore; cancelling a passkey prompt must not claim connection.
+7. On the home composer, resolve a verified recipient, review real balances,
+   route and fees, then authorize a small direct Stellar Testnet payment.
+8. Verify the protected payment relayer consumes its one-use handoff before
+   sponsorship. The receipt may show `completed` only after finality plus exact
+   recipient and amount verification.
+9. Refresh while pending and after completion. The same Payment and receipt must
+   restore without another signature or transfer.
 
-Agent Pass flow (direct Stellar USDC only):
+Integrated Agent Pass management:
 
-1. Keep the passkey account connected and funded with Testnet USDC.
-2. Enter a cumulative allowance and choose **Create Agent Pass**. Approve the
-   owner prompt and verify the creation transaction on Stellar Expert.
-3. Enter a recipient and an amount below the allowance, then choose **Send as
-   agent**. Verify the receipt is completed under the displayed context rule
-   and the on-chain cumulative spend increases.
-4. Attempt another agent payment whose cumulative total exceeds the allowance.
-   Verify Smart Account Kit reports the genuine on-chain spending-limit
-   rejection and no successful transfer is claimed.
-5. Choose **Revoke with passkey**, approve the owner prompt, and verify the
-   revocation transaction.
-6. Choose **Prove agent is blocked** and verify the revoked agent is rejected.
-7. Use the owner **Authorize and send** control above to verify the passkey
-   owner can still pay after agent revocation.
-
-The demo agent key is generated in the browser and retained only in memory for
-the current page. It is never sent to the AI, database, relayer, or browser
-storage. The database stores public rule metadata, cumulative verified spend,
-and transaction references; the Stellar context rule and spending-limit policy
-remain the authorization source of truth.
+1. Keep the authenticated passkey account restored and open Agent Pass.
+2. Create a cumulative USDC allowance and expiry. The owner-authenticated,
+   one-use administration handoff must be consumed before sponsorship.
+3. Confirm status uses the current Stellar ledger and the exact verified owner
+   account, then revoke with the owner passkey.
+4. The prior accepted on-chain allowed-spend, overspend-rejection and
+   post-revocation evidence remains documented on `main`. This draft branch no
+   longer exposes the legacy unauthenticated **Send as agent** surface. A new
+   agent spend must not be claimed until it is bound to authenticated payment
+   orchestration and passes live acceptance.
 
 The UI reports deployment as connected only after the relayer returns a real
 transaction hash and Smart Account Kit verifies the confirmed deployment. A
@@ -80,14 +75,15 @@ presented as account creation success.
 
 Direct Stellar payments use the configured `STELLAR_USDC_SAC` only. Smart
 Account Kit signs the exact token invocation with the user's passkey; the
-server relayer allowlists and revalidates its token, sender, recipient, amount,
-and authorization before paying the network fee. Durable events record
+protected payment relayer requires an authenticated, one-use Payment handoff
+and revalidates its token, sender, recipient, amount and authorization before
+paying the network fee. Durable events record
 authorization, submission, destination finality, recipient verification, and
 completion. `GET /api/stellar/transfers/<transaction-hash>` returns the
 consumer-safe receipt used for refresh recovery. It never returns passkey data,
 the sponsor key, database credentials, or internal diagnostics.
 
-Agent Pass administration is also narrowly allowlisted by the relayer: only an
+Agent Pass administration is also narrowly allowlisted by its protected relayer: only an
 owner-passkey-authorized `CallContract` rule for the configured USDC contract,
 one configured Ed25519 verifier signer, one configured spending-limit policy,
 and owner-authorized removal of a recorded Agent Pass rule are sponsored.

@@ -5,7 +5,6 @@ import { MobileBottomDock } from "./components/mobile-bottom-dock";
 import { ConversationalHome } from "./components/conversational-home";
 import { PaymentActivityPanel } from "./components/payment-activity-panel";
 import { AccountToolsPanel } from "./components/account-tools-panel";
-import { StellarWalletPanel } from "./stellar-wallet-panel";
 
 const routes = [
   ["Stellar", "Stellar", "Direct USDC"],
@@ -44,8 +43,6 @@ export default function HomePage() {
           <ConversationalHome />
         </div>
       </section>
-
-      <StellarWalletPanel />
 
       <AccountToolsPanel />
 

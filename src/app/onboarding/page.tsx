@@ -32,6 +32,7 @@ import {
 } from "../../stellar/smart-account";
 import { validateUsername } from "../../domain/username";
 import { authenticatedFetch } from "../authenticated-fetch";
+import { authorizeStellarDeployment } from "../stellar-deployment-authorization";
 
 type OnboardingStep = "welcome" | "username" | "creating" | "ready" | "returning";
 
@@ -350,7 +351,19 @@ function OnboardingFlow() {
       const normalized = validation.normalized;
       // Reuse a deployed account after a claim/network failure; never deploy a
       // second account just because the user retries the same onboarding flow.
-      const created = account ?? await createSmartAccount(kit, normalized);
+      let created = account;
+      if (!created) {
+        const config = configRef.current;
+        if (!config) throw new Error("Stellar account configuration is unavailable.");
+        const authorization = await authorizeStellarDeployment(getAccessToken);
+        const deploymentKit = createBrowserSmartAccountKit({
+          ...config,
+          relayerUrl: authorization.relayerUrl,
+        });
+        kitRef.current = deploymentKit;
+        kit = deploymentKit;
+        created = await createSmartAccount(deploymentKit, normalized);
+      }
       setAccount(created);
 
       // 2. Bind the authenticated Privy user to the live on-chain passkey signer.
