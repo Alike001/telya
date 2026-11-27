@@ -32,6 +32,23 @@ Live recheck on November 27, 2026 at 03:00 UTC: the health endpoint returned `re
 4. Open the Agent Pass creation, allowed spend, revocation and owner-after-revocation transactions. The rejected overspend and post-revocation attempts intentionally have no transaction hashes.
 5. Review the current tracker before testing a draft feature. It distinguishes automated, database, browser and live Testnet evidence.
 
+### Reproduce draft public-network readiness
+
+PR #66 head `42990e3` adds a secret-safe, read-only probe for the infrastructure
+used by the integrated draft. After checking out that exact head and configuring
+the public Testnet values, run:
+
+```bash
+pnpm env:check -- --flow=cctp
+pnpm testnet:probe
+```
+
+The probe must report Base Sepolia chain `84532`, deployed code for the configured
+Base USDC/CCTP contracts, a current Stellar Testnet ledger and discoverable
+interfaces for every configured Stellar contract. It prints no environment
+values and does not read a wallet balance, sign, submit, attest, mint or verify
+payment finality. Passing it is infrastructure readiness—not financial completion.
+
 ## Local interactive setup
 
 Requirements: Node.js 22 or newer, pnpm 11, a direct Neon Testnet database URL, and the server-only credentials named in `.env.example` for the flow being exercised.
@@ -138,6 +155,7 @@ Do not record this as a working journey until the integrated browser acceptance 
 - The current public `main` deployment does not contain the unmerged integrated frontend stack.
 - Privy credentials and a real browser wallet/passkey acceptance session are still required for onboarding, contacts, conversational payment, timeline and current Agent Pass UI proof.
 - Base direct and both CCTP directions have extensive automated/database safeguards but no accepted signed end-to-end Testnet settlement evidence. They must not appear as completed in the demo.
+- The public Base/Stellar endpoints and configured CCTP contracts pass the draft read-only probe, but this does not establish a funded or authenticated wallet, source burn, attestation, destination mint or finality.
 - MoneyGram is unavailable pending partner sandbox access and written Smart Account Kit contract-wallet compatibility confirmation.
 - Independent unfamiliar-user testing has not yet been recorded.
 - The organizer has not yet confirmed the exact cutoff/timezone, artifacts or video format. No duration is inferred here.

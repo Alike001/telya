@@ -99,6 +99,8 @@ At 03:00 UTC on November 27, the public health endpoint remained ready and Stell
 
 [EVIDENCE-MANIFEST.md](EVIDENCE-MANIFEST.md) now separates accepted public Testnet proof from live-browser, database, automated, prepared and externally blocked evidence. It preserves the exact verified Stellar hashes while marking the integrated UI, Base, both CCTP directions, MoneyGram and independent testing unverified.
 
+The submission package now includes the exact PR #66 head and commands for reproducing its read-only public Testnet probe. The evidence manifest records Base/Stellar contract readiness separately from financial proof; neither CCTP direction is upgraded without authenticated source and verified destination evidence.
+
 ## November 26 backend progress
 
 Draft [PR #53](https://github.com/Alike001/telya/pull/53) stacks PR #48 without duplication and is at `d20dddd`. All four routes have fail-closed reviews and persisted authorization/first-hash recovery. Definitive finalized Base direct, source-burn and destination-mint mismatches now atomically fail only the exact saved operation/Payment/hash and record the true verification stage; Neon parsed all three guarded transitions. Exact finality, recipient and amount still gate completion. No live browser wallet walkthrough or transaction was performed.
