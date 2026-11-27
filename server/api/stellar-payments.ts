@@ -15,6 +15,7 @@ import {
 import { reconcileStellarDirectPayment } from "../payments/stellar-reconciliation.ts";
 import { createAuthenticatedHandler, isRecord, jsonResponse, readJson } from "./http.ts";
 import type { AuthenticateRequest } from "./http.ts";
+import { clearAgentPassSessionCookie } from "../agent-pass/execution-session.ts";
 
 type ReconcileStellarPayment = typeof reconcileStellarDirectPayment;
 type CreateExecutionSession = typeof createStellarPaymentExecutionSession;
@@ -44,7 +45,8 @@ export function createStellarPaymentAuthorizationHandler(
         relayerUrl: STELLAR_PAYMENT_RELAYER_PATH,
         expiresAt: session.expiresAt,
       }, 201);
-      response.headers.set("set-cookie", stellarPaymentSessionCookie(session.token));
+      response.headers.append("set-cookie", clearAgentPassSessionCookie());
+      response.headers.append("set-cookie", stellarPaymentSessionCookie(session.token));
       return response;
     },
     paymentErrorResponse,
@@ -86,7 +88,8 @@ export function createStellarCctpPaymentAuthorizationHandler(
         expiresAt: session.expiresAt,
         burn,
       }, 201);
-      response.headers.set("set-cookie", stellarPaymentSessionCookie(session.token));
+      response.headers.append("set-cookie", clearAgentPassSessionCookie());
+      response.headers.append("set-cookie", stellarPaymentSessionCookie(session.token));
       return response;
     },
     paymentErrorResponse,

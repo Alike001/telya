@@ -34,6 +34,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import { AgentPassSpendPanel } from "./agent-pass-spend-panel";
 
 interface AgentPassPanelProps {
   readonly smartAccountAddress: string | null;
@@ -92,6 +93,11 @@ function AgentPassManagement({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successNotice, setSuccessNotice] = useState<string | null>(null);
+  const [agentSpendSession, setAgentSpendSession] = useState<{
+    readonly kit: SmartAccountKit;
+    readonly pass: ActiveAgentPass;
+    readonly tokenContract: string;
+  } | null>(null);
 
   // Creation form state
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -119,8 +125,10 @@ function AgentPassManagement({
           throw new Error("Agent Pass status evidence could not be verified.");
         }
         setPass(parsed);
+        if (parsed.status !== "active") setAgentSpendSession(null);
       } else if (res.status === 404) {
         setPass(null);
+        setAgentSpendSession(null);
       } else {
         throw new Error("Agent Pass status is unavailable. Please retry.");
       }
@@ -180,6 +188,11 @@ function AgentPassManagement({
         durationLedgers,
       });
 
+      setAgentSpendSession({
+        kit: authorizedKit,
+        pass: created,
+        tokenContract: config.usdcContract,
+      });
       setSuccessNotice(`Agent Pass creation submitted for Rule #${created.ruleId}. Checking its recorded status.`);
       setShowCreateModal(false);
       await fetchPass();
@@ -233,6 +246,7 @@ function AgentPassManagement({
         pass: { ruleId: pass.ruleId },
       });
 
+      setAgentSpendSession(null);
       setSuccessNotice(`Revocation submitted. Check the recorded status before assuming the pass is inactive. Transaction: ${result.transactionHash.slice(0, 10)}...`);
       await fetchPass();
     } catch (err) {
@@ -373,6 +387,12 @@ function AgentPassManagement({
               </div>
             )}
           </div>
+
+          <AgentPassSpendPanel
+            session={agentSpendSession}
+            request={request}
+            onStatusChanged={fetchPass}
+          />
 
           {/* Action Row */}
           <div className="pass-card-actions">

@@ -58,9 +58,9 @@ describe("Agent Pass authorization parsing", () => {
     const expiresAt = new Date(Date.now() + 60_000).toISOString();
     expect(parseAgentPassAuthorization({
       status: "authorization_ready",
-      relayerUrl: "/api/stellar/relayer/agent-pass",
+      relayerUrl: "/api/stellar/relayer/payment",
       expiresAt,
-    })).toEqual({ relayerUrl: "/api/stellar/relayer/agent-pass", expiresAt });
+    })).toEqual({ relayerUrl: "/api/stellar/relayer/payment", expiresAt });
     expect(parseAgentPassAuthorization({
       status: "authorization_ready",
       relayerUrl: "https://attacker.test/relayer",

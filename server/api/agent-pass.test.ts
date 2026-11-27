@@ -35,11 +35,15 @@ describe("Agent Pass authorization handoff API", () => {
     const body = await response.json();
     expect(body).toEqual({
       status: "authorization_ready",
-      relayerUrl: "/api/stellar/relayer/agent-pass",
+      relayerUrl: "/api/stellar/relayer/payment",
       expiresAt: "2030-01-01T00:05:00.000Z",
     });
     expect(JSON.stringify(body)).not.toContain("A".repeat(43));
-    expect(response.headers.get("set-cookie")).toContain("HttpOnly; Secure; SameSite=Strict");
+    const cookie = response.headers.get("set-cookie") ?? "";
+    expect(cookie).toContain("__Secure-telya_stellar_payment=; ");
+    expect(cookie).toContain("__Secure-telya_agent_pass=");
+    expect(cookie).toContain("Path=/api/stellar/relayer/payment");
+    expect(cookie).toContain("HttpOnly; Secure; SameSite=Strict");
     expect(createSession).toHaveBeenCalledWith(user, {
       kind: "revoke",
       smartAccount: `C${"A".repeat(55)}`,

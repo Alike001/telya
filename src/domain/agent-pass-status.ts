@@ -17,7 +17,7 @@ export type PersistedAgentPass = {
 };
 
 export type AgentPassAuthorization = {
-  readonly relayerUrl: "/api/stellar/relayer/agent-pass";
+  readonly relayerUrl: "/api/stellar/relayer/payment";
   readonly expiresAt: string;
 };
 
@@ -92,7 +92,7 @@ export function parseAgentPassAuthorization(value: unknown): AgentPassAuthorizat
   const authorization = record(value);
   if (
     !authorization || authorization.status !== "authorization_ready" ||
-    authorization.relayerUrl !== "/api/stellar/relayer/agent-pass" ||
+    authorization.relayerUrl !== "/api/stellar/relayer/payment" ||
     !timestamp(authorization.expiresAt) ||
     Date.parse(authorization.expiresAt) <= Date.now()
   ) return null;

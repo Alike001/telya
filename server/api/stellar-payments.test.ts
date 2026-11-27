@@ -85,6 +85,7 @@ describe("Stellar payment authorization handoff API", () => {
     expect(JSON.stringify(body)).not.toContain("A".repeat(43));
     const cookie = response.headers.get("set-cookie") ?? "";
     expect(cookie).toContain("__Secure-telya_stellar_payment=");
+    expect(cookie).toContain("__Secure-telya_agent_pass=; ");
     expect(cookie).toContain("HttpOnly");
     expect(cookie).toContain("Secure");
     expect(cookie).toContain("SameSite=Strict");

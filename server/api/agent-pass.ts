@@ -5,6 +5,7 @@ import {
   createAgentPassExecutionSession,
   STELLAR_AGENT_PASS_RELAYER_PATH,
 } from "../agent-pass/execution-session.ts";
+import { clearStellarPaymentSessionCookie } from "../payments/stellar-execution-session.ts";
 import { createAuthenticatedHandler, isRecord, jsonResponse, readJson } from "./http.ts";
 import type { AuthenticateRequest } from "./http.ts";
 
@@ -29,7 +30,8 @@ export function createAgentPassAuthorizationHandler(options: {
       relayerUrl: STELLAR_AGENT_PASS_RELAYER_PATH,
       expiresAt: session.expiresAt,
     }, 201);
-    response.headers.set("set-cookie", agentPassSessionCookie(session.token));
+    response.headers.append("set-cookie", clearStellarPaymentSessionCookie());
+    response.headers.append("set-cookie", agentPassSessionCookie(session.token));
     return response;
   }, (error) => error instanceof AgentPassAuthorizationError
     ? jsonResponse({ error: "agent_pass_authorization_unavailable" }, 409)

@@ -61,12 +61,17 @@ Integrated Agent Pass management:
 2. Create a cumulative USDC allowance and expiry. The owner-authenticated,
    one-use administration handoff must be consumed before sponsorship.
 3. Confirm status uses the current Stellar ledger and the exact verified owner
-   account, then revoke with the owner passkey.
-4. The prior accepted on-chain allowed-spend, overspend-rejection and
-   post-revocation evidence remains documented on `main`. This draft branch no
-   longer exposes the legacy unauthenticated **Send as agent** surface. A new
-   agent spend must not be claimed until it is bound to authenticated payment
-   orchestration and passes live acceptance.
+   account. Before refreshing the page, create a verified direct-Stellar payment
+   review in the pass panel and inspect the exact recipient, amount, route and
+   fees before running it with the memory-only agent key.
+4. Verify the delegated payment uses the same one-use authenticated Payment
+   handoff, finality checks and durable receipt as an owner-authorized payment.
+   Refreshing discards the agent private key by design. Revoke with the owner
+   passkey when finished.
+5. The prior accepted on-chain allowed-spend, overspend-rejection and
+   post-revocation evidence remains documented on `main`. This draft integrated
+   flow still requires a live Privy/browser/Testnet acceptance run before it can
+   be claimed as complete.
 
 The UI reports deployment as connected only after the relayer returns a real
 transaction hash and Smart Account Kit verifies the confirmed deployment. A
@@ -83,10 +88,14 @@ completion. `GET /api/stellar/transfers/<transaction-hash>` returns the
 consumer-safe receipt used for refresh recovery. It never returns passkey data,
 the sponsor key, database credentials, or internal diagnostics.
 
-Agent Pass administration is also narrowly allowlisted by its protected relayer: only an
-owner-passkey-authorized `CallContract` rule for the configured USDC contract,
-one configured Ed25519 verifier signer, one configured spending-limit policy,
-and owner-authorized removal of a recorded Agent Pass rule are sponsored.
+Agent Pass administration is also narrowly allowlisted by the protected payment
+relayer: only an owner-passkey-authorized `CallContract` rule for the configured
+USDC contract, one configured Ed25519 verifier signer, one configured
+spending-limit policy, and owner-authorized removal of a recorded Agent Pass
+rule are sponsored. Administration and delegated payments rotate mutually
+exclusive, path-scoped HttpOnly authorization cookies. Delegated payments must
+match an authenticated persisted Payment and the owner's active recorded rule;
+verified spend events are idempotent by transaction hash.
 
 Stellar CCTP integration checks:
 

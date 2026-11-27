@@ -166,13 +166,6 @@ export async function validateStellarPaymentAuthorization(
   paymentId: string,
   transfer: ValidatedStellarUsdcTransfer,
 ): Promise<void> {
-  if (transfer.authorizationKind !== "owner") {
-    throw new StellarRelayerError(
-      "PAYMENT_MISMATCH",
-      "Agent Pass transfers cannot authorize a consumer payment review",
-      409,
-    );
-  }
   const sql = getSqlClient();
   const rows = await sql`
     SELECT p.id
@@ -181,6 +174,13 @@ export async function validateStellarPaymentAuthorization(
       AND m.conversation_id = p.conversation_id
     JOIN wallets w ON w.id::text =
       m.structured_intent->'selectedSourceWallet'->>'id'
+    LEFT JOIN stellar_agent_passes ap
+      ON ${transfer.authorizationKind} = 'agent'
+      AND ap.smart_account = w.address
+      AND ap.context_rule_id = ${transfer.contextRuleId}
+      AND ap.agent_address = ${transfer.signerAddress}
+      AND ap.token_contract = ${transfer.tokenContract}
+      AND ap.status = 'active'
     WHERE p.id = ${paymentId}::uuid AND p.user_id = ${userId}::uuid
       AND p.route_id = 'stellar_to_stellar'
       AND p.status IN ('awaiting_confirmation', 'authorized', 'submitted', 'completed')
@@ -188,6 +188,10 @@ export async function validateStellarPaymentAuthorization(
       AND p.expected_recipient_amount * 10000000 = ${transfer.amountRaw.toString()}::numeric
       AND w.user_id = p.user_id AND w.network = 'stellar'
       AND w.address = ${transfer.sender} AND w.verification_status = 'verified'
+      AND (
+        ${transfer.authorizationKind} = 'owner'
+        OR (${transfer.authorizationKind} = 'agent' AND ap.smart_account IS NOT NULL)
+      )
     LIMIT 1
   `;
   if (!rows[0]) {
@@ -207,6 +211,12 @@ export async function linkStellarPaymentAuthorization(
   transfer: ValidatedStellarUsdcTransfer,
 ): Promise<void> {
   const sql = getSqlClient();
+  const eventKey = transfer.authorizationKind === "agent"
+    ? "stellar_agent_authorized"
+    : "stellar_owner_authorized";
+  const publicMessage = transfer.authorizationKind === "agent"
+    ? "The active Agent Pass authorized this exact USDC recipient and amount."
+    : "Your passkey authorized this exact USDC recipient and amount.";
   const rows = await sql`
     WITH eligible AS MATERIALIZED (
       SELECT p.id
@@ -215,6 +225,13 @@ export async function linkStellarPaymentAuthorization(
         AND m.conversation_id = p.conversation_id
       JOIN wallets w ON w.id::text =
         m.structured_intent->'selectedSourceWallet'->>'id'
+      LEFT JOIN stellar_agent_passes ap
+        ON ${transfer.authorizationKind} = 'agent'
+        AND ap.smart_account = w.address
+        AND ap.context_rule_id = ${transfer.contextRuleId}
+        AND ap.agent_address = ${transfer.signerAddress}
+        AND ap.token_contract = ${transfer.tokenContract}
+        AND ap.status = 'active'
       JOIN stellar_relayer_requests r ON r.request_hash = ${requestHash}
       WHERE p.id = ${paymentId}::uuid AND p.user_id = ${userId}::uuid
         AND p.route_id = 'stellar_to_stellar'
@@ -223,6 +240,10 @@ export async function linkStellarPaymentAuthorization(
         AND p.expected_recipient_amount * 10000000 = ${transfer.amountRaw.toString()}::numeric
         AND w.user_id = p.user_id AND w.network = 'stellar'
         AND w.address = ${transfer.sender} AND w.verification_status = 'verified'
+        AND (
+          ${transfer.authorizationKind} = 'owner'
+          OR (${transfer.authorizationKind} = 'agent' AND ap.smart_account IS NOT NULL)
+        )
         AND r.status = 'pending' AND r.operation_kind = 'usdc_transfer'
         AND (r.payment_id IS NULL OR r.payment_id = p.id)
         AND r.sender_address = ${transfer.sender}
@@ -240,8 +261,8 @@ export async function linkStellarPaymentAuthorization(
     ), event AS (
       INSERT INTO payment_events (
         payment_id, event_key, stage, status, network, public_message, completed_at
-      ) SELECT payment.id, 'stellar_owner_authorized', 'authorization', 'authorized',
-        'stellar', 'Your passkey authorized this exact USDC recipient and amount.', now()
+      ) SELECT payment.id, ${eventKey}, 'authorization', 'authorized',
+        'stellar', ${publicMessage}, now()
       FROM payment ON CONFLICT (payment_id, event_key) DO NOTHING
     )
     SELECT id FROM payment
@@ -602,37 +623,52 @@ export async function recordVerifiedAgentPassSpend(
 ): Promise<void> {
   if (transfer.authorizationKind !== "agent") return;
   const sql = getSqlClient();
-  const [passRows, eventRows] = await sql.transaction([
-    sql`
-      UPDATE stellar_agent_passes
-      SET spent_amount_atomic = spent_amount_atomic + ${transfer.amountRaw.toString()}::numeric
+  const eventKey = `spent:${transactionHash}`;
+  const rows = await sql`
+    WITH eligible AS MATERIALIZED (
+      SELECT smart_account, context_rule_id,
+        spent_amount_atomic + ${transfer.amountRaw.toString()}::numeric AS cumulative_spent
+      FROM stellar_agent_passes
       WHERE smart_account = ${transfer.sender}
         AND context_rule_id = ${transfer.contextRuleId}
         AND agent_address = ${transfer.signerAddress}
+        AND token_contract = ${transfer.tokenContract}
         AND status = 'active'
         AND spent_amount_atomic + ${transfer.amountRaw.toString()}::numeric
           <= spending_limit_atomic
-      RETURNING spent_amount_atomic::text
-    `,
-    sql`
+      FOR UPDATE
+    ), inserted AS (
       INSERT INTO stellar_agent_pass_events (
         smart_account, context_rule_id, event_key, event_type, amount_atomic,
         cumulative_spent_atomic, transaction_hash
       )
-      SELECT ${transfer.sender}, ${transfer.contextRuleId},
-        ${`spent:${transactionHash}`}, 'spent', ${transfer.amountRaw.toString()}::numeric,
-        spent_amount_atomic, ${transactionHash}
-      FROM stellar_agent_passes
-      WHERE smart_account = ${transfer.sender}
-        AND context_rule_id = ${transfer.contextRuleId}
+      SELECT smart_account, context_rule_id, ${eventKey}, 'spent',
+        ${transfer.amountRaw.toString()}::numeric, cumulative_spent, ${transactionHash}
+      FROM eligible
       ON CONFLICT (smart_account, context_rule_id, event_key) DO NOTHING
-      RETURNING id
-    `,
-  ]);
-  if (
-    !(passRows as Record<string, unknown>[])[0] ||
-    !(eventRows as Record<string, unknown>[])[0]
-  ) {
+      RETURNING smart_account, context_rule_id, cumulative_spent_atomic
+    ), updated AS (
+      UPDATE stellar_agent_passes p
+      SET spent_amount_atomic = i.cumulative_spent_atomic
+      FROM inserted i
+      WHERE p.smart_account = i.smart_account
+        AND p.context_rule_id = i.context_rule_id
+      RETURNING p.smart_account, p.context_rule_id
+    )
+    SELECT 'recorded' AS result FROM updated
+    UNION ALL
+    SELECT 'existing' AS result
+    FROM stellar_agent_pass_events
+    WHERE smart_account = ${transfer.sender}
+      AND context_rule_id = ${transfer.contextRuleId}
+      AND event_key = ${eventKey}
+      AND event_type = 'spent'
+      AND amount_atomic = ${transfer.amountRaw.toString()}::numeric
+      AND transaction_hash = ${transactionHash}
+      AND cumulative_spent_atomic IS NOT NULL
+    LIMIT 1
+  `;
+  if (!rows[0]) {
     throw new Error("Verified Agent Pass spend was not persisted");
   }
 }

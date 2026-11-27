@@ -5,7 +5,9 @@ import type { AuthenticatedUser } from "../auth/privy.ts";
 import { getSqlClient } from "../db/client.ts";
 
 export const STELLAR_AGENT_PASS_SESSION_COOKIE = "__Secure-telya_agent_pass";
-export const STELLAR_AGENT_PASS_RELAYER_PATH = "/api/stellar/relayer/agent-pass";
+// Agent Pass administration and an immediately-following delegated payment use
+// the same kit because the Ed25519 signer is intentionally memory-only.
+export const STELLAR_AGENT_PASS_RELAYER_PATH = "/api/stellar/relayer/payment";
 const SESSION_TTL_MS = 5 * 60 * 1_000;
 
 export type AgentPassOperation =

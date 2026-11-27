@@ -12,6 +12,7 @@ import {
   linkStellarPaymentAuthorization,
   recordStellarCctpBurnSubmission,
   recordStellarUsdcTransferSubmission,
+  recordVerifiedAgentPassSpend,
   validateStellarCctpPaymentAuthorization,
   validateStellarPaymentAuthorization,
 } from "../../src/server/stellar-relayer-requests.ts";
@@ -230,6 +231,165 @@ describe("linked Stellar direct payment execution on PostgreSQL", () => {
           sql`DELETE FROM conversations WHERE id = ${conversationId}::uuid`,
           sql`DELETE FROM wallets WHERE id = ${walletId}::uuid`,
           sql`DELETE FROM auth_sessions WHERE privy_session_id = ${authSessionId}`,
+          sql`DELETE FROM users WHERE id IN (${userId}::uuid, ${otherUserId}::uuid)`,
+        ]);
+      }
+    },
+    30_000,
+  );
+
+  it.skipIf(!process.env.DATABASE_URL)(
+    "binds an active Agent Pass signature to the owner's exact persisted payment review",
+    async () => {
+      useNeonHttpsTransport();
+      const sql = neon(process.env.DATABASE_URL!);
+      const userId = randomUUID();
+      const otherUserId = randomUUID();
+      const walletId = randomUUID();
+      const conversationId = randomUUID();
+      const messageId = randomUUID();
+      const paymentId = randomUUID();
+      const createRequestHash = randomBytes(32).toString("hex");
+      const transferRequestHash = randomBytes(32).toString("hex");
+      const clientHash = randomBytes(32).toString("hex");
+      const createTransactionHash = randomBytes(32).toString("hex");
+      const sender = StrKey.encodeContract(randomBytes(32));
+      const recipient = StrKey.encodeContract(randomBytes(32));
+      const tokenContract = StrKey.encodeContract(randomBytes(32));
+      const agentAddress = StrKey.encodeContract(randomBytes(32));
+      const contextRuleId = 7;
+      const transfer = {
+        kind: "usdc_transfer",
+        func: null as never,
+        auth: [],
+        tokenContract,
+        sender,
+        recipient,
+        amountRaw: 12_500_000n,
+        authorizationKind: "agent",
+        contextRuleId,
+        signerAddress: agentAddress,
+      } satisfies ValidatedStellarUsdcTransfer;
+
+      try {
+        await sql.transaction([
+          sql`INSERT INTO users (id, privy_did) VALUES
+            (${userId}::uuid, ${`did:privy:telya_agent_payment_${userId}`}),
+            (${otherUserId}::uuid, ${`did:privy:telya_agent_payment_${otherUserId}`})`,
+          sql`INSERT INTO wallets (
+              id, user_id, network, address, normalized_address,
+              verification_status, verified_at
+            ) VALUES (
+              ${walletId}::uuid, ${userId}::uuid, 'stellar', ${sender}, ${sender},
+              'verified', now()
+            )`,
+          sql`INSERT INTO conversations (id, user_id)
+            VALUES (${conversationId}::uuid, ${userId}::uuid)`,
+          sql`INSERT INTO messages (
+              id, conversation_id, role, content, structured_intent
+            ) VALUES (
+              ${messageId}::uuid, ${conversationId}::uuid, 'user',
+              ${`Agent Pass payment: send 1.25 USDC to ${recipient} on Stellar`},
+              ${JSON.stringify({ selectedSourceWallet: { id: walletId, network: "stellar", address: sender } })}::jsonb
+            )`,
+          sql`INSERT INTO payments (
+              id, user_id, conversation_id, intent_message_id, idempotency_key,
+              route_id, source_network, destination_network, rail,
+              recipient_address, expected_recipient_amount, status
+            ) VALUES (
+              ${paymentId}::uuid, ${userId}::uuid, ${conversationId}::uuid,
+              ${messageId}::uuid, ${`dbtest:${randomUUID()}`}, 'stellar_to_stellar',
+              'stellar', 'stellar', 'stellar_direct', ${recipient}, 1.25,
+              'awaiting_confirmation'
+            )`,
+          sql`INSERT INTO stellar_relayer_requests (
+              request_hash, client_key_hash, status, transaction_hash,
+              operation_kind, authorization_kind, context_rule_id, signer_address
+            ) VALUES (
+              ${createRequestHash}, ${clientHash}, 'succeeded', ${createTransactionHash},
+              'agent_pass_create', 'owner', ${contextRuleId}, ${sender}
+            )`,
+          sql`INSERT INTO stellar_agent_passes (
+              smart_account, context_rule_id, agent_address, agent_public_key,
+              token_contract, spending_limit_policy, spending_limit_atomic,
+              period_ledgers, valid_until_ledger, status, create_request_hash,
+              create_transaction_hash
+            ) VALUES (
+              ${sender}, ${contextRuleId}, ${agentAddress}, ${randomBytes(32).toString("hex")},
+              ${tokenContract}, ${StrKey.encodeContract(randomBytes(32))}, 50000000,
+              720, 999999999, 'active', ${createRequestHash}, ${createTransactionHash}
+            )`,
+          sql`INSERT INTO stellar_relayer_requests (
+              request_hash, client_key_hash, status, operation_kind,
+              authorization_kind, context_rule_id, signer_address,
+              token_contract, sender_address, recipient_address,
+              expected_amount_atomic
+            ) VALUES (
+              ${transferRequestHash}, ${clientHash}, 'pending', 'usdc_transfer',
+              'agent', ${contextRuleId}, ${agentAddress}, ${tokenContract},
+              ${sender}, ${recipient}, 12500000
+            )`,
+        ]);
+
+        await expect(validateStellarPaymentAuthorization(
+          otherUserId, paymentId, transfer,
+        )).rejects.toThrow("does not match the owned payment review");
+        await expect(validateStellarPaymentAuthorization(
+          userId,
+          paymentId,
+          { ...transfer, signerAddress: StrKey.encodeContract(randomBytes(32)) },
+        )).rejects.toThrow("does not match the owned payment review");
+        await expect(validateStellarPaymentAuthorization(
+          userId, paymentId, transfer,
+        )).resolves.toBeUndefined();
+        await linkStellarPaymentAuthorization(
+          userId, paymentId, transferRequestHash, transfer,
+        );
+
+        const linked = await sql`
+          SELECT p.status, r.payment_id
+          FROM payments p
+          JOIN stellar_relayer_requests r ON r.request_hash = ${transferRequestHash}
+          WHERE p.id = ${paymentId}::uuid
+        `;
+        expect(linked[0]).toMatchObject({ status: "authorized", payment_id: paymentId });
+        const events = await sql`
+          SELECT event_key, public_message
+          FROM payment_events WHERE payment_id = ${paymentId}::uuid
+        `;
+        expect(events).toEqual([expect.objectContaining({
+          event_key: "stellar_agent_authorized",
+          public_message: "The active Agent Pass authorized this exact USDC recipient and amount.",
+        })]);
+        const spendHash = randomBytes(32).toString("hex");
+        await recordVerifiedAgentPassSpend(transfer, spendHash);
+        await recordVerifiedAgentPassSpend(transfer, spendHash);
+        const pass = await sql`
+          SELECT spent_amount_atomic::text AS spent
+          FROM stellar_agent_passes
+          WHERE smart_account = ${sender} AND context_rule_id = ${contextRuleId}
+        `;
+        expect(pass[0]?.spent).toBe("12500000");
+        const spendEvents = await sql`
+          SELECT amount_atomic::text AS amount, cumulative_spent_atomic::text AS cumulative
+          FROM stellar_agent_pass_events
+          WHERE smart_account = ${sender} AND context_rule_id = ${contextRuleId}
+        `;
+        expect(spendEvents).toEqual([{ amount: "12500000", cumulative: "12500000" }]);
+      } finally {
+        await sql.transaction([
+          sql`DELETE FROM payment_events WHERE payment_id = ${paymentId}::uuid`,
+          sql`DELETE FROM stellar_direct_payment_events WHERE request_hash = ${transferRequestHash}`,
+          sql`DELETE FROM stellar_agent_pass_events
+            WHERE smart_account = ${sender} AND context_rule_id = ${contextRuleId}`,
+          sql`DELETE FROM stellar_agent_passes
+            WHERE smart_account = ${sender} AND context_rule_id = ${contextRuleId}`,
+          sql`DELETE FROM stellar_relayer_requests
+            WHERE request_hash IN (${transferRequestHash}, ${createRequestHash})`,
+          sql`DELETE FROM payments WHERE id = ${paymentId}::uuid`,
+          sql`DELETE FROM messages WHERE id = ${messageId}::uuid`,
+          sql`DELETE FROM conversations WHERE id = ${conversationId}::uuid`,
+          sql`DELETE FROM wallets WHERE id = ${walletId}::uuid`,
           sql`DELETE FROM users WHERE id IN (${userId}::uuid, ${otherUserId}::uuid)`,
         ]);
       }

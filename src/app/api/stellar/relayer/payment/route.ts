@@ -5,6 +5,11 @@ import {
   consumeStellarPaymentExecutionSession,
   readStellarPaymentSessionCookie,
 } from "../../../../../../server/payments/stellar-execution-session";
+import {
+  clearAgentPassSessionCookie,
+  consumeAgentPassExecutionSession,
+  readAgentPassSessionCookie,
+} from "../../../../../../server/agent-pass/execution-session";
 import { handleStellarRelayerRequest } from "../handler";
 
 export const dynamic = "force-dynamic";
@@ -18,23 +23,45 @@ function unauthorized(): Response {
 }
 
 export async function POST(request: Request): Promise<Response> {
-  const token = readStellarPaymentSessionCookie(request);
-  if (!token) return unauthorized();
-  let context: Awaited<ReturnType<typeof consumeStellarPaymentExecutionSession>>;
+  const paymentToken = readStellarPaymentSessionCookie(request);
+  const agentPassToken = readAgentPassSessionCookie(request);
+  if ((!paymentToken && !agentPassToken) || (paymentToken && agentPassToken)) {
+    const response = unauthorized();
+    if (paymentToken || agentPassToken) {
+      response.headers.append("set-cookie", clearStellarPaymentSessionCookie());
+      response.headers.append("set-cookie", clearAgentPassSessionCookie());
+    }
+    return response;
+  }
   try {
-    context = await consumeStellarPaymentExecutionSession(token);
+    if (paymentToken) {
+      const context = await consumeStellarPaymentExecutionSession(paymentToken);
+      if (!context) {
+        const response = unauthorized();
+        response.headers.append("set-cookie", clearStellarPaymentSessionCookie());
+        response.headers.append("set-cookie", clearAgentPassSessionCookie());
+        return response;
+      }
+      const response = await handleStellarRelayerRequest(request, context);
+      response.headers.append("set-cookie", clearStellarPaymentSessionCookie());
+      response.headers.append("set-cookie", clearAgentPassSessionCookie());
+      return response;
+    }
+    const context = await consumeAgentPassExecutionSession(agentPassToken!);
+    if (!context) {
+      const response = unauthorized();
+      response.headers.append("set-cookie", clearStellarPaymentSessionCookie());
+      response.headers.append("set-cookie", clearAgentPassSessionCookie());
+      return response;
+    }
+    const response = await handleStellarRelayerRequest(request, { agentPass: context });
+    response.headers.append("set-cookie", clearStellarPaymentSessionCookie());
+    response.headers.append("set-cookie", clearAgentPassSessionCookie());
+    return response;
   } catch {
     return Response.json(
-      { success: false, error: "Payment authorization is temporarily unavailable", errorCode: "AUTHENTICATION_UNAVAILABLE" },
+      { success: false, error: "Financial authorization is temporarily unavailable", errorCode: "AUTHENTICATION_UNAVAILABLE" },
       { status: 503, headers: { "cache-control": "no-store" } },
     );
   }
-  if (!context) {
-    const response = unauthorized();
-    response.headers.set("set-cookie", clearStellarPaymentSessionCookie());
-    return response;
-  }
-  const response = await handleStellarRelayerRequest(request, context);
-  response.headers.set("set-cookie", clearStellarPaymentSessionCookie());
-  return response;
 }
