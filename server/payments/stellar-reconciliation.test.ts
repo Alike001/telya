@@ -1,15 +1,18 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
   rows: [] as Record<string, unknown>[],
+  queryError: null as Error | null,
   complete: vi.fn(),
   fail: vi.fn(),
 }));
 
 vi.mock("../db/client.ts", () => ({
-  getSqlClient: () => () => Promise.resolve(mocks.rows),
+  getSqlClient: () => () => mocks.queryError
+    ? Promise.reject(mocks.queryError)
+    : Promise.resolve(mocks.rows),
 }));
 
 vi.mock("../../src/server/stellar-relayer-requests.ts", () => ({
@@ -18,6 +21,7 @@ vi.mock("../../src/server/stellar-relayer-requests.ts", () => ({
 }));
 
 import { reconcileStellarDirectPayment } from "./stellar-reconciliation.ts";
+import { PaymentProviderUnavailableError } from "./service.ts";
 
 const userId = "11111111-1111-4111-8111-111111111111";
 const paymentId = "22222222-2222-4222-8222-222222222222";
@@ -35,6 +39,13 @@ const row = {
   amount_atomic: "12500000",
 };
 const unusedRpc = {} as never;
+
+beforeEach(() => {
+  mocks.rows = [];
+  mocks.queryError = null;
+  mocks.complete.mockReset();
+  mocks.fail.mockReset();
+});
 
 describe("Stellar direct payment reconciliation", () => {
   it("keeps a not-yet-final transaction pending without mutating payment state", async () => {
@@ -105,5 +116,33 @@ describe("Stellar direct payment reconciliation", () => {
       verifyTransfer,
     })).resolves.toEqual({ status: "completed", transactionHash });
     expect(verifyTransfer).not.toHaveBeenCalled();
+  });
+
+  it("reports persistence lookup failure as retryable reconciliation unavailability", async () => {
+    mocks.queryError = new Error("database unavailable");
+
+    await expect(reconcileStellarDirectPayment(userId, paymentId, {
+      rpc: unusedRpc,
+      verifyTransfer: vi.fn(),
+    })).rejects.toBeInstanceOf(PaymentProviderUnavailableError);
+    expect(mocks.complete).not.toHaveBeenCalled();
+    expect(mocks.fail).not.toHaveBeenCalled();
+  });
+
+  it("does not report completion when verified evidence cannot be persisted", async () => {
+    mocks.rows = [row];
+    mocks.complete.mockRejectedValueOnce(new Error("database unavailable"));
+    const verifyTransfer = vi.fn().mockResolvedValue({
+      status: "verified",
+      ledger: 123,
+      recipient: row.recipient_address,
+      amountRaw: 12_500_000n,
+    });
+
+    await expect(reconcileStellarDirectPayment(userId, paymentId, {
+      rpc: unusedRpc,
+      verifyTransfer,
+    })).rejects.toBeInstanceOf(PaymentProviderUnavailableError);
+    expect(mocks.fail).not.toHaveBeenCalled();
   });
 });

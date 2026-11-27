@@ -53,17 +53,25 @@ export async function reconcileStellarDirectPayment(
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(paymentId)) {
     throw new PaymentNotFoundError();
   }
-  const sql = getSqlClient();
-  const rows = await sql`
-    SELECT p.status, p.destination_transaction_hash, p.failure_code,
-      r.request_hash, r.submitted_transaction_hash, r.token_contract,
-      r.sender_address, r.recipient_address, r.expected_amount_atomic::text AS amount_atomic
-    FROM payments p
-    JOIN stellar_relayer_requests r ON r.payment_id = p.id
-    WHERE p.id = ${paymentId}::uuid AND p.user_id = ${userId}::uuid
-      AND p.route_id = 'stellar_to_stellar'
-    LIMIT 1
-  `;
+  let rows: readonly Record<string, unknown>[];
+  try {
+    const sql = getSqlClient();
+    rows = await sql`
+      SELECT p.status, p.destination_transaction_hash, p.failure_code,
+        r.request_hash, r.submitted_transaction_hash, r.token_contract,
+        r.sender_address, r.recipient_address, r.expected_amount_atomic::text AS amount_atomic
+      FROM payments p
+      JOIN stellar_relayer_requests r ON r.payment_id = p.id
+      WHERE p.id = ${paymentId}::uuid AND p.user_id = ${userId}::uuid
+        AND p.route_id = 'stellar_to_stellar'
+      LIMIT 1
+    ` as readonly Record<string, unknown>[];
+  } catch {
+    // The already-submitted hash must remain refresh-only when persistence is
+    // unreachable. Surface a retryable unavailable response, never a generic
+    // 500 that might tempt the client or user to submit again.
+    throw new PaymentProviderUnavailableError();
+  }
   const row = rows[0] as Record<string, unknown> | undefined;
   if (!row) throw new PaymentNotFoundError();
   if (row.status === "completed" && typeof row.destination_transaction_hash === "string") {
@@ -105,22 +113,30 @@ export async function reconcileStellarDirectPayment(
     return { status: "pending", transactionHash: row.submitted_transaction_hash };
   }
   if (verification.status === "verified") {
-    await completeStellarUsdcTransferRequest(row.request_hash, {
-      transactionHash: row.submitted_transaction_hash,
-      ledger: verification.ledger,
-      recipient: verification.recipient,
-      amountRaw,
-    });
+    try {
+      await completeStellarUsdcTransferRequest(row.request_hash, {
+        transactionHash: row.submitted_transaction_hash,
+        ledger: verification.ledger,
+        recipient: verification.recipient,
+        amountRaw,
+      });
+    } catch {
+      throw new PaymentProviderUnavailableError();
+    }
     return { status: "completed", transactionHash: row.submitted_transaction_hash };
   }
   const failureCode = verification.status === "failed"
     ? "STELLAR_TRANSACTION_FAILED"
     : `STELLAR_${verification.reason.toUpperCase()}`;
-  await failLinkedStellarPayment(
-    row.request_hash,
-    row.submitted_transaction_hash,
-    failureCode,
-  );
+  try {
+    await failLinkedStellarPayment(
+      row.request_hash,
+      row.submitted_transaction_hash,
+      failureCode,
+    );
+  } catch {
+    throw new PaymentProviderUnavailableError();
+  }
   return {
     status: "failed",
     transactionHash: row.submitted_transaction_hash,

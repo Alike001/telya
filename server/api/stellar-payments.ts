@@ -110,7 +110,9 @@ export function createStellarPaymentReconciliationHandler(
       const result = await (options.reconcile ?? reconcileStellarDirectPayment)(user.id, paymentId);
       return jsonResponse(result, result.status === "pending" ? 202 : 200);
     },
-    paymentErrorResponse,
+    (error) => error instanceof PaymentProviderUnavailableError
+      ? jsonResponse({ error: "stellar_reconciliation_unavailable" }, 503)
+      : paymentErrorResponse(error),
   );
 }
 

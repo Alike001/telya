@@ -2,7 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-import { PaymentNotFoundError } from "../payments/service.ts";
+import {
+  PaymentNotFoundError,
+  PaymentProviderUnavailableError,
+} from "../payments/service.ts";
 import {
   createStellarPaymentAuthorizationHandler,
   createStellarCctpPaymentAuthorizationHandler,
@@ -52,6 +55,23 @@ describe("Stellar payment reconciliation API", () => {
 
     expect(response.status).toBe(404);
     await expect(response.json()).resolves.toEqual({ error: "payment_not_found" });
+  });
+
+  it("returns retryable reconciliation unavailability instead of a generic 500", async () => {
+    const handler = createStellarPaymentReconciliationHandler({
+      authenticate: vi.fn().mockResolvedValue(user),
+      reconcile: vi.fn().mockRejectedValue(new PaymentProviderUnavailableError()),
+    });
+
+    const response = await handler(new Request(
+      "https://telya.test/api/payments/stellar/direct/reconcile?id=33333333-3333-4333-8333-333333333333",
+      { method: "POST" },
+    ));
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: "stellar_reconciliation_unavailable",
+    });
   });
 });
 
