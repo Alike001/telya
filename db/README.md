@@ -7,6 +7,11 @@ run `npm run db:migrate` from the repository root using a direct (non-pooler)
 Neon connection URL. The migration command takes a Postgres advisory lock,
 records checksums in `schema_migrations`, and rejects edits to applied files.
 
+The Stellar and Base CCTP operation tables are added by migrations `0006`,
+`0007`, and `0008` in order. Migration `0008_base_cctp.sql` persists Base
+transaction evidence, Circle message/attestation bytes and hashes, trusted
+source burn/fee values, and the Base destination submission lease.
+
 ## Identity and sessions
 
 Authenticate requests by verifying a Privy access token on the server. Derive

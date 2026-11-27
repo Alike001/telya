@@ -1,4 +1,4 @@
-import { authenticateRequest } from "../auth/privy.js";
+import { authenticateRequest } from "../auth/privy.ts";
 import {
   AmbiguousRecipientError,
   ContactInputError,
@@ -6,9 +6,9 @@ import {
   listContacts,
   removeContact,
   saveContact,
-} from "../contacts/service.js";
-import { createAuthenticatedHandler, isRecord, jsonResponse, readJson } from "./http.js";
-import type { AuthenticateRequest } from "./http.js";
+} from "../contacts/service.ts";
+import { createAuthenticatedHandler, isRecord, jsonResponse, readJson } from "./http.ts";
+import type { AuthenticateRequest } from "./http.ts";
 
 export function createContactsHandler(options: { authenticate?: AuthenticateRequest } = {}) {
   return createAuthenticatedHandler(

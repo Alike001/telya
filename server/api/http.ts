@@ -1,4 +1,4 @@
-import type { AuthenticatedUser } from "../auth/privy.js";
+import type { AuthenticatedUser } from "../auth/privy.ts";
 
 export type AuthenticateRequest = (request: Request) => Promise<AuthenticatedUser>;
 export type AuthenticatedHandler = (
