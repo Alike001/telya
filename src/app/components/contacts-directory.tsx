@@ -11,6 +11,7 @@ import {
   type VerifiedContact,
 } from "../../domain/contact-directory";
 import { authenticatedFetch } from "../authenticated-fetch";
+import { createSessionRequestGuard, type SessionRequestGuard } from "../session-request-guard";
 
 interface ContactsDirectoryProps {
   readonly onSelectPayContact: (handle: string, network?: Network) => void;
@@ -82,7 +83,8 @@ function AuthenticatedContacts({ onSelectPayContact, onClose }: ContactsDirector
     [getAccessToken],
   );
 
-  const loadContacts = useCallback(async () => {
+  const loadContacts = useCallback(async (guard?: SessionRequestGuard) => {
+    if (guard?.isActive() === false) return;
     setLoading(true);
     setError(null);
     try {
@@ -90,21 +92,33 @@ function AuthenticatedContacts({ onSelectPayContact, onClose }: ContactsDirector
       const payload: unknown = await response.json();
       const parsed = response.ok ? parseVerifiedContacts(payload) : null;
       if (!parsed) throw new Error("The authenticated contacts response could not be verified.");
+      if (guard?.isActive() === false) return;
       setContacts(parsed);
     } catch (reason) {
+      if (guard?.isActive() === false) return;
       setContacts([]);
       setError(reason instanceof Error ? reason.message : "Contacts are temporarily unavailable.");
     } finally {
-      setLoading(false);
+      if (guard?.isActive() !== false) setLoading(false);
     }
   }, [request]);
 
   useEffect(() => {
     if (!ready || !authenticated) {
       setContacts([]);
+      setSearch("");
+      setShowAdd(false);
+      setUsername("");
+      setPreferredNetwork("");
+      setLoading(false);
+      setError(null);
       return;
     }
-    void loadContacts();
+    setContacts([]);
+    setError(null);
+    const guard = createSessionRequestGuard();
+    void loadContacts(guard);
+    return () => guard.cancel();
   }, [authenticated, loadContacts, ready]);
 
   async function saveContact(event: React.FormEvent) {

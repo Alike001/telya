@@ -11,6 +11,7 @@ import {
 } from "../../domain/payment-activity";
 import { buildPaymentReceipt } from "../../domain/payment-timeline";
 import { authenticatedFetch } from "../authenticated-fetch";
+import { createSessionRequestGuard, type SessionRequestGuard } from "../session-request-guard";
 import { ActivityHistory } from "./activity-history";
 import { PaymentProgressTimeline } from "./payment-progress-timeline";
 import { PaymentReceiptModal } from "./payment-receipt-modal";
@@ -45,7 +46,8 @@ function AuthenticatedPaymentActivity() {
     [getAccessToken],
   );
 
-  const loadPage = useCallback(async (cursor?: string) => {
+  const loadPage = useCallback(async (cursor?: string, guard?: SessionRequestGuard) => {
+    if (guard?.isActive() === false) return;
     setLoading(true);
     setError(null);
     try {
@@ -56,12 +58,14 @@ function AuthenticatedPaymentActivity() {
       const payload: unknown = await response.json();
       const page = response.ok ? parsePaymentActivityPage(payload) : null;
       if (!page) throw new Error("The persisted payment history response could not be verified.");
+      if (guard?.isActive() === false) return;
       setPayments((previous) => cursor ? [...previous, ...page.payments] : page.payments);
       setNextCursor(page.nextCursor);
     } catch (reason) {
+      if (guard?.isActive() === false) return;
       setError(reason instanceof Error ? reason.message : "Payment history is temporarily unavailable.");
     } finally {
-      setLoading(false);
+      if (guard?.isActive() !== false) setLoading(false);
     }
   }, [request]);
 
@@ -70,9 +74,19 @@ function AuthenticatedPaymentActivity() {
       setPayments([]);
       setNextCursor(null);
       setSelected(null);
+      setShowReceipt(false);
+      setLoading(false);
+      setError(null);
       return;
     }
-    void loadPage();
+    setPayments([]);
+    setNextCursor(null);
+    setSelected(null);
+    setShowReceipt(false);
+    setError(null);
+    const guard = createSessionRequestGuard();
+    void loadPage(undefined, guard);
+    return () => guard.cancel();
   }, [authenticated, loadPage, ready]);
 
   async function fetchDetail(paymentId: string): Promise<PersistedPayment> {
