@@ -12,6 +12,7 @@ import {
   BASE_SEPOLIA_USDC,
   CCTP_BASE_DOMAIN,
   CCTP_STELLAR_DOMAIN,
+  encodeCctpForwarderHookData,
   encodeCctpReceiveMessage,
   findBaseCctpMessage,
   getBaseTransactionReceipt,
@@ -101,6 +102,7 @@ export async function verifyBaseCctpSource(input: {
   readonly burnAmount: string;
   readonly maxFee: string;
   readonly expectedRecipientAmount: string;
+  readonly expectedRecipientAddress: string;
   readonly expectedMintRecipient: string;
   readonly expectedDestinationTokenMessenger: string;
   readonly destinationDomain?: number;
@@ -147,6 +149,16 @@ export async function verifyBaseCctpSource(input: {
   const expectedMaxFee = normalizeBaseUsdcFee(input.maxFee);
   const expectedRecipientAmount = normalizeBaseUsdcAmount(input.expectedRecipientAmount);
   const destinationDomain = input.destinationDomain ?? CCTP_STELLAR_DOMAIN;
+  let expectedHookData: string;
+  try {
+    expectedHookData = encodeCctpForwarderHookData(input.expectedRecipientAddress);
+  } catch {
+    return {
+      status: "mismatch",
+      sourceTransactionHash,
+      reason: "Expected Stellar CCTP forward recipient is invalid",
+    };
+  }
   let expectedMintRecipient: string;
   let expectedDestinationTokenMessenger: string;
   try {
@@ -167,6 +179,8 @@ export async function verifyBaseCctpSource(input: {
     parsed.burnToken.toLowerCase() === baseAddressAsBytes32(BASE_SEPOLIA_USDC) &&
     parsed.messageSender.toLowerCase() === baseAddressAsBytes32(input.sourceAddress) &&
     parsed.mintRecipient.toLowerCase() === expectedMintRecipient &&
+    parsed.destinationCaller.toLowerCase() === expectedMintRecipient &&
+    parsed.hookData.toLowerCase() === expectedHookData &&
     parsed.nonce !== CCTP_V2_EMPTY_NONCE &&
     parsed.minFinalityThreshold === CCTP_STANDARD_FINALITY_THRESHOLD &&
     parsed.finalityThresholdExecuted >= CCTP_STANDARD_FINALITY_THRESHOLD &&
@@ -652,6 +666,7 @@ export async function reconcileBaseToStellarCctp(input: {
     burnAmount: atomicToDecimal(String(operation.burn_amount), 6),
     maxFee: atomicToDecimal(String(operation.max_fee), 6),
     expectedRecipientAmount: String(payment.expected_amount),
+    expectedRecipientAddress: payment.recipient_address,
     expectedMintRecipient: stellarConfig.forwarder,
     expectedDestinationTokenMessenger: stellarConfig.tokenMessenger,
   });

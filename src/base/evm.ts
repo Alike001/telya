@@ -1,4 +1,5 @@
 import type { DecimalAmount } from "../domain/index.ts";
+import { StrKey } from "@stellar/stellar-sdk";
 
 export const BASE_SEPOLIA_CHAIN_ID = 84_532;
 export const CCTP_BASE_DOMAIN = 6;
@@ -18,7 +19,7 @@ const ERC20_TRANSFER_SELECTOR = "0xa9059cbb";
 const ERC20_APPROVE_SELECTOR = "0x095ea7b3";
 const ERC20_ALLOWANCE_SELECTOR = "0xdd62ed3e";
 const ERC20_BALANCE_OF_SELECTOR = "0x70a08231";
-const CCTP_DEPOSIT_FOR_BURN_SELECTOR = "0x8e0250ee";
+const CCTP_DEPOSIT_FOR_BURN_WITH_HOOK_SELECTOR = "0x779b432d";
 const CCTP_RECEIVE_MESSAGE_SELECTOR = "0x57ecfd28";
 const UINT256_MAX = (1n << 256n) - 1n;
 
@@ -167,17 +168,30 @@ function encodeErc20Allowance(owner: string, spender: string): string {
   return `${ERC20_ALLOWANCE_SELECTOR}${addressWord(owner)}${addressWord(spender)}`;
 }
 
-export function encodeCctpDepositForBurn(input: {
+export function encodeCctpForwarderHookData(forwardRecipient: string): string {
+  if (!(StrKey.isValidEd25519PublicKey(forwardRecipient) ||
+      StrKey.isValidContract(forwardRecipient) ||
+      StrKey.isValidMed25519PublicKey(forwardRecipient))) {
+    throw new BaseEvmError("INVALID_ADDRESS", "CCTP forward recipient must be a Stellar G, C, or M address");
+  }
+  const bytes = new TextEncoder().encode(forwardRecipient);
+  const header = new Uint8Array(32);
+  new DataView(header.buffer).setUint32(28, bytes.length, false);
+  return `0x${Array.from([...header, ...bytes], (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+}
+
+export function encodeCctpDepositForBurnWithHook(input: {
   readonly amount: DecimalAmount;
   readonly destinationDomain: number;
   readonly mintRecipient: string;
+  readonly destinationCaller: string;
+  readonly forwardRecipient: string;
   readonly burnToken?: string;
-  readonly destinationCaller?: string;
   readonly maxFee?: DecimalAmount;
   readonly minimumFinalityThreshold?: number;
 }): string {
-  if (!Number.isSafeInteger(input.destinationDomain) || input.destinationDomain < 0) {
-    throw new BaseEvmError("INVALID_CONFIG", "CCTP destination domain is invalid");
+  if (input.destinationDomain !== CCTP_STELLAR_DOMAIN) {
+    throw new BaseEvmError("INVALID_CONFIG", "CCTP forwarder burn requires Stellar destination domain");
   }
   const amount = normalizeBaseUsdcAmount(input.amount);
   const maxFee = input.maxFee ? normalizeBaseUsdcFee(input.maxFee) : 0n;
@@ -189,16 +203,23 @@ export function encodeCctpDepositForBurn(input: {
     throw new BaseEvmError("INVALID_CONFIG", "CCTP finality threshold is invalid");
   }
   const burnToken = input.burnToken ?? BASE_SEPOLIA_USDC;
-  const destinationCaller = input.destinationCaller ?? `0x${"0".repeat(64)}`;
+  const mintRecipient = requireBytes32(input.mintRecipient, "mintRecipient");
+  const destinationCaller = requireBytes32(input.destinationCaller, "destinationCaller");
+  if (mintRecipient !== destinationCaller || mintRecipient === `0x${"0".repeat(64)}`) {
+    throw new BaseEvmError("INVALID_ADDRESS", "CCTP mint recipient and destination caller must be the same nonzero forwarder");
+  }
+  const hookData = hexBytes(encodeCctpForwarderHookData(input.forwardRecipient), "CCTP forwarder hook");
   return [
-    CCTP_DEPOSIT_FOR_BURN_SELECTOR,
+    CCTP_DEPOSIT_FOR_BURN_WITH_HOOK_SELECTOR,
     word(amount),
     word(BigInt(input.destinationDomain)),
-    bytes32Word(input.mintRecipient, "mintRecipient"),
+    bytes32Word(mintRecipient, "mintRecipient"),
     addressWord(burnToken),
     bytes32Word(destinationCaller, "destinationCaller"),
     word(maxFee),
     word(BigInt(threshold)),
+    word(256n),
+    dynamicBytes(hookData),
   ].join("");
 }
 
@@ -295,6 +316,8 @@ export async function submitBaseCctpBurn(input: {
   readonly maxFee: DecimalAmount;
   readonly destinationDomain: number;
   readonly mintRecipient: string;
+  readonly destinationCaller: string;
+  readonly forwardRecipient: string;
 }): Promise<{ readonly transactionHash: string; readonly approvalTransactionHash?: string }> {
   const sender = requireEvmAddress(input.sender, "sender");
   const amount = normalizeBaseUsdcAmount(input.burnAmount);
@@ -323,11 +346,13 @@ export async function submitBaseCctpBurn(input: {
     provider: input.provider,
     from: sender,
     to: BASE_SEPOLIA_TOKEN_MESSENGER,
-    data: encodeCctpDepositForBurn({
+    data: encodeCctpDepositForBurnWithHook({
       amount: input.burnAmount,
       maxFee: input.maxFee,
       destinationDomain: input.destinationDomain,
       mintRecipient: input.mintRecipient,
+      destinationCaller: input.destinationCaller,
+      forwardRecipient: input.forwardRecipient,
     }),
   });
   return approvalTransactionHash
@@ -582,6 +607,7 @@ export interface ParsedCctpMessage {
   readonly maxFee: bigint;
   readonly feeExecuted: bigint;
   readonly expirationBlock: bigint;
+  readonly hookData: string;
 }
 
 export function parseCctpMessage(message: string): ParsedCctpMessage {
@@ -610,5 +636,6 @@ export function parseCctpMessage(message: string): ParsedCctpMessage {
     maxFee: BigInt(`0x${body.slice(132 * 2, 164 * 2)}`),
     feeExecuted: BigInt(`0x${body.slice(164 * 2, 196 * 2)}`),
     expirationBlock: BigInt(`0x${body.slice(196 * 2, 228 * 2)}`),
+    hookData: `0x${body.slice(228 * 2)}`,
   };
 }
