@@ -62,6 +62,30 @@ beforeEach(() => {
 });
 
 describe("Base-to-Stellar destination recovery", () => {
+  it("preserves an already attested operation while rechecking the same Base hash", async () => {
+    mocks.getSqlClient.mockReturnValue(async (parts: TemplateStringsArray) => {
+      const query = parts.join(" ").replace(/\s+/g, " ");
+      mocks.queries.push(query);
+      if (query.includes("SELECT p.id, p.route_id")) return [{
+        id: paymentId, route_id: "base_to_stellar", status: "awaiting_attestation",
+        recipient_address: recipient, expected_amount: "0.100000000000000000",
+        source_address: `0x${"1".repeat(40)}`, source_transaction_hash: sourceHash,
+        destination_transaction_hash: null,
+      }];
+      if (query.includes("SELECT burn_amount_atomic")) return [{
+        burn_amount: "100000", max_fee: "0", status: "awaiting_attestation",
+        source_transaction_hash: sourceHash,
+      }];
+      if (query.includes("WITH operation AS")) return [{ id: paymentId }];
+      throw new Error(`Unexpected query: ${query.slice(0, 90)}`);
+    });
+    const rpc = { request: vi.fn().mockResolvedValue(null) };
+    await expect(reconcileBaseToStellarCctp({ paymentId, sourceTransactionHash: sourceHash, rpc }))
+      .resolves.toEqual({ status: "pending", sourceTransactionHash: sourceHash });
+    expect(mocks.queries.join(" ")).toContain("WHEN status = 'authorized' THEN 'source_submitted' ELSE status END");
+    expect(mocks.settleBaseToStellarCctp).not.toHaveBeenCalled();
+  });
+
   it("reuses saved Circle proof and destination envelope after a pending mint", async () => {
     mocks.settleBaseToStellarCctp.mockResolvedValue({ status: "completed", destinationTransactionHash: destinationHash });
     const rpc = { request: vi.fn() };
