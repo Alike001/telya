@@ -4,7 +4,7 @@ import { Networks, StrKey } from "@stellar/stellar-sdk";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { BASE_SEPOLIA_USDC } from "../../src/base/evm.ts";
-import { quoteSupportedPaymentFees } from "./quotes.ts";
+import { BaseApprovalRequiredError, quoteSupportedPaymentFees } from "./quotes.ts";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -108,7 +108,7 @@ describe("mounted payment fee policy", () => {
     }), "latest"]);
   });
 
-  it("quotes Base-to-Stellar Standard provider, approval and burn fees from live inputs", async () => {
+  it("requires exact-amount approval before trying to estimate a reverting Base CCTP burn", async () => {
     vi.stubEnv("BASE_SEPOLIA_RPC_URL", "https://base-sepolia.example.test");
     vi.stubEnv("STELLAR_FEE_SPONSOR_SECRET", "configured-in-test");
     vi.stubEnv("STELLAR_RPC_URL", "https://stellar.example.test");
@@ -147,17 +147,44 @@ describe("mounted payment fee policy", () => {
       amount: "5",
       sourceWallet: { id: "base-wallet", network: "base", address: `0x${"a".repeat(40)}` },
       destinationAddress: StrKey.encodeContract(Buffer.alloc(32, 5)),
+    })).rejects.toBeInstanceOf(BaseApprovalRequiredError);
+    expect(rpcBodies.filter((body) => body.method === "eth_estimateGas")).toEqual([]);
+  });
+
+  it("quotes Base-to-Stellar burn gas only from an actually sufficient allowance", async () => {
+    vi.stubEnv("BASE_SEPOLIA_RPC_URL", "https://base-sepolia.example.test");
+    vi.stubEnv("STELLAR_FEE_SPONSOR_SECRET", "configured-in-test");
+    vi.stubEnv("STELLAR_RPC_URL", "https://stellar.example.test");
+    vi.stubEnv("STELLAR_NETWORK_PASSPHRASE", Networks.TESTNET);
+    vi.stubEnv("STELLAR_USDC_SAC", StrKey.encodeContract(Buffer.alloc(32, 1)));
+    vi.stubEnv("CCTP_STELLAR_TOKEN_MESSENGER", StrKey.encodeContract(Buffer.alloc(32, 2)));
+    vi.stubEnv("CCTP_STELLAR_MESSAGE_TRANSMITTER", StrKey.encodeContract(Buffer.alloc(32, 3)));
+    vi.stubEnv("CCTP_STELLAR_FORWARDER", StrKey.encodeContract(Buffer.alloc(32, 4)));
+    vi.stubEnv("CCTP_BASE_DOMAIN", "6");
+    vi.stubEnv("CCTP_STELLAR_DOMAIN", "27");
+    const calls: Array<{ method: string; params: readonly unknown[] }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      if (String(url).startsWith("https://iris-api-sandbox.circle.com/")) {
+        return Response.json([{ finalityThreshold: 2_000, minimumFee: 0 }]);
+      }
+      const body = JSON.parse(String(init?.body)) as { method: string; params: readonly unknown[] };
+      calls.push(body);
+      const result = body.method === "eth_chainId" ? "0x14a34"
+        : body.method === "eth_call" ? `0x${(5_000_000n).toString(16).padStart(64, "0")}`
+        : body.method === "eth_estimateGas" ? "0x186a0"
+        : "0x3b9aca00";
+      return Response.json({ jsonrpc: "2.0", id: 1, result });
+    }));
+    await expect(quoteSupportedPaymentFees({
+      route: { id: "base_to_stellar_cctp", sourceNetwork: "base", destinationNetwork: "stellar", rail: "circle_cctp_standard" },
+      amount: "5",
+      sourceWallet: { id: "base-wallet", network: "base", address: `0x${"a".repeat(40)}` },
+      destinationAddress: StrKey.encodeContract(Buffer.alloc(32, 5)),
     })).resolves.toEqual([
       { kind: "provider", payer: "sender", asset: "USDC", amount: "0", label: "Circle CCTP Standard fee" },
-      {
-        kind: "network",
-        payer: "sender",
-        asset: "ETH",
-        amount: "0.00015",
-        label: "Estimated Base approval and CCTP burn gas",
-      },
+      { kind: "network", payer: "sender", asset: "ETH", amount: "0.0001", label: "Estimated Base CCTP burn gas" },
     ]);
-    expect(rpcBodies.filter((body) => body.method === "eth_estimateGas").map((body) =>
-      (body.params[0] as { data: string }).data.slice(0, 10))).toEqual(["0x095ea7b3", "0x8e0250ee"]);
+    expect(calls.filter((body) => body.method === "eth_estimateGas").map((body) =>
+      (body.params[0] as { data: string }).data.slice(0, 10))).toEqual(["0x8e0250ee"]);
   });
 });

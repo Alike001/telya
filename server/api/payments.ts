@@ -22,6 +22,7 @@ import {
   validateFeeList,
 } from "../payments/service.ts";
 import type { BalanceProvider, FeeQuoteProvider } from "../payments/service.ts";
+import { BaseApprovalRequiredError } from "../payments/quotes.ts";
 import { resolvePaymentRoute } from "../payments/routing.ts";
 import { createAuthenticatedHandler, isRecord, jsonResponse, readJson } from "./http.ts";
 import type { AuthenticateRequest } from "./http.ts";
@@ -186,7 +187,8 @@ export function createPaymentHandler(options: PaymentApiOptions = {}) {
       let balances: Awaited<ReturnType<BalanceProvider>>;
       try {
         balances = await options.getBalances(user, sourceWallets);
-      } catch {
+      } catch (error) {
+        if (error instanceof BaseApprovalRequiredError) throw error;
         throw new PaymentProviderUnavailableError();
       }
       const route = resolvePaymentRoute({
@@ -292,6 +294,7 @@ export function createPaymentHandler(options: PaymentApiOptions = {}) {
       if (error instanceof PaymentInputError) return jsonResponse({ error: "invalid_payment", message: error.message }, 400);
       if (error instanceof PaymentNotFoundError) return jsonResponse({ error: "payment_not_found" }, 404);
       if (error instanceof PaymentConflictError) return jsonResponse({ error: "payment_conflict", message: error.message }, 409);
+      if (error instanceof BaseApprovalRequiredError) return jsonResponse({ error: "base_approval_required", message: error.message }, 409);
       if (error instanceof PaymentProviderUnavailableError) return jsonResponse({ error: "payment_provider_unavailable" }, 503);
       return null;
     },

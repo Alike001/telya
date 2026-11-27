@@ -6,10 +6,8 @@ import {
   baseEvmConfigFromEnvironment,
   createBaseRpc,
   encodeCctpDepositForBurn,
-  encodeErc20Approve,
   encodeErc20Transfer,
   estimateBaseTransactionFee,
-  formatBaseWeiAsEth,
   normalizeBaseUsdcAmount,
   readBaseUsdcAllowance,
 } from "../../src/base/evm.ts";
@@ -25,6 +23,13 @@ function atomicUsdcToDecimal(value: string): string {
   const whole = padded.slice(0, -6).replace(/^0+(?=\d)/, "");
   const fraction = padded.slice(-6).replace(/0+$/, "");
   return fraction ? `${whole}.${fraction}` : whole;
+}
+
+export class BaseApprovalRequiredError extends Error {
+  constructor(readonly amount: string) {
+    super(`Approve exactly ${amount} USDC for Circle on Base Sepolia in Base wallet setup, then request a fresh payment review.`);
+    this.name = "BaseApprovalRequiredError";
+  }
 }
 
 /** Direct Stellar USDC is fully transferred; the configured sponsor pays XLM network costs. */
@@ -64,17 +69,10 @@ export const quoteSupportedPaymentFees: FeeQuoteProvider = async (input) => {
     const rpc = createBaseRpc(baseEvmConfigFromEnvironment());
     const burnAmount = normalizeBaseUsdcAmount(input.amount);
     const allowance = await readBaseUsdcAllowance({ rpc, owner: input.sourceWallet.address });
-    let feeWei = 0n;
-    let approvalRequired = false;
     if (allowance < burnAmount) {
-      approvalRequired = true;
-      const approval = await estimateBaseTransactionFee({
-        rpc,
-        from: input.sourceWallet.address,
-        to: BASE_SEPOLIA_USDC,
-        data: encodeErc20Approve(BASE_SEPOLIA_TOKEN_MESSENGER, input.amount),
-      });
-      feeWei += approval.feeWei;
+      // An unapproved burn reverts in eth_estimateGas. The user must approve
+      // this exact amount separately before an honest full route quote exists.
+      throw new BaseApprovalRequiredError(input.amount);
     }
     const burn = await estimateBaseTransactionFee({
       rpc,
@@ -87,7 +85,6 @@ export const quoteSupportedPaymentFees: FeeQuoteProvider = async (input) => {
         mintRecipient: stellarContractToBytes32(stellar.forwarder),
       }),
     });
-    feeWei += burn.feeWei;
     return [
       {
         kind: "provider",
@@ -100,10 +97,8 @@ export const quoteSupportedPaymentFees: FeeQuoteProvider = async (input) => {
         kind: "network",
         payer: "sender",
         asset: "ETH",
-        amount: formatBaseWeiAsEth(feeWei),
-        label: approvalRequired
-          ? "Estimated Base approval and CCTP burn gas"
-          : "Estimated Base CCTP burn gas",
+        amount: burn.feeEth,
+        label: "Estimated Base CCTP burn gas",
       },
     ];
   }
