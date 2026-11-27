@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   getSqlClient: vi.fn(),
   completionRows: true,
   completionQuery: "",
+  submissionQuery: "",
 }));
 
 vi.mock("server-only", () => ({}));
@@ -55,6 +56,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.completionRows = true;
   mocks.completionQuery = "";
+  mocks.submissionQuery = "";
   const sql = (async (strings: TemplateStringsArray) => {
     const query = strings.join(" ").replace(/\s+/g, " ").trim();
     if (query.startsWith("SELECT p.id, p.route_id")) {
@@ -70,6 +72,10 @@ beforeEach(() => {
         verified_recipient_amount: null,
         source_address: SOURCE,
       }];
+    }
+    if (query.startsWith("WITH operation AS")) {
+      mocks.submissionQuery = query;
+      return [{ id: PAYMENT_ID }];
     }
     if (query.startsWith("WITH eligible AS MATERIALIZED")) {
       mocks.completionQuery = query;
@@ -93,6 +99,7 @@ describe("Base direct payment completion persistence", () => {
     })).resolves.toEqual({ status: "completed", transactionHash: TX_HASH });
 
     expect(mocks.completionQuery).toContain("lower(p.recipient_address) = lower(");
+    expect(mocks.submissionQuery).toContain("base_direct_submitted");
     expect(mocks.completionQuery).toContain("JOIN operation ON operation.payment_id = payment.id");
     expect(mocks.completionQuery).toContain("FROM payment CROSS JOIN (VALUES");
   });
