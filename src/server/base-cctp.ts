@@ -526,6 +526,31 @@ export async function reconcileBaseDirectPayment(input: {
   return { status: "completed", transactionHash: hash };
 }
 
+async function persistCompletedBaseToStellarOperation(input: {
+  readonly sql: ReturnType<typeof getSqlClient>;
+  readonly paymentId: string;
+  readonly destinationTransactionHash: string;
+  readonly recipientAddress: string;
+  readonly amountAtomic: string;
+}): Promise<void> {
+  const persisted = await input.sql`
+    UPDATE base_cctp_operations SET status = 'completed',
+      destination_transaction_hash = ${input.destinationTransactionHash},
+      verified_recipient_address = ${input.recipientAddress},
+      verified_amount_atomic = ${input.amountAtomic}::numeric,
+      verified_at = COALESCE(verified_at, now()), updated_at = now()
+    WHERE payment_id = ${input.paymentId}::uuid AND route_id = 'base_to_stellar'
+      AND expected_recipient_address = ${input.recipientAddress}
+      AND expected_amount_atomic = ${input.amountAtomic}::numeric
+      AND (destination_transaction_hash IS NULL
+        OR destination_transaction_hash = ${input.destinationTransactionHash})
+    RETURNING payment_id
+  `;
+  if (persisted.length === 0) {
+    throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "Completed Stellar settlement conflicts with persisted Base CCTP state");
+  }
+}
+
 /** Confirms a Base burn, records Circle evidence, then delegates Stellar settlement to ST-04. */
 export async function reconcileBaseToStellarCctp(input: {
   readonly paymentId: string;
@@ -568,7 +593,7 @@ export async function reconcileBaseToStellarCctp(input: {
       destinationTransactionHash: String(payment.destination_transaction_hash ?? ""),
     };
   }
-  if (!["authorized", "submitted", "source_confirmed", "awaiting_attestation"].includes(payment.status)) {
+  if (!["authorized", "submitted", "source_confirmed", "awaiting_attestation", "destination_submitted"].includes(payment.status)) {
     throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "Base-to-Stellar payment is not awaiting source reconciliation");
   }
   if (typeof payment.source_address !== "string") {
@@ -580,7 +605,9 @@ export async function reconcileBaseToStellarCctp(input: {
   }
   const operations = await sql`
     SELECT burn_amount_atomic::text AS burn_amount,
-      max_fee_atomic::text AS max_fee
+      max_fee_atomic::text AS max_fee, status, source_transaction_hash,
+      circle_message, circle_attestation, expected_recipient_address,
+      expected_amount_atomic::text AS expected_amount_atomic
     FROM base_cctp_operations WHERE payment_id = ${paymentId}::uuid
   `;
   const operation = operations[0] as Record<string, unknown> | undefined;
@@ -588,6 +615,36 @@ export async function reconcileBaseToStellarCctp(input: {
     throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "Base CCTP burn amount and max fee must be reserved before signing");
   }
   const stellarConfig = stellarCctpConfigFromEnvironment();
+  const sourceHash = input.sourceTransactionHash.trim().toLowerCase();
+  const atomic = normalizeStellarUsdcAmount(String(payment.expected_amount)).raw.toString();
+  if (payment.status === "destination_submitted") {
+    if (operation.status !== "awaiting_attestation" ||
+        operation.source_transaction_hash !== sourceHash ||
+        operation.expected_recipient_address !== payment.recipient_address ||
+        operation.expected_amount_atomic !== atomic ||
+        typeof operation.circle_message !== "string" ||
+        typeof operation.circle_attestation !== "string") {
+      throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "Saved CCTP destination evidence does not match this payment");
+    }
+    const resumed = await settleBaseToStellarCctp({
+      paymentId,
+      sourceTransactionHash: sourceHash.slice(2),
+      message: operation.circle_message,
+      attestation: operation.circle_attestation,
+      rpc: input.stellarRpc ?? new rpc.Server(stellarConfig.rpcUrl),
+      config: stellarConfig,
+    });
+    if (resumed.status === "completed") {
+      if (!resumed.destinationTransactionHash) {
+        throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "Completed Stellar settlement has no destination hash");
+      }
+      await persistCompletedBaseToStellarOperation({
+        sql, paymentId, destinationTransactionHash: resumed.destinationTransactionHash,
+        recipientAddress: payment.recipient_address, amountAtomic: atomic,
+      });
+    }
+    return resumed;
+  }
   const verification = await verifyBaseCctpSource({
     rpc: input.rpc,
     sourceTransactionHash: input.sourceTransactionHash,
@@ -605,7 +662,6 @@ export async function reconcileBaseToStellarCctp(input: {
       verification.reason,
     );
   }
-  const atomic = normalizeStellarUsdcAmount(String(payment.expected_amount)).raw.toString();
   await recordBaseCctpAttestation({
     paymentId,
     sourceTransactionHash: verification.sourceTransactionHash,
@@ -625,22 +681,13 @@ export async function reconcileBaseToStellarCctp(input: {
     config: stellarConfig,
   });
   if (result.status === "completed") {
-    const persisted = await sql`
-      UPDATE base_cctp_operations SET status = 'completed',
-        destination_transaction_hash = ${result.destinationTransactionHash},
-        verified_recipient_address = ${payment.recipient_address},
-        verified_amount_atomic = ${atomic}::numeric,
-        verified_at = COALESCE(verified_at, now()), updated_at = now()
-      WHERE payment_id = ${paymentId}::uuid AND route_id = 'base_to_stellar'
-        AND expected_recipient_address = ${payment.recipient_address}
-        AND expected_amount_atomic = ${atomic}::numeric
-        AND (destination_transaction_hash IS NULL
-          OR destination_transaction_hash = ${result.destinationTransactionHash})
-      RETURNING payment_id
-    `;
-    if (persisted.length === 0) {
-      throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "Completed Stellar settlement conflicts with persisted Base CCTP state");
+    if (!result.destinationTransactionHash) {
+      throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "Completed Stellar settlement has no destination hash");
     }
+    await persistCompletedBaseToStellarOperation({
+      sql, paymentId, destinationTransactionHash: result.destinationTransactionHash,
+      recipientAddress: payment.recipient_address, amountAtomic: atomic,
+    });
   }
   return result;
 }
