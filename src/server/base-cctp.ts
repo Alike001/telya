@@ -280,6 +280,140 @@ async function getPaymentOperation(paymentId: string, routes: readonly string[])
   return { sql, payment };
 }
 
+export async function recordBaseDirectVerificationFailure(input: {
+  readonly paymentId: string;
+  readonly transactionHash: string;
+  readonly reason: string;
+}): Promise<void> {
+  const sql = getSqlClient();
+  const rows = await sql`
+    WITH operation AS (
+      UPDATE base_cctp_operations SET status = 'failed',
+        failure_code = 'DESTINATION_MISMATCH', updated_at = now()
+      WHERE payment_id = ${input.paymentId}::uuid AND route_id = 'base_to_base'
+        AND status = 'destination_submitted'
+        AND destination_transaction_hash = ${input.transactionHash}
+      RETURNING payment_id
+    ), payment AS (
+      UPDATE payments p SET status = 'failed', failure_code = 'DESTINATION_MISMATCH',
+        failure_message = 'Base finalized without the exact intended USDC transfer.',
+        updated_at = now()
+      FROM operation o WHERE p.id = o.payment_id
+        AND p.route_id = 'base_to_base' AND p.status = 'destination_submitted'
+        AND p.destination_transaction_hash = ${input.transactionHash}
+      RETURNING p.id
+    ), event AS (
+      INSERT INTO payment_events (
+        payment_id, event_key, stage, status, network, transaction_hash,
+        public_message, debug_message, error_code, completed_at
+      )
+      SELECT p.id, 'base_direct_destination_mismatch', 'recipient_verification',
+        'failed', 'base', ${input.transactionHash},
+        'Base finalized, but the exact recipient and USDC amount could not be verified.',
+        ${input.reason}, 'DESTINATION_MISMATCH', now()
+      FROM payment p JOIN operation o ON o.payment_id = p.id
+      ON CONFLICT (payment_id, event_key) DO NOTHING
+      RETURNING payment_id
+    )
+    SELECT p.id FROM payment p JOIN operation o ON o.payment_id = p.id
+  `;
+  if (rows.length === 0) {
+    throw new BaseCctpPersistenceError(
+      "INVALID_PAYMENT_STATE",
+      "Base direct payment changed while destination failure was being recorded",
+    );
+  }
+}
+
+export async function recordBaseCctpSourceVerificationFailure(input: {
+  readonly paymentId: string;
+  readonly transactionHash: string;
+  readonly reason: string;
+}): Promise<void> {
+  const sql = getSqlClient();
+  const rows = await sql`
+    WITH operation AS (
+      UPDATE base_cctp_operations SET status = 'failed',
+        failure_code = 'DESTINATION_MISMATCH', updated_at = now()
+      WHERE payment_id = ${input.paymentId}::uuid AND route_id = 'base_to_stellar'
+        AND status = 'submitted' AND source_transaction_hash = ${input.transactionHash}
+      RETURNING payment_id
+    ), payment AS (
+      UPDATE payments p SET status = 'failed', failure_code = 'DESTINATION_MISMATCH',
+        failure_message = 'The finalized Base burn did not match the authorized CCTP intent.',
+        updated_at = now()
+      FROM operation o WHERE p.id = o.payment_id
+        AND p.route_id = 'base_to_stellar' AND p.status = 'submitted'
+        AND p.source_transaction_hash = ${input.transactionHash}
+      RETURNING p.id
+    ), event AS (
+      INSERT INTO payment_events (
+        payment_id, event_key, stage, status, network, transaction_hash,
+        public_message, debug_message, error_code, completed_at
+      )
+      SELECT p.id, 'base_cctp_source_mismatch', 'source_verification',
+        'failed', 'base', ${input.transactionHash},
+        'The finalized Base burn did not match the authorized Circle payment.',
+        ${input.reason}, 'DESTINATION_MISMATCH', now()
+      FROM payment p JOIN operation o ON o.payment_id = p.id
+      ON CONFLICT (payment_id, event_key) DO NOTHING
+      RETURNING payment_id
+    )
+    SELECT p.id FROM payment p JOIN operation o ON o.payment_id = p.id
+  `;
+  if (rows.length === 0) {
+    throw new BaseCctpPersistenceError(
+      "INVALID_PAYMENT_STATE",
+      "Base CCTP payment changed while source failure was being recorded",
+    );
+  }
+}
+
+export async function recordStellarToBaseDestinationVerificationFailure(input: {
+  readonly paymentId: string;
+  readonly transactionHash: string;
+  readonly reason: string;
+}): Promise<void> {
+  const sql = getSqlClient();
+  const rows = await sql`
+    WITH operation AS (
+      UPDATE base_cctp_operations SET status = 'failed',
+        failure_code = 'DESTINATION_MISMATCH', updated_at = now()
+      WHERE payment_id = ${input.paymentId}::uuid AND route_id = 'stellar_to_base'
+        AND status = 'destination_submitted'
+        AND destination_transaction_hash = ${input.transactionHash}
+      RETURNING payment_id
+    ), payment AS (
+      UPDATE payments p SET status = 'failed', failure_code = 'DESTINATION_MISMATCH',
+        failure_message = 'Base finalized without the exact intended CCTP recipient and amount.',
+        updated_at = now()
+      FROM operation o WHERE p.id = o.payment_id
+        AND p.route_id = 'stellar_to_base' AND p.status = 'destination_submitted'
+        AND p.destination_transaction_hash = ${input.transactionHash}
+      RETURNING p.id
+    ), event AS (
+      INSERT INTO payment_events (
+        payment_id, event_key, stage, status, network, transaction_hash,
+        public_message, debug_message, error_code, completed_at
+      )
+      SELECT p.id, 'base_cctp_destination_mismatch', 'recipient_verification',
+        'failed', 'base', ${input.transactionHash},
+        'Base finalized, but the exact CCTP recipient and USDC amount could not be verified.',
+        ${input.reason}, 'DESTINATION_MISMATCH', now()
+      FROM payment p JOIN operation o ON o.payment_id = p.id
+      ON CONFLICT (payment_id, event_key) DO NOTHING
+      RETURNING payment_id
+    )
+    SELECT p.id FROM payment p JOIN operation o ON o.payment_id = p.id
+  `;
+  if (rows.length === 0) {
+    throw new BaseCctpPersistenceError(
+      "INVALID_PAYMENT_STATE",
+      "Stellar-to-Base payment changed while destination failure was being recorded",
+    );
+  }
+}
+
 /** Persist deterministic burn/fee limits before a wallet is asked to sign. */
 export async function reserveBaseCctpOperation(input: {
   readonly paymentId: string;
@@ -585,6 +719,11 @@ export async function reconcileBaseDirectPayment(input: {
   });
   if (verification.status === "pending") return { status: "pending", transactionHash: hash };
   if (verification.status !== "verified") {
+    await recordBaseDirectVerificationFailure({
+      paymentId,
+      transactionHash: hash,
+      reason: "The finalized Base transaction did not contain the exact authorized USDC transfer.",
+    });
     throw new BaseCctpPersistenceError(
       "DESTINATION_MISMATCH",
       "Base did not finalize the exact USDC transfer to the expected recipient",
@@ -778,6 +917,11 @@ export async function reconcileBaseToStellarCctp(input: {
     return { status: "pending", sourceTransactionHash: sourceHash };
   }
   if (verification.status !== "verified") {
+    await recordBaseCctpSourceVerificationFailure({
+      paymentId,
+      transactionHash: sourceHash,
+      reason: verification.reason,
+    });
     throw new BaseCctpPersistenceError(
       "DESTINATION_MISMATCH",
       verification.reason,
@@ -1172,6 +1316,11 @@ export async function reconcileStellarToBaseDestination(input: {
   });
   if (verification.status === "pending") return { status: "pending", destinationTransactionHash: hash };
   if (verification.status !== "verified") {
+    await recordStellarToBaseDestinationVerificationFailure({
+      paymentId,
+      transactionHash: hash,
+      reason: "The finalized Base mint did not deliver the exact expected USDC recipient and amount.",
+    });
     throw new BaseCctpPersistenceError(
       "DESTINATION_MISMATCH",
       "Base did not finalize the exact CCTP USDC mint to the expected recipient",
