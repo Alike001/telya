@@ -4,7 +4,7 @@
 
 **Merged baseline:** `origin/main` at `2531820`
 
-**Integrated draft baseline:** PR #66 at `70e944e`
+**Integrated draft baseline:** PR #66 at `ce12a81`
 
 **Assessment scope:** repository code, merged and open pull requests, open issues, automated checks, public Testnet deployment, and linked Testnet transaction evidence
 
@@ -263,12 +263,12 @@ Work that does not improve one of these outcomes should be challenged before ent
 
 Merged `main` at `2531820` remains the public deployment baseline. The public health endpoint most recently returned HTTP 200 with Testnet application/database readiness; the recorded merged direct-Stellar and positive Agent Pass transactions were independently rechecked on Stellar Testnet.
 
-On integrated draft PR #66 head `70e944e`:
+On integrated draft PR #66 head `ce12a81`:
 
-- secure environment: 77 files / 384 tests passed with no skips;
-- plain environment: 66 files / 366 tests passed, while 11 files / 18 credential/database-gated tests were explicitly skipped;
+- secure environment: 77 files / 385 tests passed with no skips;
+- plain environment: 66 files / 367 tests passed, while 11 files / 18 credential/database-gated tests were explicitly skipped;
 - client TypeScript, server TypeScript, production build and `git diff --check` passed; the prior dependency-only head also passed frozen install;
-- exact-head GitGuardian passed; Vercel did not run because the teammate fork requires team authorization;
+- exact-head GitGuardian is pending; Vercel does not run because the teammate fork requires team authorization;
 - `pnpm audit --prod` reported no known vulnerabilities after resolving transitive Zod to patched `4.6.7`;
 - the read-only public-network probe passed at Stellar ledger `5,946,104`; and
 - mobile/desktop unauthenticated acceptance proved no financial controls or substituted data appear without sign-in, while protected reads return 401; and
@@ -283,5 +283,6 @@ On integrated draft PR #66 head `70e944e`:
 - conversation creation, intent parsing, payment review, confirmation and recovery each capture one token-backed request function, so later authenticated stages cannot silently switch to another Privy identity.
 - Agent Pass status/create/revoke and payment review/execute/reconcile capture initiating-owner requests; spend state is keyed by exact account/rule/public agent address and cleared when the memory-only signer changes.
 - Activity history/detail loads capture one initiating-owner request, and a direct-Stellar refresh uses that same token for reconciliation and the following persisted-detail read.
+- contact loads, saves and deletes capture the initiating auth epoch before sending; a session change during token resolution prevents the HTTP mutation entirely.
 
 Vercel did not build PR #66 because the teammate fork requires team authorization. The checks above prove automated, database, public-infrastructure and unavailable-state behavior only. They do not prove authenticated browser ownership, real balances, wallet signatures, Base/CCTP settlement, MoneyGram, independent-user acceptance or production readiness.
