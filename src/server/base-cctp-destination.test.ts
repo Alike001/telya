@@ -257,7 +257,7 @@ describe("Stellar-to-Base CCTP destination reservation", () => {
     expect(mocks.transitionQuery).toContain("FROM payment ON CONFLICT");
   });
 
-  it("refuses to fall back to a user-submitted Base mint when Circle did not forward", async () => {
+  it("keeps the same Stellar burn pending when Circle attested but has not forwarded", async () => {
     mocks.getCircleCctpStatus.mockResolvedValue({
       status: "complete",
       sourceTransactionHash: STELLAR_SOURCE_HASH,
@@ -266,13 +266,16 @@ describe("Stellar-to-Base CCTP destination reservation", () => {
       messageHash: "1".repeat(64),
       attestationHash: "2".repeat(64),
     });
+    const baseRpc = mintRpc();
     await expect(prepareStellarToBaseCctpDestination({
       paymentId: PAYMENT_ID,
       stellarSourceTransactionHash: STELLAR_SOURCE_HASH,
       stellarRpc: { getTransaction: vi.fn() } as never,
       config,
-      baseRpc: mintRpc(),
-    })).rejects.toThrow("did not return the forwarded Base transaction");
+      baseRpc,
+    })).resolves.toEqual({ status: "pending", sourceTransactionHash: STELLAR_SOURCE_HASH });
+    expect(mocks.transitionQuery).toBe("");
+    expect(baseRpc.request).not.toHaveBeenCalled();
   });
 
   it("keeps a reserved forwarded hash pending until it is visible, then verifies it", async () => {

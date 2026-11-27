@@ -1143,12 +1143,6 @@ export async function prepareStellarToBaseCctpDestination(input: {
       sourceTransactionHash: input.stellarSourceTransactionHash.trim().toLowerCase(),
     };
   }
-  if (!circle.forwardTransactionHash) {
-    throw new BaseCctpPersistenceError(
-      "DESTINATION_MISMATCH",
-      "Circle did not return the forwarded Base transaction for this burn",
-    );
-  }
   const parsed = parseCctpMessage(circle.message);
   const expectedRecipient = `0x${requireEvmAddress(payment.recipient_address, "recipient").slice(2).padStart(64, "0")}`;
   const burnAmount = BigInt(operation.burn_amount);
@@ -1192,6 +1186,14 @@ export async function prepareStellarToBaseCctpDestination(input: {
       "DESTINATION_MISMATCH",
       "Circle attestation does not match the persisted Stellar burn intent",
     );
+  }
+  // Circle can attest the source before its forwarding worker broadcasts the
+  // Base mint. Keep the same burn pending; do not request a user-submitted mint.
+  if (!circle.forwardTransactionHash) {
+    return {
+      status: "pending",
+      sourceTransactionHash: input.stellarSourceTransactionHash.trim().toLowerCase(),
+    };
   }
   const leaseId = randomUUID();
   const reserved = await sql`
