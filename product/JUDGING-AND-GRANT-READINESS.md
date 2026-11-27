@@ -4,7 +4,7 @@
 
 **Merged baseline:** `origin/main` at `2531820`
 
-**Integrated draft baseline:** PR #66 at `f3f4870`
+**Integrated draft baseline:** PR #66 at `260c884`
 
 **Assessment scope:** repository code, merged and open pull requests, open issues, automated checks, public Testnet deployment, and linked Testnet transaction evidence
 
@@ -263,7 +263,7 @@ Work that does not improve one of these outcomes should be challenged before ent
 
 Merged `main` at `2531820` remains the public deployment baseline. The public health endpoint most recently returned HTTP 200 with Testnet application/database readiness; the recorded merged direct-Stellar and positive Agent Pass transactions were independently rechecked on Stellar Testnet.
 
-On integrated draft PR #66 head `f3f4870`:
+On integrated draft PR #66 head `260c884`:
 
 - secure environment: 76 files / 381 tests passed with no skips;
 - plain environment: 65 files / 363 tests passed, while 11 files / 18 credential/database-gated tests were explicitly skipped;
@@ -276,6 +276,6 @@ On integrated draft PR #66 head `f3f4870`:
 - browser-only Base wallet verification is cleared on Privy sign-out or wallet removal and cannot carry a previous identity's display claim into the next session.
 - one shared fail-closed owner check gates locally restored Stellar state in Conversation and Account Tools; Agent Pass and MoneyGram receive no C-address or kit on mismatch, missing identity, sign-out or lookup failure.
 - sign-out/auth loss clears the prior conversation ID, payment-review messages, recipient labels, balances and restored kit; a new owner check begins with blank identity-bound state.
-- Contacts and Activity cancel identity-scoped initial loads and reject late success/error/finally writes after an auth change, preventing an earlier session response from repopulating cleared state.
+- Contacts and Activity use one auth-epoch guard for initial loads and all state-writing actions, including save/delete, detail, reconciliation, refresh and pagination; late responses cannot update the next identity.
 
 Vercel did not build PR #66 because the teammate fork requires team authorization. The checks above prove automated, database, public-infrastructure and unavailable-state behavior only. They do not prove authenticated browser ownership, real balances, wallet signatures, Base/CCTP settlement, MoneyGram, independent-user acceptance or production readiness.
