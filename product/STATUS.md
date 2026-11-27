@@ -93,6 +93,8 @@ See the [Codex Master Playbook](CODEX-MASTER-PLAYBOOK.md) for the full start-to-
 
 [SUBMISSION-PACKAGE.md](SUBMISSION-PACKAGE.md) now gives a stranger a no-wallet evidence path, local setup and truthful Testnet funding guidance, the exact verified direct-Stellar and Agent Pass hashes, architecture, a modular demo script, recording checks and known limitations. It is intentionally marked draft: the integrated browser journey, independent user pass, organizer-confirmed format/cutoff, final video and submission confirmation are not yet verified.
 
+At 03:00 UTC on November 27, the public health endpoint remained ready and Stellar Testnet Horizon returned successful records at the documented ledgers for the direct payment and all four positive Agent Pass transactions. This is a current public-evidence recheck, not proof of the unmerged integrated journey.
+
 ## November 26 backend progress
 
 Draft [PR #53](https://github.com/Alike001/telya/pull/53) stacks PR #48 without duplication and is at `d20dddd`. All four routes have fail-closed reviews and persisted authorization/first-hash recovery. Definitive finalized Base direct, source-burn and destination-mint mismatches now atomically fail only the exact saved operation/Payment/hash and record the true verification stage; Neon parsed all three guarded transitions. Exact finality, recipient and amount still gate completion. No live browser wallet walkthrough or transaction was performed.

@@ -20,6 +20,8 @@ Agent Pass is the secondary differentiator: an agent receives a bounded, expirin
 
 The public URL currently proves the deployed `main` branch only. Features in draft pull requests are not part of the public acceptance claim until their tested commits are deployed.
 
+Live recheck on November 27, 2026 at 03:00 UTC: the health endpoint returned `ready` with application/database `ok`, and Stellar Testnet Horizon returned `successful: true` at the recorded ledger for the direct payment plus all four positive Agent Pass transactions below.
+
 ## How to verify without a wallet
 
 1. Open the health endpoint. Expect HTTP `200` with application and database readiness. A healthy response does not prove a payment route.
