@@ -95,6 +95,8 @@ See the [Codex Master Playbook](CODEX-MASTER-PLAYBOOK.md) for the full start-to-
 
 At 03:00 UTC on November 27, the public health endpoint remained ready and Stellar Testnet Horizon returned successful records at the documented ledgers for the direct payment and all four positive Agent Pass transactions. This is a current public-evidence recheck, not proof of the unmerged integrated journey.
 
+[INDEPENDENT-TESTING.md](INDEPENDENT-TESTING.md) now provides the unfamiliar-user script required after engineering acceptance. It gates live actions on ready credentials and prepared Testnet accounts, captures exact recipient/amount/finality/recovery evidence, keeps CCTP disabled until accepted, and includes secret-redacted bug and session-verdict formats. It has not yet been executed, so independent testing remains open.
+
 ## November 26 backend progress
 
 Draft [PR #53](https://github.com/Alike001/telya/pull/53) stacks PR #48 without duplication and is at `d20dddd`. All four routes have fail-closed reviews and persisted authorization/first-hash recovery. Definitive finalized Base direct, source-burn and destination-mint mismatches now atomically fail only the exact saved operation/Payment/hash and record the true verification stage; Neon parsed all three guarded transitions. Exact finality, recipient and amount still gate completion. No live browser wallet walkthrough or transaction was performed.

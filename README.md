@@ -155,6 +155,7 @@ If you are a developer or AI agent joining the project, start here:
 
 - [Current project status](product/STATUS.md)
 - [Buildathon submission package](product/SUBMISSION-PACKAGE.md)
+- [Independent tester runbook](product/INDEPENDENT-TESTING.md)
 - [Codex master playbook](product/CODEX-MASTER-PLAYBOOK.md)
 - [Live execution tracker](product/EXECUTION-TRACKER.md)
 - [Buildathon execution plan](product/BUILDATHON-EXECUTION-PLAN.md)

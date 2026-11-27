@@ -17,6 +17,7 @@ Agent Pass is the secondary differentiator: an agent receives a bounded, expirin
 - Source: <https://github.com/Alike001/telya>
 - Current implementation and blockers: [EXECUTION-TRACKER.md](EXECUTION-TRACKER.md)
 - Architecture: [ARCHITECTURE.md](ARCHITECTURE.md)
+- Independent tester runbook: [INDEPENDENT-TESTING.md](INDEPENDENT-TESTING.md)
 
 The public URL currently proves the deployed `main` branch only. Features in draft pull requests are not part of the public acceptance claim until their tested commits are deployed.
 
@@ -129,6 +130,7 @@ Do not record this as a working journey until the integrated browser acceptance 
 - [ ] Agent Pass shows limit/expiry, successful bounded spend, rejection and revocation evidence.
 - [ ] Captions and narration match what the application actually proves.
 - [ ] Final video and public links work in a signed-out browser.
+- [ ] An unfamiliar tester completed [the independent runbook](INDEPENDENT-TESTING.md); findings, fixes and retest evidence are recorded.
 
 ## Known limitations and blockers
 
