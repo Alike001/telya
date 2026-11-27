@@ -375,9 +375,9 @@ export async function recordBaseCctpSourceVerificationFailure(input: {
         payment_id, event_key, stage, status, network, transaction_hash,
         public_message, debug_message, error_code, completed_at
       )
-      SELECT p.id, 'base_cctp_source_mismatch', 'source_verification',
+      SELECT p.id, 'base_cctp_source_mismatch', 'failure',
         'failed', 'base', ${input.transactionHash},
-        'The Base burn or forwarding proof failed verification. The Stellar recipient has not been paid.',
+        'The Base burn or forwarding proof failed verification. Stellar recipient credit is not verified.',
         ${input.reason}, 'DESTINATION_MISMATCH', now()
       FROM payment p JOIN operation o ON o.payment_id = p.id
       ON CONFLICT (payment_id, event_key) DO NOTHING
@@ -954,7 +954,8 @@ export async function reconcileBaseToStellarCctp(input: {
   }
   const submitted = await sql`
     WITH operation AS (
-      UPDATE base_cctp_operations SET status = 'source_submitted',
+      UPDATE base_cctp_operations SET status = CASE
+          WHEN status = 'authorized' THEN 'source_submitted' ELSE status END,
         source_transaction_hash = ${sourceHash}, updated_at = now()
       WHERE payment_id = ${paymentId}::uuid AND route_id = 'base_to_stellar'
         AND status IN ('authorized', 'source_submitted', 'source_confirmed', 'awaiting_attestation')
