@@ -11,9 +11,13 @@ import type {
   StellarCctpConfig,
   StellarCctpSourceKit,
 } from "../../stellar/cctp";
+import type { Eip1193Provider } from "../../base/evm";
 import {
   apiMessage,
   parseAuthorizationReady,
+  parseBaseCctpAuthorization,
+  parseBaseDirectAuthorization,
+  parseBaseToStellarReconciliation,
   parseCctpAuthorizationReady,
   parseCctpReconciliation,
   parseCompletedPaymentReceipt,
@@ -28,6 +32,38 @@ import type {
 export type AuthenticatedRequest = (input: string, init: RequestInit) => Promise<Response>;
 type ConversationPaymentKit = StellarUsdcTransferKit & SmartAccountLifecycleKit;
 type ConversationCctpKit = ConversationPaymentKit & StellarCctpSourceKit;
+
+function equalAmount(left: string, right: string): boolean {
+  const normalize = (value: string) => {
+    const [whole, fraction = ""] = value.split(".");
+    return `${whole}.${fraction.replace(/0+$/, "")}`;
+  };
+  return normalize(left) === normalize(right);
+}
+
+function baseUsdcUnits(value: string): bigint | null {
+  const match = /^(0|[1-9]\d*)(?:\.(\d{1,6}))?$/.exec(value);
+  if (!match) return null;
+  return BigInt(match[1]!) * 1_000_000n + BigInt((match[2] ?? "").padEnd(6, "0") || "0");
+}
+
+function baseCctpAuthorizationMatchesReview(
+  review: PaymentReview,
+  authorization: { readonly burnAmount: string; readonly maxFee: string },
+): boolean {
+  const expected = baseUsdcUnits(review.expectedRecipientAmount);
+  const burn = baseUsdcUnits(authorization.burnAmount);
+  const maxFee = baseUsdcUnits(authorization.maxFee);
+  if (expected === null || burn === null || maxFee === null) return false;
+  let reviewedFee = 0n;
+  for (const fee of review.fees) {
+    if (fee.kind !== "provider" || fee.asset !== "USDC" || fee.payer !== "sender") continue;
+    const units = baseUsdcUnits(fee.amount);
+    if (units === null) return false;
+    reviewedFee += units;
+  }
+  return maxFee === reviewedFee && burn === expected + reviewedFee;
+}
 
 async function completedReceipt(
   review: PaymentReview,
@@ -140,11 +176,79 @@ export async function reconcileConversationCctpPayment(
   );
 }
 
+export async function reconcileConversationBaseDirectPayment(
+  review: PaymentReview,
+  transactionHash: string,
+  request: AuthenticatedRequest,
+): Promise<PaymentExecutionResult> {
+  const response = await request(`/api/payments/base/direct?id=${encodeURIComponent(review.id)}`, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ transactionHash }),
+  });
+  const payload: unknown = await response.json();
+  const result = response.ok || response.status === 202 ? parseReconciliation(payload) : null;
+  if (!result || result.status === "failed" ||
+      result.transactionHash.toLowerCase() !== transactionHash.toLowerCase()) {
+    throw new Error(apiMessage(payload, "The Base payment hash could not be verified. Do not submit again."));
+  }
+  if (result.status === "pending") {
+    return {
+      status: "pending",
+      transactionHash: result.transactionHash,
+      message: "The Base USDC transfer is recorded. Finality and exact recipient verification are still pending.",
+    };
+  }
+  return completedReceipt(
+    review,
+    result.transactionHash,
+    request,
+    "Base finalized, but the canonical recipient and amount receipt is not available yet.",
+  );
+}
+
+export async function reconcileConversationBaseToStellarPayment(
+  review: PaymentReview,
+  sourceTransactionHash: string,
+  request: AuthenticatedRequest,
+): Promise<PaymentExecutionResult> {
+  const response = await request(`/api/payments/base/cctp/source?id=${encodeURIComponent(review.id)}`, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ sourceTransactionHash }),
+  });
+  const payload: unknown = await response.json();
+  const result = response.ok || response.status === 202
+    ? parseBaseToStellarReconciliation(payload)
+    : null;
+  if (!result) {
+    throw new Error(apiMessage(payload, "The Base CCTP status could not be verified. Do not submit again."));
+  }
+  if (result.status !== "completed") {
+    if (result.sourceTransactionHash !== sourceTransactionHash.toLowerCase()) {
+      throw new Error("The persisted Base burn hash differs from this wallet submission. Do not submit again.");
+    }
+    return {
+      status: "pending",
+      transactionHash: result.sourceTransactionHash,
+      message: "The Base burn is recorded. Base finality, Circle attestation, Stellar settlement, and recipient verification are still pending.",
+    };
+  }
+  return completedReceipt(
+    review,
+    result.destinationTransactionHash,
+    request,
+    "Stellar settlement finalized, but the canonical recipient and amount receipt is not available yet.",
+  );
+}
+
 export async function executeConversationPayment(
   review: PaymentReview,
   input: {
-    readonly config: SmartAccountPublicConfig;
-    readonly smartAccount: ConnectedSmartAccount;
+    readonly config: SmartAccountPublicConfig | null;
+    readonly smartAccount: ConnectedSmartAccount | null;
     readonly request: AuthenticatedRequest;
     readonly createKit: (config: SmartAccountPublicConfig) => ConversationPaymentKit;
     readonly restoreAccount: (kit: ConversationPaymentKit) => Promise<ConnectedSmartAccount | null>;
@@ -161,8 +265,83 @@ export async function executeConversationPayment(
       readonly burnAmount: string;
       readonly maxFee: string;
     }) => Promise<{ readonly txHash: string }>;
+    readonly getBaseProvider?: (sender: string) => Promise<Eip1193Provider>;
+    readonly submitBaseTransfer?: (input: {
+      readonly provider: Eip1193Provider;
+      readonly sender: string;
+      readonly recipient: string;
+      readonly amount: string;
+    }) => Promise<string>;
+    readonly submitBaseCctpBurn?: (input: {
+      readonly provider: Eip1193Provider;
+      readonly sender: string;
+      readonly burnAmount: string;
+      readonly maxFee: string;
+      readonly destinationDomain: number;
+      readonly mintRecipient: string;
+    }) => Promise<{ readonly transactionHash: string; readonly approvalTransactionHash?: string }>;
   },
 ): Promise<PaymentExecutionResult> {
+  if (review.routeId === "base_to_base" && review.sourceNetwork === "base" && review.destinationNetwork === "base") {
+    if (!input.getBaseProvider || !input.submitBaseTransfer) throw new Error("Base wallet execution is unavailable.");
+    const response = await input.request(`/api/payments/base/direct?id=${encodeURIComponent(review.id)}`, {
+      method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: "{}",
+    });
+    const payload: unknown = await response.json();
+    const authorization = response.ok ? parseBaseDirectAuthorization(payload) : null;
+    if (!authorization || authorization.recipient !== review.recipientAddress.toLowerCase() ||
+        !equalAmount(authorization.amount, review.expectedRecipientAmount)) {
+      throw new Error(apiMessage(payload, "The Base payment authorization does not match this review."));
+    }
+    const provider = await input.getBaseProvider(authorization.sender);
+    let transactionHash: string;
+    try {
+      transactionHash = await input.submitBaseTransfer({ provider, ...authorization });
+    } catch {
+      return {
+        status: "status_unknown", transactionHash: null,
+        message: "Base wallet submission did not return a verifiable hash. Check the wallet and Activity before creating another payment.",
+      };
+    }
+    try {
+      return await reconcileConversationBaseDirectPayment(review, transactionHash, input.request);
+    } catch {
+      return {
+        status: "unverified", transactionHash,
+        message: "The Base wallet returned a hash without canonical payment verification. Do not submit again.",
+      };
+    }
+  }
+  if (review.routeId === "base_to_stellar" && review.sourceNetwork === "base" && review.destinationNetwork === "stellar") {
+    if (!input.getBaseProvider || !input.submitBaseCctpBurn) throw new Error("Base-to-Stellar wallet execution is unavailable.");
+    const response = await input.request(`/api/payments/base/cctp/authorize?id=${encodeURIComponent(review.id)}`, {
+      method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: "{}",
+    });
+    const payload: unknown = await response.json();
+    const authorization = response.ok ? parseBaseCctpAuthorization(payload) : null;
+    if (!authorization || !baseCctpAuthorizationMatchesReview(review, authorization)) {
+      throw new Error(apiMessage(payload, "The Base CCTP authorization does not match this review."));
+    }
+    const provider = await input.getBaseProvider(authorization.sender);
+    let sourceTransactionHash: string;
+    try {
+      const submitted = await input.submitBaseCctpBurn({ provider, ...authorization });
+      sourceTransactionHash = submitted.transactionHash;
+    } catch {
+      return {
+        status: "status_unknown", transactionHash: null,
+        message: "Base CCTP submission did not return a verifiable burn hash. Check the wallet and Activity before creating another payment.",
+      };
+    }
+    try {
+      return await reconcileConversationBaseToStellarPayment(review, sourceTransactionHash, input.request);
+    } catch {
+      return {
+        status: "unverified", transactionHash: sourceTransactionHash,
+        message: "The Base wallet returned a burn hash without canonical cross-chain verification. Do not submit again.",
+      };
+    }
+  }
   if (review.routeId === "stellar_to_base" &&
       review.sourceNetwork === "stellar" && review.destinationNetwork === "base") {
     if (!input.submitCctpBurn) {
@@ -196,6 +375,7 @@ export async function executeConversationPayment(
     if (!cctpConfig) {
       throw new Error(apiMessage(configPayload, "Stellar CCTP configuration is unavailable."));
     }
+    if (!input.config || !input.smartAccount) throw new Error("Connect the verified Stellar passkey account before authorizing.");
     const paymentKit = input.createKit({
       ...input.config,
       relayerUrl: authorization.relayerUrl,
@@ -245,6 +425,9 @@ export async function executeConversationPayment(
     review.destinationNetwork !== "stellar"
   ) {
     throw new Error("This route is not available for direct Stellar passkey execution.");
+  }
+  if (!input.config || !input.smartAccount) {
+    throw new Error("Connect the verified Stellar passkey account before authorizing.");
   }
   const authorizationResponse = await input.request(
     "/api/payments/stellar/direct/authorize",

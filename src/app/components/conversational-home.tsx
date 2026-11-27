@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { usePrivy } from "@privy-io/react-auth";
+import { usePrivy, useWallets } from "@privy-io/react-auth";
 import { CheckCircle2 } from "lucide-react";
 
 import { authenticatedFetch } from "../authenticated-fetch";
@@ -14,8 +14,14 @@ import {
 import { submitStellarUsdcTransfer } from "../../stellar/usdc";
 import { submitStellarCctpBurn } from "../../stellar/cctp";
 import {
+  submitBaseCctpBurn,
+  submitBaseUsdcTransfer,
+  type Eip1193Provider,
+} from "../../base/evm";
+import {
   apiMessage,
   parsePaymentReview,
+  parsePersistedPaymentHashes,
   parseVerifiedBalances,
 } from "./conversation-payment";
 import type {
@@ -25,6 +31,8 @@ import type {
 } from "./conversation-payment";
 import {
   executeConversationPayment,
+  reconcileConversationBaseDirectPayment,
+  reconcileConversationBaseToStellarPayment,
   reconcileConversationCctpPayment,
   reconcileConversationPayment,
 } from "./conversation-payment-execution";
@@ -67,6 +75,7 @@ function UnavailableConversation() {
 
 function AuthenticatedConversation() {
   const { ready: authReady, authenticated, login, getAccessToken } = usePrivy();
+  const { wallets } = useWallets();
   const [smartAccount, setSmartAccount] = useState<ConnectedSmartAccount | null>(null);
   const [balances, setBalances] = useState<readonly VerifiedBalance[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([welcome]);
@@ -146,25 +155,74 @@ function AuthenticatedConversation() {
     review: PaymentReview,
     submittedTransactionHash?: string,
   ): Promise<PaymentExecutionResult> {
+    let transactionHash = submittedTransactionHash;
+    if (!transactionHash && review.sourceNetwork === "base") {
+      const response = await authenticatedFetch(
+        `/api/payments?id=${encodeURIComponent(review.id)}`,
+        { cache: "no-store" },
+        getAccessToken,
+      );
+      const hashes = response.ok
+        ? parsePersistedPaymentHashes(await response.json(), review.id)
+        : null;
+      transactionHash = review.routeId === "base_to_base"
+        ? hashes?.destinationTransactionHash
+        : hashes?.sourceTransactionHash;
+      if (!transactionHash) {
+        throw new Error("No persisted Base transaction hash is available. Check the connected wallet before creating another payment.");
+      }
+    }
+    if (review.routeId === "base_to_base" && transactionHash) {
+      return reconcileConversationBaseDirectPayment(
+        review,
+        transactionHash,
+        (input, init) => authenticatedFetch(input, init, getAccessToken),
+      );
+    }
+    if (review.routeId === "base_to_stellar" && transactionHash) {
+      return reconcileConversationBaseToStellarPayment(
+        review,
+        transactionHash,
+        (input, init) => authenticatedFetch(input, init, getAccessToken),
+      );
+    }
     if (review.routeId === "stellar_to_base") {
       return reconcileConversationCctpPayment(
         review,
-        submittedTransactionHash,
+        transactionHash,
         (input, init) => authenticatedFetch(input, init, getAccessToken),
       );
     }
     return reconcileConversationPayment(
       review,
-      submittedTransactionHash,
+      transactionHash,
       (input, init) => authenticatedFetch(input, init, getAccessToken),
     );
   }
 
   async function confirmPayment(review: PaymentReview): Promise<PaymentExecutionResult> {
     const config = configRef.current;
-    if (!smartAccount || !config) {
+    if (review.sourceNetwork === "stellar" && (!smartAccount || !config)) {
       throw new Error("Connect and verify the same Stellar passkey account before authorizing.");
     }
+    const getBaseProvider = async (sender: string): Promise<Eip1193Provider> => {
+      const wallet = wallets.find((candidate) => candidate.address.toLowerCase() === sender.toLowerCase());
+      if (!wallet) throw new Error("The server-authorized Base wallet is not connected to this Privy session.");
+      await wallet.loginOrLink();
+      await wallet.switchChain(84_532);
+      const provider = await wallet.getEthereumProvider();
+      const accounts = await provider.request({ method: "eth_accounts" });
+      if (!Array.isArray(accounts) || !accounts.some((address) =>
+        typeof address === "string" && address.toLowerCase() === sender.toLowerCase())) {
+        throw new Error("The active Base wallet does not match the server-authorized source address.");
+      }
+      return {
+        request: ({ method, params }) => provider.request({
+          method,
+          ...(params ? { params: [...params] } : {}),
+        }),
+      };
+    };
     return executeConversationPayment(review, {
       config,
       smartAccount,
@@ -173,6 +231,9 @@ function AuthenticatedConversation() {
       restoreAccount: restoreSmartAccount,
       submitTransfer: submitStellarUsdcTransfer,
       submitCctpBurn: submitStellarCctpBurn,
+      getBaseProvider,
+      submitBaseTransfer: submitBaseUsdcTransfer,
+      submitBaseCctpBurn,
     });
   }
 
@@ -293,7 +354,9 @@ function AuthenticatedConversation() {
               <PaymentReviewCard
                 review={message.review}
                 recipientLabel={message.recipientLabel}
-                canAuthorize={Boolean(smartAccount && authenticated)}
+                canAuthorize={Boolean(authenticated && (
+                  message.review.sourceNetwork === "base" ? wallets.length > 0 : smartAccount
+                ))}
                 onConfirm={() => confirmPayment(message.review!)}
                 onRefresh={(transactionHash) => reconcilePayment(message.review!, transactionHash)}
                 onCancel={() => setMessages((previous) => previous.filter((item) => item.id !== message.id))}
