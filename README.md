@@ -35,6 +35,11 @@ at the configured Base CCTP contracts, the latest Stellar Testnet ledger and the
 configured Stellar contract interfaces. It never reads a wallet balance, signs,
 submits a transaction or claims settlement evidence.
 
+After `pnpm build`, run `pnpm secrets:check`. It scans the emitted browser assets
+for the exact configured database, Privy, AI, sponsor, Circle and MoneyGram
+server-only values. The report names variables only, never their values, and
+fails if a configured secret appears in the client bundle.
+
 Open `http://localhost:3000`. The readiness endpoint is available at
 `http://localhost:3000/api/health`; it returns HTTP `200` only when the app can
 reach Neon and HTTP `503` with a sanitized `degraded` response otherwise.
