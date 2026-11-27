@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 
 import {
+  assertActiveAgentPassForTransfer,
   linkStellarCctpPaymentAuthorization,
   linkStellarPaymentAuthorization,
   recordStellarCctpBurnSubmission,
@@ -376,6 +377,13 @@ describe("linked Stellar direct payment execution on PostgreSQL", () => {
           WHERE smart_account = ${sender} AND context_rule_id = ${contextRuleId}
         `;
         expect(spendEvents).toEqual([{ amount: "12500000", cumulative: "12500000" }]);
+        await expect(assertActiveAgentPassForTransfer({
+          ...transfer,
+          amountRaw: 40_000_000n,
+        })).rejects.toMatchObject({
+          code: "PAYMENT_MISMATCH",
+          status: 409,
+        });
       } finally {
         await sql.transaction([
           sql`DELETE FROM payment_events WHERE payment_id = ${paymentId}::uuid`,

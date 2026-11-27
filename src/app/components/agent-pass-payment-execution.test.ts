@@ -126,4 +126,34 @@ describe("Agent Pass payment orchestration", () => {
     });
     expect(submitTransfer).toHaveBeenCalledTimes(1);
   });
+
+  it("reports an explicit hashless policy rejection without pretending status is unknown", async () => {
+    const request = vi.fn().mockResolvedValueOnce(Response.json({
+      status: "authorization_ready",
+      relayerUrl: "/api/stellar/relayer/payment",
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    }, { status: 201 }));
+    const submitTransfer = vi.fn().mockResolvedValue({
+      success: false,
+      hash: null,
+      error: {
+        code: "PAYMENT_MISMATCH",
+        message: "The Agent Pass is inactive or its remaining allowance is insufficient",
+      },
+    });
+
+    await expect(executeAgentPassPayment({
+      review,
+      kit: {} as never,
+      pass: {} as never,
+      tokenContract: `C${"B".repeat(55)}`,
+      request,
+      submitTransfer,
+    })).resolves.toEqual({
+      status: "failed",
+      transactionHash: null,
+      message: "The Agent Pass is inactive or its remaining allowance is insufficient",
+    });
+    expect(request).toHaveBeenCalledTimes(1);
+  });
 });

@@ -521,7 +521,11 @@ export async function assertActiveAgentPassForTransfer(
     LIMIT 1
   `;
   if (!rows[0]) {
-    throw new Error("The Agent Pass is inactive or its remaining allowance is insufficient");
+    throw new StellarRelayerError(
+      "PAYMENT_MISMATCH",
+      "The Agent Pass is inactive or its remaining allowance is insufficient",
+      409,
+    );
   }
 }
 

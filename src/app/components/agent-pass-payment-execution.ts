@@ -120,19 +120,15 @@ export async function executeAgentPassPayment(input: {
     ));
   }
 
-  let transactionHash: string | undefined;
+  let result: Awaited<ReturnType<typeof submitAgentPassTransfer>>;
   try {
-    const result = await (input.submitTransfer ?? submitAgentPassTransfer)({
+    result = await (input.submitTransfer ?? submitAgentPassTransfer)({
       kit: input.kit,
       pass: input.pass,
       tokenContract: input.tokenContract,
       recipient: input.review.recipientAddress,
       amount: input.review.expectedRecipientAmount,
     });
-    if (!result.success) {
-      throw new Error(result.error.message || "The Agent Pass transfer was rejected.");
-    }
-    transactionHash = result.hash;
   } catch {
     try {
       return await reconcileConversationPayment(input.review, undefined, input.request);
@@ -144,6 +140,25 @@ export async function executeAgentPassPayment(input: {
       };
     }
   }
+  if (!result.success) {
+    if (!result.hash) {
+      return {
+        status: "failed",
+        transactionHash: null,
+        message: result.error.message || "The Agent Pass transfer was rejected before submission.",
+      };
+    }
+    try {
+      return await reconcileConversationPayment(input.review, result.hash, input.request);
+    } catch {
+      return {
+        status: "unverified",
+        transactionHash: result.hash,
+        message: "The Agent Pass transfer returned a hash without canonical payment verification. Do not submit again.",
+      };
+    }
+  }
+  const transactionHash = result.hash;
 
   try {
     return await reconcileConversationPayment(input.review, transactionHash, input.request);
