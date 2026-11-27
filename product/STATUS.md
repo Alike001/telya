@@ -89,6 +89,10 @@ MoneyGram's documented non-custodial Stellar widget flow uses a G-address. Telya
 
 See the [Codex Master Playbook](CODEX-MASTER-PLAYBOOK.md) for the full start-to-finish instructions and the [Execution Tracker](EXECUTION-TRACKER.md) for current task status and human-controlled blockers.
 
+## Submission package progress
+
+[SUBMISSION-PACKAGE.md](SUBMISSION-PACKAGE.md) now gives a stranger a no-wallet evidence path, local setup and truthful Testnet funding guidance, the exact verified direct-Stellar and Agent Pass hashes, architecture, a modular demo script, recording checks and known limitations. It is intentionally marked draft: the integrated browser journey, independent user pass, organizer-confirmed format/cutoff, final video and submission confirmation are not yet verified.
+
 ## November 26 backend progress
 
 Draft [PR #53](https://github.com/Alike001/telya/pull/53) stacks PR #48 without duplication and is at `d20dddd`. All four routes have fail-closed reviews and persisted authorization/first-hash recovery. Definitive finalized Base direct, source-burn and destination-mint mismatches now atomically fail only the exact saved operation/Payment/hash and record the true verification stage; Neon parsed all three guarded transitions. Exact finality, recipient and amount still gate completion. No live browser wallet walkthrough or transaction was performed.

@@ -4,6 +4,8 @@
 
 Telya is building a conversational USDC experience across Stellar and Base. The current public Testnet app has verified passkey smart accounts, direct Stellar USDC payments with durable receipts, and limited, revocable Agent Pass spending. The conversational journey, Base routes, bidirectional Circle CCTP, usernames, and MoneyGram ramp are still being integrated or externally verified. [Current state](product/EXECUTION-TRACKER.md)
 
+Judge/tester entry point: [Buildathon submission package](product/SUBMISSION-PACKAGE.md). It separates reproducible evidence from unfinished or externally blocked work.
+
 > Team Bravo — Stellar Buildathon 2026
 
 ## How to Test
@@ -152,6 +154,7 @@ Completion requires destination finality plus recipient and amount verification.
 If you are a developer or AI agent joining the project, start here:
 
 - [Current project status](product/STATUS.md)
+- [Buildathon submission package](product/SUBMISSION-PACKAGE.md)
 - [Codex master playbook](product/CODEX-MASTER-PLAYBOOK.md)
 - [Live execution tracker](product/EXECUTION-TRACKER.md)
 - [Buildathon execution plan](product/BUILDATHON-EXECUTION-PLAN.md)
