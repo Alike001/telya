@@ -61,7 +61,7 @@ pnpm dev
 
 Open `http://localhost:3000`. Do not paste credentials into an issue, PR, recording or browser-visible `NEXT_PUBLIC_*` variable unless `.env.example` explicitly marks the value public.
 
-The local secure environment passes Privy and localhost WebAuthn configuration checks, and Vercel lists Privy/sponsor key presence without exposing values. The local sponsor remains a placeholder; secret validity and real login/wallet/passkey acceptance have not been recorded. Use the public evidence register rather than claiming the draft conversational journey works end to end.
+The local secure environment passes Privy and localhost WebAuthn configuration checks. The dedicated sponsor's public Testnet identity, 10,000-XLM starting balance and one-stroop self-payment are independently verified, while Vercel lists the sponsor as a hidden Secret in Preview/Production without exposing its value. A later Vercel deployment proves environment-snapshot timing but not that the hidden deployed seed derives the same public key. Real authenticated onboarding, protected relayer and payment acceptance remain open, so use the public evidence register rather than claiming the draft conversational journey works end to end.
 
 ## Testnet funding
 
@@ -153,7 +153,7 @@ Do not record this as a working journey until the integrated browser acceptance 
 ## Known limitations and blockers
 
 - The current public `main` deployment does not contain the unmerged integrated frontend stack.
-- Local Privy configuration passes preflight and Vercel key presence is confirmed, but secret validity, fork-preview deployment and a real browser wallet/passkey acceptance session are still required for onboarding, contacts, conversational payment, timeline and current Agent Pass UI proof; the local sponsor remains a placeholder.
+- Local Privy configuration and sponsor key control pass preflight/Testnet verification, and Vercel secret presence/scope is confirmed. The integrated fork preview is still blocked by teammate authorization plus the current 100-deployments/day Vercel limit, and a real browser wallet/passkey acceptance session remains required for onboarding, contacts, conversational payment, timeline and current Agent Pass UI proof.
 - The integrated build's value-redacted client-secret scan passed across 215 emitted browser files; this guards packaging but does not validate the configured secrets.
 - Base direct and both CCTP directions have extensive automated/database safeguards but no accepted signed end-to-end Testnet settlement evidence. They must not appear as completed in the demo.
 - The public Base/Stellar endpoints and configured CCTP contracts pass the draft read-only probe, but this does not establish a funded or authenticated wallet, source burn, attestation, destination mint or finality.
