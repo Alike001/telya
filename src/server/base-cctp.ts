@@ -896,8 +896,8 @@ export async function reconcileBaseToStellarCctp(input: {
     throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "Base CCTP burn amount and max fee must be reserved before signing");
   }
   const sourceHash = input.sourceTransactionHash.trim().toLowerCase();
-  const atomic = normalizeStellarUsdcAmount(String(payment.expected_amount)).raw.toString();
   const stellarConfig = stellarCctpConfigFromEnvironment();
+  const atomic = normalizeStellarUsdcAmount(String(payment.expected_amount)).raw.toString();
   if (payment.status === "destination_submitted") {
     if (operation.status !== "awaiting_attestation" ||
         operation.source_transaction_hash !== sourceHash ||
