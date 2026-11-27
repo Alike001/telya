@@ -17,6 +17,7 @@ import {
   type SessionRequestGuard,
 } from "../session-request-guard";
 import { ActivityHistory } from "./activity-history";
+import { reconcileSubmittedActivityPayment } from "./payment-activity-refresh";
 import { PaymentProgressTimeline } from "./payment-progress-timeline";
 import { PaymentReceiptModal } from "./payment-receipt-modal";
 
@@ -146,12 +147,7 @@ function AuthenticatedPaymentActivity() {
     setError(null);
     try {
       const request = await captureRequest(guard);
-      if (selected.route.id === "stellar_to_stellar" && selected.status === "submitted") {
-        await request(
-          `/api/payments/stellar/direct/reconcile?id=${encodeURIComponent(selected.id)}`,
-          { method: "POST", credentials: "same-origin" },
-        );
-      }
+      await reconcileSubmittedActivityPayment(selected, request);
       if (!guard.isActive()) return;
       await fetchDetail(selected.id, guard, request);
     } catch (reason) {
