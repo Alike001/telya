@@ -28,6 +28,53 @@ Payment creation requires an existing user message ID from the owned conversatio
 
 The created payment stays in `awaiting_confirmation`. No confirmation handler is exposed until a real wallet authorization proof is verified. The later execution integration must recheck current balance, fee quote, wallet state, and idempotency before submission. Chain execution and finality verification are outside this handler and must use the existing payment completion invariant.
 
+Authenticated Base execution routes are exposed under `/api/payments/base`:
+
+- `POST /direct?id=<paymentId>` records a Base -> Base wallet transaction only
+  after Base Sepolia finality and a single exact USDC `Transfer` log prove the
+  source wallet, recipient, and expected amount.
+- `POST /cctp/authorize?id=<paymentId>` reserves the gross burn and Circle
+  maximum fee from the confirmed payment and its server-quoted USDC provider
+  fee. It accepts no user-supplied amount.
+- `POST /cctp/source?id=<paymentId>` reconciles a Base -> Stellar burn and
+  Circle attestation, or reconciles a Stellar -> Base burn and returns prepared
+  Base mint calldata for the connected wallet.
+- `POST /cctp/destination?id=<paymentId>` records a submitted Stellar -> Base
+  mint and completes the payment only after a finalized `receiveMessage`
+  transaction and the exact recipient/amount USDC mint are verified.
+
+Each handler checks that the authenticated Privy user owns the payment. Base
+signing uses the connected EIP-1193 wallet; no Base private key is stored by
+Telya. Set `BASE_SEPOLIA_RPC_URL` to a credential-free HTTPS Base Sepolia
+JSON-RPC endpoint on the server and apply migrations `0006`, `0007`, and `0008`
+in order. Circle status and attestation are retrieved from Circle's Testnet
+Iris API and persisted with hashes for reconciliation. Repeated requests use
+unique payment events, operation hashes, and a 60-second destination lease.
+Source confirmation and Circle attestation remain intermediate states.
+
+## Stellar / Circle CCTP integration seam
+
+Issue #12 exposes the Stellar half used by Issue #16's Base/Circle coordinator:
+
+- `submitStellarCctpBurn` creates the owner-authorized Stellar `deposit_for_burn`
+  call for Base domain `6` with Standard finality `2000`. The relayer allowlists
+  the exact token messenger, Stellar USDC contract, recipient, amount, and fee.
+- `reconcileStellarCctpSource` verifies the finalized transaction envelope and
+  persists only `source_confirmed`. It never completes the payment.
+- Issue #16 obtains the Circle message/attestation from that source transaction
+  and passes attested bytes to `settleBaseToStellarCctp` for the reverse route.
+- `settleBaseToStellarCctp` reserves the Circle message idempotently, prepares
+  and durably stores the signed `mint_and_forward` envelope and hash before
+  broadcast, verifies Stellar finality plus the exact USDC transfer event, and
+  only then writes `destination_confirmed`, `recipient_verified`, and
+  `completed` PaymentEvents.
+
+`stellar_cctp_operations` is the durable reconciliation record. Reusing a
+payment with different source/message/attestation evidence fails closed, and a
+second worker does not create a different destination operation. A stale worker
+lease can replay only the exact persisted transaction hash; a legacy hashless
+reservation is failed for manual reconciliation instead of being resubmitted.
+
 ## Example request
 
 ```http

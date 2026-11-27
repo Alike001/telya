@@ -18,6 +18,8 @@ import {
   completeStellarAgentPassRevocation,
   completeStellarUsdcTransferRequest,
   completeStellarRelayerRequest,
+  recordStellarCctpBurnAuthorization,
+  recordStellarCctpBurnSubmission,
   recordStellarAgentPassAuthorization,
   recordStellarUsdcTransferAuthorization,
   recordStellarUsdcTransferSubmission,
@@ -120,6 +122,8 @@ export async function handleStellarRelayerRequest(
       spendingLimitPolicyAddress:
         process.env.STELLAR_SPENDING_LIMIT_POLICY ?? "",
       usdcContract: process.env.STELLAR_USDC_SAC ?? "",
+      cctpTokenMessenger: process.env.CCTP_STELLAR_TOKEN_MESSENGER ?? "",
+      baseDomain: Number(process.env.CCTP_BASE_DOMAIN),
     });
     if (paymentId && validated.kind !== "usdc_transfer") {
       throw new StellarRelayerError(
@@ -193,6 +197,11 @@ export async function handleStellarRelayerRequest(
         );
       }
     }
+    if (validated.kind === "cctp_burn") {
+      // A finalized burn is source evidence only. The Circle coordinator
+      // verifies the attestation and destination before completing payment.
+      await recordStellarCctpBurnAuthorization(identity.requestHash, validated);
+    }
     if (
       validated.kind === "agent_pass_create" ||
       validated.kind === "agent_pass_revoke"
@@ -235,6 +244,15 @@ export async function handleStellarRelayerRequest(
         amountRaw: validated.amountRaw,
       });
       await recordVerifiedAgentPassSpend(validated, result.hash);
+    } else if (validated.kind === "cctp_burn") {
+      await recordStellarCctpBurnSubmission(identity.requestHash, {
+        transactionHash: result.hash,
+        ledger: result.ledger,
+      });
+      await completeStellarRelayerRequest(identity.requestHash, {
+        status: "succeeded",
+        transactionHash: result.hash,
+      });
     } else if (validated.kind === "agent_pass_create") {
       await completeStellarAgentPassCreation(identity.requestHash, validated, {
         transactionHash: result.hash,
