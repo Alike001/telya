@@ -1,5 +1,11 @@
 import { Networks, StrKey } from "@stellar/stellar-sdk";
 
+import {
+  BASE_SEPOLIA_CHAIN_ID,
+  BASE_SEPOLIA_TOKEN_MESSENGER,
+  BASE_SEPOLIA_USDC,
+  CCTP_STELLAR_DOMAIN,
+} from "../../base/evm";
 import type { StellarCctpConfig } from "../../stellar/cctp";
 
 export type VerifiedBalance = {
@@ -74,6 +80,10 @@ function decimal(value: unknown): value is string {
 
 function transactionHash(value: unknown): value is string {
   return typeof value === "string" && /^(?:0x)?[0-9a-f]{64}$/i.test(value);
+}
+
+function evmAddress(value: unknown): value is string {
+  return typeof value === "string" && /^0x[0-9a-f]{40}$/i.test(value);
 }
 
 function equalDecimal(left: string, right: string): boolean {
@@ -193,6 +203,49 @@ export function parseCctpAuthorizationReady(value: unknown): {
   return { ...base, burnAmount: burn.burnAmount, maxFee: burn.maxFee };
 }
 
+export function parseBaseDirectAuthorization(value: unknown): {
+  readonly sender: string;
+  readonly recipient: string;
+  readonly amount: string;
+} | null {
+  const payload = record(value);
+  const transaction = record(payload?.transaction);
+  if (payload?.status !== "authorization_ready" || !transaction ||
+      transaction.chainId !== BASE_SEPOLIA_CHAIN_ID ||
+      typeof transaction.token !== "string" || transaction.token.toLowerCase() !== BASE_SEPOLIA_USDC.toLowerCase() ||
+      !evmAddress(transaction.sender) || !evmAddress(transaction.recipient) || !decimal(transaction.amount)) return null;
+  return {
+    sender: transaction.sender.toLowerCase(),
+    recipient: transaction.recipient.toLowerCase(),
+    amount: transaction.amount,
+  };
+}
+
+export function parseBaseCctpAuthorization(value: unknown): {
+  readonly sender: string;
+  readonly burnAmount: string;
+  readonly maxFee: string;
+  readonly destinationDomain: 27;
+  readonly mintRecipient: string;
+} | null {
+  const payload = record(value);
+  const transaction = record(payload?.transaction);
+  if (payload?.status !== "authorization_ready" || !transaction ||
+      transaction.chainId !== BASE_SEPOLIA_CHAIN_ID ||
+      typeof transaction.token !== "string" || transaction.token.toLowerCase() !== BASE_SEPOLIA_USDC.toLowerCase() ||
+      typeof transaction.tokenMessenger !== "string" || transaction.tokenMessenger.toLowerCase() !== BASE_SEPOLIA_TOKEN_MESSENGER.toLowerCase() ||
+      !evmAddress(transaction.sender) || !decimal(transaction.burnAmount) || !decimal(transaction.maxFee) ||
+      transaction.destinationDomain !== CCTP_STELLAR_DOMAIN ||
+      typeof transaction.mintRecipient !== "string" || !/^0x[0-9a-f]{64}$/i.test(transaction.mintRecipient)) return null;
+  return {
+    sender: transaction.sender.toLowerCase(),
+    burnAmount: transaction.burnAmount,
+    maxFee: transaction.maxFee,
+    destinationDomain: 27,
+    mintRecipient: transaction.mintRecipient.toLowerCase(),
+  };
+}
+
 export function parseStellarCctpConfig(value: unknown): StellarCctpConfig | null {
   const payload = record(value);
   const config = record(payload?.config);
@@ -259,6 +312,41 @@ export function parseCctpReconciliation(value: unknown):
     };
   }
   return null;
+}
+
+export function parseBaseToStellarReconciliation(value: unknown):
+  | { readonly status: "pending" | "in_progress"; readonly sourceTransactionHash: string }
+  | { readonly status: "completed"; readonly destinationTransactionHash: string }
+  | null {
+  const payload = record(value);
+  if ((payload?.status === "pending" || payload?.status === "in_progress") &&
+      typeof payload.sourceTransactionHash === "string" && /^0x[0-9a-f]{64}$/i.test(payload.sourceTransactionHash)) {
+    return { status: payload.status, sourceTransactionHash: payload.sourceTransactionHash.toLowerCase() };
+  }
+  if (payload?.status === "completed" &&
+      typeof payload.destinationTransactionHash === "string" && /^[0-9a-f]{64}$/i.test(payload.destinationTransactionHash)) {
+    return { status: "completed", destinationTransactionHash: payload.destinationTransactionHash.toLowerCase() };
+  }
+  return null;
+}
+
+export function parsePersistedPaymentHashes(value: unknown, paymentId: string): {
+  readonly sourceTransactionHash?: string;
+  readonly destinationTransactionHash?: string;
+} | null {
+  const payload = record(value);
+  const payment = record(payload?.payment);
+  if (!payment || payment.id !== paymentId) return null;
+  const source = transactionHash(payment.sourceTransactionHash)
+    ? payment.sourceTransactionHash.toLowerCase()
+    : undefined;
+  const destination = transactionHash(payment.destinationTransactionHash)
+    ? payment.destinationTransactionHash.toLowerCase()
+    : undefined;
+  return {
+    ...(source ? { sourceTransactionHash: source } : {}),
+    ...(destination ? { destinationTransactionHash: destination } : {}),
+  };
 }
 
 /** A completed UI state requires canonical persisted recipient, amount, and hash evidence. */

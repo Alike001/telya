@@ -37,7 +37,12 @@ export function PaymentReviewCard({
     ? "Stellar Direct USDC"
     : review.routeId === "stellar_to_base"
       ? "Circle CCTP Standard · Stellar to Base"
+    : review.routeId === "base_to_stellar"
+      ? "Circle CCTP Standard · Base to Stellar"
+    : review.routeId === "base_to_base"
+      ? "Base Direct USDC"
     : review.routeId.replaceAll("_", " ");
+  const baseSource = review.sourceNetwork === "base";
   const completedExplorer = review.destinationNetwork === "base"
     ? `https://sepolia.basescan.org/tx/${execution?.transactionHash ?? ""}`
     : `https://stellar.expert/explorer/testnet/tx/${execution?.transactionHash ?? ""}`;
@@ -117,7 +122,7 @@ export function PaymentReviewCard({
 
       {!execution && !errorMessage && (
         <div className="review-error-banner" role="status">
-          Review the exact recipient, amount, route and fees. Nothing is submitted until your device passkey authorizes this payment.
+          Review the exact recipient, amount, route and fees. Nothing is submitted until your {baseSource ? "connected Base wallet" : "device passkey"} authorizes this payment.
         </div>
       )}
       {execution?.status === "pending" && (
@@ -168,7 +173,7 @@ export function PaymentReviewCard({
             disabled={phase === "authorizing"}
           >
             {phase === "authorizing" ? (
-              <><Loader2 className="btn-icon spinner" /><span>Authorizing passkey…</span></>
+              <><Loader2 className="btn-icon spinner" /><span>Authorizing {baseSource ? "Base wallet" : "passkey"}…</span></>
             ) : (
               <><Fingerprint className="btn-icon" /><span>Confirm exact payment</span></>
             )}
