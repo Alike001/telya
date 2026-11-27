@@ -94,7 +94,7 @@ These heads demonstrate code/test state only. They are not accepted financial co
 | [#53 backend orchestration](https://github.com/Alike001/telya/pull/53) | `d20dddd` | 224 configured tests; guarded finalized mismatch persistence | Real browser authorization and route execution |
 | [#49 conversational UI](https://github.com/Alike001/telya/pull/49) | `64ab352` | 294 configured tests; four protected route paths | Real authenticated browser and signed transactions |
 | [#65 timeline/receipts](https://github.com/Alike001/telya/pull/65) | `8f64801` | 310 configured tests; persisted exact failure stages | Real browser refresh and completed/failed receipt |
-| [#66 Agent Pass/contacts/Judge UI](https://github.com/Alike001/telya/pull/66) | `42990e3` | 370 configured tests; Neon contacts/Agent Pass; one-use execution; exact secret-redacted preflight; repeatable read-only Base/Stellar chain and contract probe; exact-head mobile/desktop unavailable-state browser pass | Privy, sponsor and authenticated live browser/payment/Agent Pass acceptance |
+| [#66 Agent Pass/contacts/Judge UI](https://github.com/Alike001/telya/pull/66) | `65ff241` | 370 configured tests; Neon contacts/Agent Pass; one-use execution; clean production dependency audit; repeatable read-only Base/Stellar chain and contract probe; exact-head mobile/desktop unavailable-state browser pass | Privy, sponsor and authenticated live browser/payment/Agent Pass acceptance |
 
 PR #66's live probe at ledger `5,945,858` verified Base Sepolia chain `84532`,
 non-empty deployed bytecode at the configured Base USDC, TokenMessenger and
