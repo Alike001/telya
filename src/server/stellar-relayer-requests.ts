@@ -405,12 +405,33 @@ export async function recordStellarCctpBurnSubmission(
 ): Promise<void> {
   const sql = getSqlClient();
   const rows = await sql`
-    UPDATE stellar_relayer_requests
-    SET submitted_transaction_hash = ${result.transactionHash},
-      submitted_ledger = ${result.ledger}, updated_at = now()
-    WHERE request_hash = ${requestHash}
-      AND status = 'pending' AND operation_kind = 'cctp_burn'
-    RETURNING request_hash
+    WITH request AS (
+      UPDATE stellar_relayer_requests
+      SET submitted_transaction_hash = ${result.transactionHash},
+        submitted_ledger = ${result.ledger}, updated_at = now()
+      WHERE request_hash = ${requestHash}
+        AND status = 'pending' AND operation_kind = 'cctp_burn'
+      RETURNING request_hash, payment_id
+    ), payment AS (
+      UPDATE payments p SET status = 'submitted',
+        source_transaction_hash = ${result.transactionHash}, updated_at = now()
+      FROM request r
+      WHERE r.payment_id = p.id
+        AND p.route_id = 'stellar_to_base'
+        AND p.status IN ('authorized', 'submitted')
+        AND (p.source_transaction_hash IS NULL
+          OR p.source_transaction_hash = ${result.transactionHash})
+      RETURNING p.id
+    ), event AS (
+      INSERT INTO payment_events (
+        payment_id, event_key, stage, status, network, transaction_hash,
+        public_message, completed_at
+      ) SELECT payment.id, 'stellar_cctp_submitted', 'source_submission',
+        'submitted', 'stellar', ${result.transactionHash},
+        'The Stellar CCTP burn was submitted. Destination delivery is not complete yet.', now()
+      FROM payment ON CONFLICT (payment_id, event_key) DO NOTHING
+    )
+    SELECT request_hash FROM request
   `;
   if (!(rows as Record<string, unknown>[])[0]) {
     throw new Error("Stellar CCTP burn submission was not persisted");

@@ -195,7 +195,10 @@ export function createBaseCctpSourceHandler(options: { authenticate?: Authentica
         return jsonResponse(result, result.status === "pending" || result.status === "in_progress" ? 202 : 200);
       }
       if (payment.route_id === "stellar_to_base") {
-        const txHash = parseTransactionHash(body.sourceTransactionHash, false);
+        const txHash = parseTransactionHash(
+          body.sourceTransactionHash ?? payment.source_transaction_hash,
+          false,
+        );
         if (!txHash) return jsonResponse({ error: "invalid_transaction_hash" }, 400);
         const config = stellarCctpConfigFromEnvironment();
         const baseConfig = baseEvmConfigFromEnvironment();

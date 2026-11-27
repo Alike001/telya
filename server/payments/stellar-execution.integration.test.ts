@@ -10,6 +10,7 @@ vi.mock("server-only", () => ({}));
 import {
   linkStellarCctpPaymentAuthorization,
   linkStellarPaymentAuthorization,
+  recordStellarCctpBurnSubmission,
   recordStellarUsdcTransferSubmission,
   validateStellarCctpPaymentAuthorization,
   validateStellarPaymentAuthorization,
@@ -341,18 +342,28 @@ describe("linked Stellar direct payment execution on PostgreSQL", () => {
         });
         await validateStellarCctpPaymentAuthorization(userId, paymentId, burn);
         await linkStellarCctpPaymentAuthorization(userId, paymentId, requestHash, burn);
+        const transactionHash = randomBytes(32).toString("hex");
+        await recordStellarCctpBurnSubmission(requestHash, {
+          transactionHash,
+          ledger: 123,
+        });
 
         const linked = await sql`
-          SELECT p.status, r.payment_id
+          SELECT p.status, p.source_transaction_hash, r.payment_id
           FROM payments p JOIN stellar_relayer_requests r ON r.request_hash = ${requestHash}
           WHERE p.id = ${paymentId}::uuid
         `;
-        expect(linked[0]).toMatchObject({ status: "authorized", payment_id: paymentId });
+        expect(linked[0]).toMatchObject({
+          status: "submitted",
+          source_transaction_hash: transactionHash,
+          payment_id: paymentId,
+        });
         const events = await sql`
           SELECT event_key FROM payment_events WHERE payment_id = ${paymentId}::uuid
         `;
         expect(events.map((event) => event.event_key)).toEqual([
           "stellar_cctp_owner_authorized",
+          "stellar_cctp_submitted",
         ]);
       } finally {
         await sql.transaction([
