@@ -7,10 +7,7 @@ export async function reconcileSubmittedActivityPayment(
   request: Request,
 ): Promise<void> {
   if (payment.route.id === "base_to_stellar_cctp" || payment.route.id === "stellar_to_base_cctp") {
-    const recoverable = payment.route.id === "base_to_stellar_cctp"
-      ? ["submitted", "source_confirmed", "awaiting_attestation"]
-      : ["submitted", "source_confirmed", "awaiting_attestation", "destination_submitted"];
-    if (!recoverable.includes(payment.status)) return;
+    if (!["submitted", "source_confirmed", "awaiting_attestation", "destination_submitted"].includes(payment.status)) return;
     const sourceHash = payment.sourceTransaction?.txHash;
     const validSourceHash = payment.sourceTransaction?.network === payment.route.sourceNetwork &&
       (payment.route.sourceNetwork === "base"
