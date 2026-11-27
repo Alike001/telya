@@ -14,13 +14,13 @@ import {
 } from "@stellar/stellar-sdk";
 import type { TransactionResult } from "smart-account-kit";
 
-import type { DecimalAmount } from "../domain";
+import type { DecimalAmount } from "../domain/index.ts";
 import {
   normalizeStellarUsdcAmount,
   type StellarTransactionRpc,
   type StellarUsdcVerification,
   verifyStellarUsdcTransfer,
-} from "./usdc";
+} from "./usdc.ts";
 
 export const CCTP_STANDARD_FINALITY_THRESHOLD = 2_000;
 export const CCTP_BASE_DOMAIN = 6;
