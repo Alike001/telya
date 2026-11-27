@@ -11,7 +11,11 @@ import {
   type VerifiedContact,
 } from "../../domain/contact-directory";
 import { authenticatedFetch } from "../authenticated-fetch";
-import { createSessionRequestGuard, type SessionRequestGuard } from "../session-request-guard";
+import {
+  captureSessionAccessToken,
+  createSessionRequestGuard,
+  type SessionRequestGuard,
+} from "../session-request-guard";
 
 interface ContactsDirectoryProps {
   readonly onSelectPayContact: (handle: string, network?: Network) => void;
@@ -79,8 +83,12 @@ function AuthenticatedContacts({ onSelectPayContact, onClose }: ContactsDirector
   const [error, setError] = useState<string | null>(null);
   const sessionGuardRef = useRef<SessionRequestGuard | null>(null);
 
-  const request = useCallback(
-    (input: string, init: RequestInit = {}) => authenticatedFetch(input, init, getAccessToken),
+  const captureRequest = useCallback(
+    async (guard: SessionRequestGuard) => {
+      const tokenProvider = await captureSessionAccessToken(getAccessToken, guard);
+      return (input: string, init: RequestInit = {}) =>
+        authenticatedFetch(input, init, tokenProvider);
+    },
     [getAccessToken],
   );
 
@@ -89,6 +97,7 @@ function AuthenticatedContacts({ onSelectPayContact, onClose }: ContactsDirector
     setLoading(true);
     setError(null);
     try {
+      const request = await captureRequest(guard);
       const response = await request("/api/contacts", { cache: "no-store" });
       const payload: unknown = await response.json();
       const parsed = response.ok ? parseVerifiedContacts(payload) : null;
@@ -102,7 +111,7 @@ function AuthenticatedContacts({ onSelectPayContact, onClose }: ContactsDirector
     } finally {
       if (guard.isActive()) setLoading(false);
     }
-  }, [request]);
+  }, [captureRequest]);
 
   useEffect(() => {
     sessionGuardRef.current?.cancel();
@@ -135,6 +144,7 @@ function AuthenticatedContacts({ onSelectPayContact, onClose }: ContactsDirector
     setLoading(true);
     setError(null);
     try {
+      const request = await captureRequest(guard);
       const response = await request("/api/contacts", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -165,6 +175,7 @@ function AuthenticatedContacts({ onSelectPayContact, onClose }: ContactsDirector
     setLoading(true);
     setError(null);
     try {
+      const request = await captureRequest(guard);
       const response = await request(`/api/contacts?id=${encodeURIComponent(contactId)}`, { method: "DELETE" });
       if (response.status !== 204) throw new Error("The contact could not be removed from persistence.");
       if (!guard.isActive()) return;

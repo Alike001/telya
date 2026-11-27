@@ -63,4 +63,21 @@ describe("authenticated session request guard", () => {
         .toBe("Bearer identity-a-token");
     }
   });
+
+  it("does not send a mutation when the auth epoch changes while its token resolves", async () => {
+    const guard = createSessionRequestGuard();
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const mutation = async () => {
+      const tokenProvider = await captureSessionAccessToken(async () => {
+        guard.cancel();
+        return "next-identity-token";
+      }, guard);
+      return authenticatedFetch("/api/contacts", { method: "POST" }, tokenProvider);
+    };
+
+    await expect(mutation()).rejects.toThrow("Authenticated session changed");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });
