@@ -192,10 +192,12 @@ export function createBaseCctpSourceHandler(options: { authenticate?: Authentica
         const txHash = parseTransactionHash(body.sourceTransactionHash, false);
         if (!txHash) return jsonResponse({ error: "invalid_transaction_hash" }, 400);
         const config = stellarCctpConfigFromEnvironment();
+        const baseConfig = baseEvmConfigFromEnvironment();
         const result = await prepareStellarToBaseCctpDestination({
           paymentId: id,
           stellarSourceTransactionHash: txHash,
           stellarRpc: new rpc.Server(config.rpcUrl),
+          baseRpc: createBaseRpc(baseConfig),
         });
         return jsonResponse(result, result.status === "pending" || result.status === "in_progress" ? 202 : 200);
       }

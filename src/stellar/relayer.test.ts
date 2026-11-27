@@ -287,6 +287,8 @@ function cctpBurnSubmission(overrides: {
   readonly destinationCaller?: Buffer;
   readonly mintRecipient?: Buffer;
   readonly signature?: xdr.ScVal;
+  readonly functionName?: string;
+  readonly hookData?: Buffer;
 } = {}) {
   const targetArgs = [
     nativeToScVal(smartAccount, { type: "address" }),
@@ -299,13 +301,17 @@ function cctpBurnSubmission(overrides: {
     xdr.ScVal.scvBytes(overrides.destinationCaller ?? Buffer.alloc(32)),
     nativeToScVal(100_000n, { type: "i128" }),
     xdr.ScVal.scvU32(overrides.finalityThreshold ?? 2_000),
+    xdr.ScVal.scvBytes(overrides.hookData ?? Buffer.from(
+      "636374702d666f72776172640000000000000000000000000000000000000000",
+      "hex",
+    )),
   ];
   const invoke = new xdr.InvokeContractArgs({
     contractAddress: Address.fromString(smartAccount).toScAddress(),
     functionName: "execute",
     args: [
       nativeToScVal(cctpTokenMessenger, { type: "address" }),
-      xdr.ScVal.scvString("deposit_for_burn"),
+      xdr.ScVal.scvString(overrides.functionName ?? "deposit_for_burn_with_hook"),
       xdr.ScVal.scvVec(targetArgs),
     ],
   });
@@ -378,6 +384,17 @@ describe("Stellar CCTP relayer boundary", () => {
         options,
       ),
     ).toThrow("Standard Testnet policy");
+  });
+
+  it("rejects an unhooked burn or any non-Circle forwarding hook", () => {
+    expect(() => validateStellarCctpBurnSubmission(
+      cctpBurnSubmission({ functionName: "deposit_for_burn" }),
+      options,
+    )).toThrow("deposit_for_burn_with_hook");
+    expect(() => validateStellarCctpBurnSubmission(
+      cctpBurnSubmission({ hookData: Buffer.alloc(32, 1) }),
+      options,
+    )).toThrow("Standard Testnet policy");
   });
 
   it("rejects non-owner authorization", () => {

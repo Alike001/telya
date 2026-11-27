@@ -8,6 +8,7 @@ export interface CircleCctpMessage {
   readonly attestation: string;
   readonly status: string;
   readonly cctpVersion?: number;
+  readonly forwardTxHash?: string;
 }
 
 interface CircleMessagesResponse {
@@ -18,6 +19,9 @@ interface CircleMessagesResponse {
 interface CircleFeeEntry {
   readonly finalityThreshold?: unknown;
   readonly minimumFee?: unknown;
+  readonly forwardFee?: {
+    readonly med?: unknown;
+  };
 }
 
 export type CircleCctpStatus =
@@ -29,6 +33,7 @@ export type CircleCctpStatus =
       readonly attestation: string;
       readonly messageHash: string;
       readonly attestationHash: string;
+      readonly forwardTransactionHash?: string;
     };
 
 export interface CircleCctpStandardFeeQuote {
@@ -37,6 +42,8 @@ export interface CircleCctpStandardFeeQuote {
   readonly finalityThreshold: 2_000;
   /** Circle's current minimum fee rate in basis points, preserved as a decimal string. */
   readonly minimumFeeBps: string;
+  /** Circle's median forwarding quote in atomic USDC (six decimals). */
+  readonly forwardFeeAtomic?: string;
 }
 
 export class CircleCctpError extends Error {
@@ -87,12 +94,25 @@ function minimumFeeBps(value: unknown): string {
   return fee;
 }
 
+function forwardFeeAtomic(value: unknown): string {
+  if ((typeof value !== "number" && typeof value !== "string") ||
+      (typeof value === "number" && (!Number.isSafeInteger(value) || value < 0))) {
+    throw new CircleCctpError("INVALID_RESPONSE", "Circle Forwarding Service fee is missing");
+  }
+  const fee = String(value);
+  if (!/^(?:0|[1-9]\d{0,29})$/.test(fee)) {
+    throw new CircleCctpError("INVALID_RESPONSE", "Circle Forwarding Service fee is invalid");
+  }
+  return fee;
+}
+
 /** Fetch Circle's current Standard Transfer fee rate for Telya's two Testnet routes. */
 export async function getCircleCctpStandardFeeQuote(input: {
   readonly sourceDomain: number;
   readonly destinationDomain: number;
   readonly fetcher?: typeof fetch;
   readonly apiBaseUrl?: string;
+  readonly forward?: boolean;
 }): Promise<CircleCctpStandardFeeQuote> {
   const supportedRoute =
     (input.sourceDomain === 6 && input.destinationDomain === 27) ||
@@ -104,6 +124,7 @@ export async function getCircleCctpStandardFeeQuote(input: {
     `/v2/burn/USDC/fees/${input.sourceDomain}/${input.destinationDomain}`,
     input.apiBaseUrl,
   );
+  if (input.forward) url.searchParams.set("forward", "true");
   let response: Response;
   try {
     response = await (input.fetcher ?? fetch)(url, { cache: "no-store" });
@@ -128,11 +149,16 @@ export async function getCircleCctpStandardFeeQuote(input: {
   if (standard.length !== 1) {
     throw new CircleCctpError("INVALID_RESPONSE", "Circle CCTP fee API must return one Standard Transfer quote");
   }
-  return {
+  const quote: CircleCctpStandardFeeQuote = {
     sourceDomain: input.sourceDomain,
     destinationDomain: input.destinationDomain,
     finalityThreshold: 2_000,
     minimumFeeBps: minimumFeeBps(standard[0]!.minimumFee),
+  };
+  if (!input.forward) return quote;
+  return {
+    ...quote,
+    forwardFeeAtomic: forwardFeeAtomic(standard[0]!.forwardFee?.med),
   };
 }
 
@@ -186,6 +212,14 @@ export async function getCircleCctpStatus(input: {
   }
   const message = normalizeHex(entry.message, "message");
   const attestation = normalizeHex(entry.attestation, "attestation");
+  let forwardTransactionHash: string | undefined;
+  if (entry.forwardTxHash !== undefined) {
+    const normalized = entry.forwardTxHash.trim().toLowerCase();
+    if (!/^0x[0-9a-f]{64}$/.test(normalized)) {
+      throw new CircleCctpError("INVALID_RESPONSE", "Circle forwarding transaction hash is invalid");
+    }
+    forwardTransactionHash = normalized;
+  }
   return {
     status: "complete",
     sourceTransactionHash,
@@ -193,5 +227,6 @@ export async function getCircleCctpStatus(input: {
     attestation,
     messageHash: hashHex(message),
     attestationHash: hashHex(attestation),
+    ...(forwardTransactionHash ? { forwardTransactionHash } : {}),
   };
 }

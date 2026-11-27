@@ -37,11 +37,13 @@ Authenticated Base execution routes are exposed under `/api/payments/base`:
   maximum fee from the confirmed payment and its server-quoted USDC provider
   fee. It accepts no user-supplied amount.
 - `POST /cctp/source?id=<paymentId>` reconciles a Base -> Stellar burn and
-  Circle attestation, or reconciles a Stellar -> Base burn and returns prepared
-  Base mint calldata for the connected wallet.
-- `POST /cctp/destination?id=<paymentId>` records a submitted Stellar -> Base
-  mint and completes the payment only after a finalized `receiveMessage`
-  transaction and the exact recipient/amount USDC mint are verified.
+  Circle attestation, or reconciles a Stellar -> Base burn plus Circle's
+  Forwarding Service transaction. The latter remains pending until the forwarded
+  Base mint and exact recipient/amount are finalized and verified.
+- `POST /cctp/destination?id=<paymentId>` remains an idempotent reconciliation
+  endpoint for the Circle-forwarded Stellar -> Base mint hash; it cannot replace
+  the hash reserved from Circle's response or bypass exact `receiveMessage` and
+  USDC mint verification.
 
 Each handler checks that the authenticated Privy user owns the payment. Base
 signing uses the connected EIP-1193 wallet; no Base private key is stored by
@@ -56,9 +58,12 @@ Source confirmation and Circle attestation remain intermediate states.
 
 Issue #12 exposes the Stellar half used by Issue #16's Base/Circle coordinator:
 
-- `submitStellarCctpBurn` creates the owner-authorized Stellar `deposit_for_burn`
-  call for Base domain `6` with Standard finality `2000`. The relayer allowlists
-  the exact token messenger, Stellar USDC contract, recipient, amount, and fee.
+- `submitStellarCctpBurn` creates the owner-authorized Stellar
+  `deposit_for_burn_with_hook` call for Base domain `6` with Standard finality
+  `2000` and Circle's exact Forwarding Service hook. The relayer allowlists the
+  exact token messenger, Stellar USDC contract, recipient, amount, fee, and hook.
+  Circle submits the Base mint and deducts its live quoted USDC forwarding fee;
+  destination finality and exact recipient/amount verification still gate completion.
 - `reconcileStellarCctpSource` verifies the finalized transaction envelope and
   persists only `source_confirmed`. It never completes the payment.
 - Issue #16 obtains the Circle message/attestation from that source transaction

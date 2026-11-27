@@ -19,6 +19,10 @@ const SHARED_DEPLOYER = Keypair.fromRawEd25519Seed(
 
 const MAX_REQUEST_BYTES = 48_000;
 const DEFAULT_MAX_RESOURCE_FEE_STROOPS = 1_000_000n;
+const CCTP_FORWARDING_SERVICE_HOOK = Buffer.from(
+  "636374702d666f72776172640000000000000000000000000000000000000000",
+  "hex",
+);
 
 export class StellarRelayerError extends Error {
   constructor(
@@ -753,7 +757,7 @@ function requireBytes(value: xdr.ScVal, length: number, label: string): Buffer {
   return Buffer.from(value.bytes());
 }
 
-/** Allow only an exact owner-authorized Standard CCTP burn to configured Base. */
+/** Allow only an exact owner-authorized Standard CCTP forwarding burn to configured Base. */
 export function validateStellarCctpBurnSubmission(
   submission: StellarDeploymentSubmission,
   options: {
@@ -797,12 +801,12 @@ export function validateStellarCctpBurnSubmission(
     args[0]?.switch().name !== "scvAddress" ||
     contractIdOf(args[0].address(), "CCTP target must be a contract") !==
       options.cctpTokenMessenger ||
-    scValToNative(args[1]!) !== "deposit_for_burn" ||
-    targetArgs.length !== 8
+    scValToNative(args[1]!) !== "deposit_for_burn_with_hook" ||
+    targetArgs.length !== 9
   ) {
     throw new StellarRelayerError(
       "FORBIDDEN_DEPLOYMENT",
-      "Only the configured CCTP deposit_for_burn operation is accepted",
+      "Only the configured CCTP deposit_for_burn_with_hook operation is accepted",
       403,
     );
   }
@@ -822,6 +826,7 @@ export function validateStellarCctpBurnSubmission(
     "CCTP destination caller",
   );
   const maxFeeRaw = scValToNative(targetArgs[6]!) as unknown;
+  const hookData = requireBytes(targetArgs[8]!, 32, "CCTP forwarding hook");
   if (
     caller !== smartAccount ||
     typeof amountRaw !== "bigint" ||
@@ -835,7 +840,8 @@ export function validateStellarCctpBurnSubmission(
     maxFeeRaw < 0n ||
     maxFeeRaw >= amountRaw ||
     targetArgs[7]?.switch().name !== "scvU32" ||
-    targetArgs[7].u32() !== 2_000
+    targetArgs[7].u32() !== 2_000 ||
+    !hookData.equals(CCTP_FORWARDING_SERVICE_HOOK)
   ) {
     throw new StellarRelayerError(
       "FORBIDDEN_DEPLOYMENT",

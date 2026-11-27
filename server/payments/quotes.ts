@@ -19,6 +19,14 @@ import {
   stellarContractToBytes32,
 } from "../../src/stellar/cctp.ts";
 
+function atomicUsdcToDecimal(value: string): string {
+  if (!/^\d+$/.test(value)) throw new Error("Atomic USDC amount is invalid");
+  const padded = value.padStart(7, "0");
+  const whole = padded.slice(0, -6).replace(/^0+(?=\d)/, "");
+  const fraction = padded.slice(-6).replace(/0+$/, "");
+  return fraction ? `${whole}.${fraction}` : whole;
+}
+
 /** Direct Stellar USDC is fully transferred; the configured sponsor pays XLM network costs. */
 export const quoteSupportedPaymentFees: FeeQuoteProvider = async (input) => {
   if (input.route.id === "stellar_to_stellar") {
@@ -98,6 +106,26 @@ export const quoteSupportedPaymentFees: FeeQuoteProvider = async (input) => {
           : "Estimated Base CCTP burn gas",
       },
     ];
+  }
+  if (input.route.id === "stellar_to_base_cctp") {
+    if (!process.env.STELLAR_FEE_SPONSOR_SECRET?.trim()) return null;
+    const circle = await getCircleCctpStandardFeeQuote({
+      sourceDomain: 27,
+      destinationDomain: 6,
+      forward: true,
+    });
+    // Standard must remain fee-free; the separate forwarding quote covers
+    // destination Base gas and Circle's forwarding service charge.
+    if (circle.minimumFeeBps !== "0" || circle.forwardFeeAtomic === undefined) {
+      return null;
+    }
+    return [{
+      kind: "provider",
+      payer: "sender",
+      asset: "USDC",
+      amount: atomicUsdcToDecimal(circle.forwardFeeAtomic),
+      label: "Circle destination forwarding fee",
+    }];
   }
   return null;
 };

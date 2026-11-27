@@ -13,6 +13,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   CCTP_BASE_DOMAIN,
+  CCTP_FORWARDING_SERVICE_HOOK,
   CCTP_STANDARD_FINALITY_THRESHOLD,
   CCTP_STELLAR_DOMAIN,
   StellarCctpError,
@@ -54,7 +55,7 @@ function finalizedBurnEnvelope(): xdr.TransactionEnvelope {
   const invoke = new Contract(SMART_ACCOUNT).call(
     "execute",
     new Address(config.tokenMessenger).toScVal(),
-    xdr.ScVal.scvString("deposit_for_burn"),
+    xdr.ScVal.scvString("deposit_for_burn_with_hook"),
     xdr.ScVal.scvVec([...prepared.targetArgs]),
   );
   return new TransactionBuilder(new Account(SPONSOR, "1"), {
@@ -121,6 +122,7 @@ describe("Stellar to Base source burn", () => {
     expect(burn.targetArgs[3]?.bytes()).toEqual(evmAddressToBytes32(RECIPIENT));
     expect(burn.targetArgs[5]?.bytes()).toEqual(Buffer.alloc(32));
     expect(burn.targetArgs[7]?.u32()).toBe(CCTP_STANDARD_FINALITY_THRESHOLD);
+    expect(burn.targetArgs[8]?.bytes()).toEqual(CCTP_FORWARDING_SERVICE_HOOK);
   });
 
   it("allows a zero max fee when Circle's trusted quote is zero", () => {
@@ -149,7 +151,7 @@ describe("Stellar to Base source burn", () => {
     expect(result.txHash).toBe("a".repeat(64));
     expect(executeAndSubmit).toHaveBeenCalledWith(
       config.tokenMessenger,
-      "deposit_for_burn",
+      "deposit_for_burn_with_hook",
       expect.any(Array),
       expect.objectContaining({ forceMethod: "relayer" }),
     );

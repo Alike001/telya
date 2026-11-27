@@ -25,12 +25,36 @@ describe("mounted payment fee policy", () => {
       .resolves.toBeNull();
   });
 
-  it("keeps CCTP unavailable without a real Circle fee quote", async () => {
+  it("keeps Stellar-to-Base unavailable without a real Circle forwarding quote", async () => {
     vi.stubEnv("STELLAR_FEE_SPONSOR_SECRET", "configured-in-test");
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("Circle unavailable")));
     await expect(quoteSupportedPaymentFees({
       route: { id: "stellar_to_base_cctp", sourceNetwork: "stellar", destinationNetwork: "base", rail: "circle_cctp_standard" },
       amount: "1", sourceWallet, destinationAddress: `0x${"1".repeat(40)}`,
-    })).resolves.toBeNull();
+    })).rejects.toThrow("fee request failed");
+  });
+
+  it("quotes the exact Stellar-to-Base Standard destination forwarding fee", async () => {
+    vi.stubEnv("STELLAR_FEE_SPONSOR_SECRET", "configured-in-test");
+    const fetcher = vi.fn().mockResolvedValue(Response.json([
+      { finalityThreshold: 2_000, minimumFee: 0, forwardFee: { med: 52_683 } },
+    ]));
+    vi.stubGlobal("fetch", fetcher);
+    await expect(quoteSupportedPaymentFees({
+      route: { id: "stellar_to_base_cctp", sourceNetwork: "stellar", destinationNetwork: "base", rail: "circle_cctp_standard" },
+      amount: "5",
+      sourceWallet,
+      destinationAddress: `0x${"1".repeat(40)}`,
+    })).resolves.toEqual([{
+      kind: "provider",
+      payer: "sender",
+      asset: "USDC",
+      amount: "0.052683",
+      label: "Circle destination forwarding fee",
+    }]);
+    expect(String(fetcher.mock.calls[0]?.[0])).toBe(
+      "https://iris-api-sandbox.circle.com/v2/burn/USDC/fees/27/6?forward=true",
+    );
   });
 
   it("keeps CCTP unavailable when a nonzero Standard rate needs unproven gross/net rounding", async () => {

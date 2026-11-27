@@ -646,19 +646,19 @@ export async function reconcileBaseToStellarCctp(input: {
 }
 
 export interface PreparedBaseCctpDestination {
-  readonly status: "pending" | "in_progress" | "ready";
-  readonly transactionTo?: string;
-  readonly transactionData?: string;
+  readonly status: "pending" | "in_progress" | "completed";
+  readonly destinationTransactionHash?: string;
   readonly sourceTransactionHash?: string;
 }
 
-/** Reconciles Stellar source finality and returns a reserved, wallet-signed Base mint request. */
+/** Reconciles Stellar source finality and Circle's forwarded Base mint. */
 export async function prepareStellarToBaseCctpDestination(input: {
   readonly paymentId: string;
   readonly stellarSourceTransactionHash: string;
   readonly stellarRpc: Pick<rpc.Server, "getTransaction">;
   readonly config?: ReturnType<typeof stellarCctpConfigFromEnvironment>;
   readonly fetchCircle?: typeof getCircleCctpStatus;
+  readonly baseRpc: BaseRpc;
 }): Promise<PreparedBaseCctpDestination> {
   const paymentId = requirePaymentId(input.paymentId);
   const { sql, payment } = await getPaymentOperation(paymentId, ["stellar_to_base"]);
@@ -677,8 +677,35 @@ export async function prepareStellarToBaseCctpDestination(input: {
       "Stellar-to-Base CCTP requires server-approved burn amount and fee limits before signing",
     );
   }
-  if (operation.status === "completed" || typeof operation.destination_transaction_hash === "string") {
-    throw new BaseCctpPersistenceError("INVALID_PAYMENT_STATE", "Base destination mint has already been submitted");
+  if (operation.status === "completed" && typeof operation.destination_transaction_hash === "string") {
+    return {
+      status: "completed",
+      sourceTransactionHash: input.stellarSourceTransactionHash.trim().toLowerCase(),
+      destinationTransactionHash: operation.destination_transaction_hash,
+    };
+  }
+  if (typeof operation.destination_transaction_hash === "string") {
+    try {
+      await recordStellarToBaseDestinationSubmitted({
+        paymentId,
+        destinationTransactionHash: operation.destination_transaction_hash,
+        rpc: input.baseRpc,
+      });
+    } catch (error) {
+      if (error instanceof BaseCctpPersistenceError && error.code === "SUBMISSION_FAILED") {
+        return {
+          status: "pending",
+          sourceTransactionHash: input.stellarSourceTransactionHash.trim().toLowerCase(),
+          destinationTransactionHash: operation.destination_transaction_hash,
+        };
+      }
+      throw error;
+    }
+    return reconcileStellarToBaseDestination({
+      paymentId,
+      destinationTransactionHash: operation.destination_transaction_hash,
+      rpc: input.baseRpc,
+    });
   }
   if (typeof operation.source_transaction_hash === "string" &&
       operation.source_transaction_hash !== input.stellarSourceTransactionHash.trim().toLowerCase()) {
@@ -709,6 +736,12 @@ export async function prepareStellarToBaseCctpDestination(input: {
         AND (source_transaction_hash IS NULL OR source_transaction_hash = ${input.stellarSourceTransactionHash.trim().toLowerCase()})
     `;
     return { status: "pending" };
+  }
+  if (!circle.forwardTransactionHash) {
+    throw new BaseCctpPersistenceError(
+      "DESTINATION_MISMATCH",
+      "Circle did not return the forwarded Base transaction for this burn",
+    );
   }
   const parsed = parseCctpMessage(circle.message);
   const expectedRecipient = `0x${requireEvmAddress(payment.recipient_address, "recipient").slice(2).padStart(64, "0")}`;
@@ -746,7 +779,8 @@ export async function prepareStellarToBaseCctpDestination(input: {
     netStellarAtomic <= 0n ||
     netStellarAtomic % 10n !== 0n ||
     netStellarAtomic / 10n !== expectedRecipientAmount ||
-    parsed.destinationCaller !== `0x${"0".repeat(64)}`
+    parsed.destinationCaller !== `0x${"0".repeat(64)}` ||
+    parsed.hookData !== `0x${"636374702d666f72776172640000000000000000000000000000000000000000"}`
   ) {
     throw new BaseCctpPersistenceError(
       "DESTINATION_MISMATCH",
@@ -773,6 +807,7 @@ export async function prepareStellarToBaseCctpDestination(input: {
       source_transaction_hash = ${input.stellarSourceTransactionHash.trim().toLowerCase()},
       circle_message_hash = ${circle.messageHash}, circle_attestation_hash = ${circle.attestationHash},
       circle_message = ${circle.message}, circle_attestation = ${circle.attestation},
+      destination_transaction_hash = ${circle.forwardTransactionHash},
       submission_lease_id = ${leaseId}::uuid,
       submission_lease_expires_at = now() + interval '60 seconds', updated_at = now()
       WHERE payment_id IN (SELECT id FROM eligible)
@@ -787,18 +822,33 @@ export async function prepareStellarToBaseCctpDestination(input: {
         public_message, completed_at
       ) SELECT payment.id, 'stellar_cctp_attestation_ready', 'attestation',
         'awaiting_attestation', 'stellar', ${input.stellarSourceTransactionHash.trim().toLowerCase()},
-        'Circle completed the Stellar burn attestation. The Base mint is ready for wallet approval.', now()
+        'Circle completed the Stellar burn attestation and forwarded the Base mint for verification.', now()
       FROM payment ON CONFLICT (payment_id, event_key) DO NOTHING
     )
     SELECT id FROM payment
   `;
   if (reserved.length === 0) return { status: "in_progress" };
-  return {
-    status: "ready",
-    transactionTo: BASE_SEPOLIA_MESSAGE_TRANSMITTER,
-    transactionData: encodeCctpReceiveMessage(circle.message, circle.attestation),
-    sourceTransactionHash: input.stellarSourceTransactionHash.trim().toLowerCase(),
-  };
+  try {
+    await recordStellarToBaseDestinationSubmitted({
+      paymentId,
+      destinationTransactionHash: circle.forwardTransactionHash,
+      rpc: input.baseRpc,
+    });
+  } catch (error) {
+    if (error instanceof BaseCctpPersistenceError && error.code === "SUBMISSION_FAILED") {
+      return {
+        status: "pending",
+        sourceTransactionHash: input.stellarSourceTransactionHash.trim().toLowerCase(),
+        destinationTransactionHash: circle.forwardTransactionHash,
+      };
+    }
+    throw error;
+  }
+  return reconcileStellarToBaseDestination({
+    paymentId,
+    destinationTransactionHash: circle.forwardTransactionHash,
+    rpc: input.baseRpc,
+  });
 }
 
 export async function recordStellarToBaseDestinationSubmitted(input: {

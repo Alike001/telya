@@ -111,7 +111,8 @@ function cctpMessage(options: {
   const body = [
     u32(1), options.burnToken ?? contractWord(config.usdcContract), BASE_RECIPIENT.slice(2).padStart(64, "0"),
     word(51_000_000n), options.messageSender ?? contractWord(StrKey.encodeContract(Buffer.alloc(32, 5))),
-    word(1_000_000n), word(options.feeExecuted ?? 1_000_000n), word(0n), word(0n),
+    word(1_000_000n), word(options.feeExecuted ?? 1_000_000n), word(0n),
+    "636374702d666f72776172640000000000000000000000000000000000000000",
   ].join("");
   return `0x${header}${body}`;
 }
@@ -135,6 +136,7 @@ beforeEach(() => {
     attestation: `0x${"c".repeat(130)}`,
     messageHash: "1".repeat(64),
     attestationHash: "2".repeat(64),
+    forwardTransactionHash: DESTINATION_HASH,
   });
   const sql = (async (strings: TemplateStringsArray) => {
     const query = strings.join(" ").replace(/\s+/g, " ").trim();
@@ -172,7 +174,7 @@ beforeEach(() => {
         submission_lease_expires_at: mocks.leaseExpiresAt
           ? new Date(mocks.leaseExpiresAt)
           : null,
-        destination_transaction_hash: null,
+        destination_transaction_hash: mocks.destinationHash,
       }];
     }
     if (query.includes("UPDATE base_cctp_operations SET status = 'awaiting_attestation'")) {
@@ -209,20 +211,20 @@ beforeEach(() => {
 });
 
 describe("Stellar-to-Base CCTP destination reservation", () => {
-  it("does not prepare a second mint while a repeated callback's submission lease is active", async () => {
+  it("verifies Circle's forwarded mint and does not reserve a second destination transaction", async () => {
     const input = {
       paymentId: PAYMENT_ID,
       stellarSourceTransactionHash: STELLAR_SOURCE_HASH,
       stellarRpc: { getTransaction: vi.fn() } as never,
       config,
+      baseRpc: mintRpc(),
     };
     const first = await prepareStellarToBaseCctpDestination(input);
     const duplicate = await prepareStellarToBaseCctpDestination(input);
 
-    expect(first.status).toBe("ready");
+    expect(first.status).toBe("completed");
     expect(duplicate).toEqual({ status: "in_progress" });
-    expect(first.transactionTo).toBe("0xE737e5cEBEEBa77EFE34D4aa090756590b1CE275");
-    expect(first.transactionData).toMatch(/^0x57ecfd28/);
+    expect(first.destinationTransactionHash).toBe(DESTINATION_HASH);
     expect(mocks.transitionQuery).toContain("FROM payment ON CONFLICT");
   });
 
@@ -233,9 +235,54 @@ describe("Stellar-to-Base CCTP destination reservation", () => {
       stellarSourceTransactionHash: STELLAR_SOURCE_HASH,
       stellarRpc: { getTransaction: vi.fn() } as never,
       config,
+      baseRpc: mintRpc(),
     })).resolves.toEqual({ status: "in_progress" });
     expect(mocks.transitionQuery).toContain("FOR UPDATE OF p, o");
     expect(mocks.transitionQuery).toContain("FROM payment ON CONFLICT");
+  });
+
+  it("refuses to fall back to a user-submitted Base mint when Circle did not forward", async () => {
+    mocks.getCircleCctpStatus.mockResolvedValue({
+      status: "complete",
+      sourceTransactionHash: STELLAR_SOURCE_HASH,
+      message: cctpMessage(),
+      attestation: `0x${"c".repeat(130)}`,
+      messageHash: "1".repeat(64),
+      attestationHash: "2".repeat(64),
+    });
+    await expect(prepareStellarToBaseCctpDestination({
+      paymentId: PAYMENT_ID,
+      stellarSourceTransactionHash: STELLAR_SOURCE_HASH,
+      stellarRpc: { getTransaction: vi.fn() } as never,
+      config,
+      baseRpc: mintRpc(),
+    })).rejects.toThrow("did not return the forwarded Base transaction");
+  });
+
+  it("keeps a reserved forwarded hash pending until it is visible, then verifies it", async () => {
+    mocks.status = "destination_prepared";
+    mocks.destinationHash = DESTINATION_HASH;
+    const baseInput = {
+      paymentId: PAYMENT_ID,
+      stellarSourceTransactionHash: STELLAR_SOURCE_HASH,
+      stellarRpc: { getTransaction: vi.fn() } as never,
+      config,
+    };
+    await expect(prepareStellarToBaseCctpDestination({
+      ...baseInput,
+      baseRpc: { request: vi.fn().mockResolvedValue(null) } as unknown as BaseRpc,
+    })).resolves.toEqual({
+      status: "pending",
+      sourceTransactionHash: STELLAR_SOURCE_HASH,
+      destinationTransactionHash: DESTINATION_HASH,
+    });
+    await expect(prepareStellarToBaseCctpDestination({
+      ...baseInput,
+      baseRpc: mintRpc(),
+    })).resolves.toEqual({
+      status: "completed",
+      destinationTransactionHash: DESTINATION_HASH,
+    });
   });
 
   it("does not regress an active mint reservation when a late Circle poll says pending", async () => {
@@ -244,8 +291,9 @@ describe("Stellar-to-Base CCTP destination reservation", () => {
       stellarSourceTransactionHash: STELLAR_SOURCE_HASH,
       stellarRpc: { getTransaction: vi.fn() } as never,
       config,
+      baseRpc: mintRpc(),
     };
-    expect((await prepareStellarToBaseCctpDestination(input)).status).toBe("ready");
+    expect((await prepareStellarToBaseCctpDestination(input)).status).toBe("completed");
     mocks.getCircleCctpStatus.mockResolvedValue({ status: "pending", sourceTransactionHash: STELLAR_SOURCE_HASH });
     expect(await prepareStellarToBaseCctpDestination(input)).toEqual({ status: "pending" });
     expect(mocks.status).toBe("destination_prepared");
@@ -331,6 +379,7 @@ describe("Stellar-to-Base CCTP destination reservation", () => {
       attestation: `0x${"c".repeat(130)}`,
       messageHash: "1".repeat(64),
       attestationHash: "2".repeat(64),
+      forwardTransactionHash: DESTINATION_HASH,
     });
 
     await expect(prepareStellarToBaseCctpDestination({
@@ -338,6 +387,7 @@ describe("Stellar-to-Base CCTP destination reservation", () => {
       stellarSourceTransactionHash: STELLAR_SOURCE_HASH,
       stellarRpc: { getTransaction: vi.fn() } as never,
       config,
+      baseRpc: mintRpc(),
     })).rejects.toThrow("Circle attestation does not match the persisted Stellar burn intent");
   });
 
@@ -358,12 +408,14 @@ describe("Stellar-to-Base CCTP destination reservation", () => {
       attestation: `0x${"c".repeat(130)}`,
       messageHash: "1".repeat(64),
       attestationHash: "2".repeat(64),
+      forwardTransactionHash: DESTINATION_HASH,
     });
     await expect(prepareStellarToBaseCctpDestination({
       paymentId: PAYMENT_ID,
       stellarSourceTransactionHash: STELLAR_SOURCE_HASH,
       stellarRpc: { getTransaction: vi.fn() } as never,
       config,
+      baseRpc: mintRpc(),
     })).rejects.toThrow("Circle attestation does not match the persisted Stellar burn intent");
   });
 });

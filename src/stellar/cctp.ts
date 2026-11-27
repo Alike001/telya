@@ -25,6 +25,10 @@ import {
 export const CCTP_STANDARD_FINALITY_THRESHOLD = 2_000;
 export const CCTP_BASE_DOMAIN = 6;
 export const CCTP_STELLAR_DOMAIN = 27;
+export const CCTP_FORWARDING_SERVICE_HOOK = Buffer.from(
+  "636374702d666f72776172640000000000000000000000000000000000000000",
+  "hex",
+);
 
 export interface StellarCctpConfig {
   readonly rpcUrl: string;
@@ -235,6 +239,7 @@ export function prepareStellarCctpBurn(
       xdr.ScVal.scvBytes(zeroBytes32()),
       nativeToScVal(maxFee.raw, { type: "i128" }),
       xdr.ScVal.scvU32(CCTP_STANDARD_FINALITY_THRESHOLD),
+      xdr.ScVal.scvBytes(CCTP_FORWARDING_SERVICE_HOOK),
     ],
   };
 }
@@ -262,7 +267,7 @@ export async function submitStellarCctpBurn(input: {
   });
   const result = await input.kit.executeAndSubmit(
     checked.tokenMessenger,
-    "deposit_for_burn",
+    "deposit_for_burn_with_hook",
     [...burn.targetArgs],
     { forceMethod: "relayer", resolveContextRuleIds: () => [0] },
   );
@@ -385,7 +390,7 @@ export async function verifyStellarCctpBurn(input: {
     invoke.functionName().toString() === "execute" &&
     args.length === 3 &&
     scAddress(args[0]!) === checked.tokenMessenger &&
-    scValToNative(args[1]!) === "deposit_for_burn" &&
+    scValToNative(args[1]!) === "deposit_for_burn_with_hook" &&
     targetArgs.length === expected.targetArgs.length &&
     targetArgs.every((value, index) =>
       Buffer.from(value.toXDR()).equals(Buffer.from(expected.targetArgs[index]!.toXDR())),

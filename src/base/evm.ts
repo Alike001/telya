@@ -658,6 +658,7 @@ export interface ParsedCctpMessage {
   readonly maxFee: bigint;
   readonly feeExecuted: bigint;
   readonly expirationBlock: bigint;
+  readonly hookData: string;
 }
 
 export function parseCctpMessage(message: string): ParsedCctpMessage {
@@ -686,5 +687,6 @@ export function parseCctpMessage(message: string): ParsedCctpMessage {
     maxFee: BigInt(`0x${body.slice(132 * 2, 164 * 2)}`),
     feeExecuted: BigInt(`0x${body.slice(164 * 2, 196 * 2)}`),
     expirationBlock: BigInt(`0x${body.slice(196 * 2, 228 * 2)}`),
+    hookData: `0x${body.slice(228 * 2)}`,
   };
 }

@@ -28,6 +28,7 @@ describe("Circle CCTP Testnet status", () => {
         attestation: ATTESTATION,
         status: "complete",
         cctpVersion: 2,
+        forwardTxHash: `0x${"d".repeat(64)}`,
       }],
     }));
     await expect(getCircleCctpStatus({
@@ -41,7 +42,26 @@ describe("Circle CCTP Testnet status", () => {
       attestation: ATTESTATION,
       messageHash: expect.stringMatching(/^[0-9a-f]{64}$/),
       attestationHash: expect.stringMatching(/^[0-9a-f]{64}$/),
+      forwardTransactionHash: `0x${"d".repeat(64)}`,
     });
+  });
+
+  it("rejects a malformed forwarding transaction hash", async () => {
+    const fetcher = vi.fn().mockResolvedValue(Response.json({
+      sourceTxHash: SOURCE_TX,
+      messages: [{
+        message: MESSAGE,
+        eventNonce: "9",
+        attestation: ATTESTATION,
+        status: "complete",
+        forwardTxHash: "not-a-hash",
+      }],
+    }));
+    await expect(getCircleCctpStatus({
+      sourceDomain: 27,
+      sourceTransactionHash: SOURCE_TX,
+      fetcher,
+    })).rejects.toThrow("forwarding transaction hash is invalid");
   });
 
   it("rejects a response for another source transaction and refuses a mainnet API host", async () => {
@@ -80,6 +100,42 @@ describe("Circle CCTP Standard Transfer fee quote", () => {
       `https://iris-api-sandbox.circle.com/v2/burn/USDC/fees/${route.sourceDomain}/${route.destinationDomain}`,
     );
   });
+
+  it("returns the exact Standard Forwarding Service quote", async () => {
+    const fetcher = vi.fn().mockResolvedValue(Response.json([
+      { finalityThreshold: 1_000, minimumFee: 0, forwardFee: { med: 52_100 } },
+      { finalityThreshold: 2_000, minimumFee: 0, forwardFee: { med: 52_683 } },
+    ]));
+    await expect(getCircleCctpStandardFeeQuote({
+      sourceDomain: 27,
+      destinationDomain: 6,
+      forward: true,
+      fetcher,
+    })).resolves.toEqual({
+      sourceDomain: 27,
+      destinationDomain: 6,
+      finalityThreshold: 2_000,
+      minimumFeeBps: "0",
+      forwardFeeAtomic: "52683",
+    });
+    expect(String(fetcher.mock.calls[0]?.[0])).toBe(
+      "https://iris-api-sandbox.circle.com/v2/burn/USDC/fees/27/6?forward=true",
+    );
+  });
+
+  it.each([undefined, -1, 1.5, "01", "not-a-fee"])(
+    "rejects malformed Forwarding Service median fee %s",
+    async (med) => {
+      await expect(getCircleCctpStandardFeeQuote({
+        sourceDomain: 27,
+        destinationDomain: 6,
+        forward: true,
+        fetcher: vi.fn().mockResolvedValue(Response.json([
+          { finalityThreshold: 2_000, minimumFee: 0, forwardFee: { med } },
+        ])),
+      })).rejects.toThrow("Forwarding Service fee");
+    },
+  );
 
   it.each([
     { name: "no standard entry", payload: [{ finalityThreshold: 1_000, minimumFee: 1 }] },
