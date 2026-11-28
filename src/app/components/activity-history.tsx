@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { PersistedPayment } from "../../domain/payment-activity";
 import {
   CheckCircle2,
+  Clock,
   History,
   Loader2,
   Search,
@@ -23,15 +24,16 @@ export function ActivityHistory({
   onSelectPayment,
   onOpenTimeline,
 }: ActivityHistoryProps) {
-  const [filter, setFilter] = useState<"all" | "completed" | "in_progress" | "failed">("all");
+  const [filter, setFilter] = useState<"all" | "completed" | "awaiting_confirmation" | "in_progress" | "failed">("all");
   const [searchQuery, setSearchQuery] = useState("");
 
   const filteredPayments = payments.filter((payment) => {
     // Filter by status category
     if (filter === "completed" && payment.status !== "completed") return false;
+    if (filter === "awaiting_confirmation" && payment.status !== "awaiting_confirmation") return false;
     if (
       filter === "in_progress" &&
-      (payment.status === "completed" || payment.status === "failed")
+      (payment.status === "completed" || payment.status === "failed" || payment.status === "awaiting_confirmation")
     ) {
       return false;
     }
@@ -81,6 +83,13 @@ export function ActivityHistory({
           </button>
           <button
             type="button"
+            className={`filter-chip ${filter === "awaiting_confirmation" ? "active" : ""}`}
+            onClick={() => setFilter("awaiting_confirmation")}
+          >
+            Awaiting Confirmation
+          </button>
+          <button
+            type="button"
             className={`filter-chip ${filter === "in_progress" ? "active" : ""}`}
             onClick={() => setFilter("in_progress")}
           >
@@ -112,7 +121,8 @@ export function ActivityHistory({
           filteredPayments.map((payment) => {
             const isCompleted = payment.status === "completed";
             const isFailed = payment.status === "failed";
-            const isInProgress = !isCompleted && !isFailed;
+            const isAwaitingConfirmation = payment.status === "awaiting_confirmation";
+            const isInProgress = !isCompleted && !isFailed && !isAwaitingConfirmation;
             const isSelected = payment.id === activePaymentId;
 
             const routeLabel =
@@ -177,6 +187,10 @@ export function ActivityHistory({
                     ) : isFailed ? (
                       <span className="status-badge failed">
                         <XCircle className="status-mini-icon" /> Failed
+                      </span>
+                    ) : isAwaitingConfirmation ? (
+                      <span className="status-badge awaiting-confirmation">
+                        <Clock className="status-mini-icon" /> Awaiting Confirmation
                       </span>
                     ) : (
                       <span className="status-badge in-progress">
