@@ -35,4 +35,4 @@ export type {
   WalletAddress,
   WalletKind,
   WalletStatus,
-} from "./contracts";
+} from "./contracts.ts";

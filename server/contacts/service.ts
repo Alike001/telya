@@ -1,7 +1,7 @@
 import { StrKey } from "@stellar/stellar-sdk/base";
-import type { AuthenticatedUser } from "../auth/privy.js";
-import { getSqlClient } from "../db/client.js";
-import type { ContactDestination, Network, RecipientReference } from "../../src/domain/contracts.js";
+import type { AuthenticatedUser } from "../auth/privy.ts";
+import { getSqlClient } from "../db/client.ts";
+import type { ContactDestination, Network, RecipientReference } from "../../src/domain/contracts.ts";
 
 export type ContactRecord = {
   readonly id: string;
