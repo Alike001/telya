@@ -15,9 +15,9 @@ type DockTab = {
   readonly icon: React.ComponentType<{ className?: string }>;
 };
 
-const DOCK_TABS: readonly DockTab[] = [
+export const DOCK_TABS: readonly DockTab[] = [
   { id: "home", label: "Home", href: "#top", icon: Home },
-  { id: "transfer", label: "Transfer", href: "#route-preview", icon: ArrowLeftRight },
+  { id: "transfer", label: "Transfer", href: "#composer", icon: ArrowLeftRight },
   { id: "agent-pass", label: "Agent Pass", href: "#agent-pass", icon: KeyRound },
   { id: "activity", label: "Activity", href: "#activity", icon: Clock },
 ];

@@ -1,4 +1,4 @@
-import { authenticateRequest } from "../auth/privy.js";
+import { authenticateRequest } from "../auth/privy.ts";
 
 const GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions";
 const DEFAULT_INTENT_MODEL = "openai/gpt-oss-20b";

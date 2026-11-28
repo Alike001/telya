@@ -1,7 +1,10 @@
+import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { SiteHeader } from "./components/site-header";
 import { MobileBottomDock } from "./components/mobile-bottom-dock";
-import { StellarWalletPanel } from "./stellar-wallet-panel";
+import { ConversationalHome } from "./components/conversational-home";
+import { PaymentActivityPanel } from "./components/payment-activity-panel";
+import { AccountToolsPanel } from "./components/account-tools-panel";
 
 const routes = [
   ["Stellar", "Stellar", "Direct USDC"],
@@ -25,63 +28,29 @@ export default function HomePage() {
             outcome.
           </p>
           <div className="hero-actions">
-            <a className="primary-action" href="#route-preview">
-              <span>See the route preview</span>
+            <Link className="primary-action" href="/onboarding">
+              <span>Get started with Passkey</span>
               <ArrowRight className="inline-arrow" aria-hidden="true" />
+            </Link>
+            <a className="secondary-action" href="#composer">
+              <span>Try conversational payment</span>
             </a>
-            <span className="build-note">Public Build Week shell</span>
           </div>
         </div>
 
-        <div className="route-stage" id="route-preview" aria-label="Route preview">
-          <div className="dot-field" aria-hidden="true" />
-          <article className="route-card">
-            <div className="route-card-header">
-              <div>
-                <span className="card-kicker">Route preview</span>
-                <strong>Send @alice 5 USDC</strong>
-              </div>
-              <span className="preview-badge">Not submitted</span>
-            </div>
-
-            <div className="route-path" aria-label="Base to Stellar through Circle CCTP">
-              <div className="route-node">
-                <span>From</span>
-                <strong>Base</strong>
-              </div>
-              <div className="route-rail">
-                <span className="rail-line" aria-hidden="true" />
-                <small>Circle CCTP</small>
-              </div>
-              <div className="route-node destination">
-                <span>To</span>
-                <strong>Stellar</strong>
-              </div>
-            </div>
-
-            <dl className="route-details">
-              <div>
-                <dt>Recipient gets</dt>
-                <dd>5 USDC</dd>
-              </div>
-              <div>
-                <dt>Recipient</dt>
-                <dd>@alice</dd>
-              </div>
-              <div>
-                <dt>Completion</dt>
-                <dd>Recipient + amount verified</dd>
-              </div>
-            </dl>
-          </article>
+        {/* Conversational Home & Payment Review Surface */}
+        <div className="route-stage" id="composer" aria-label="Conversational payment surface">
+          <ConversationalHome />
         </div>
       </section>
 
-      <div id="agent-pass">
-        <StellarWalletPanel />
-      </div>
+      <AccountToolsPanel />
 
-      <section className="trust-section shell" id="activity" aria-labelledby="trust-title">
+      <section className="activity-section shell" id="activity" aria-label="Authenticated payment activity">
+        <PaymentActivityPanel />
+      </section>
+
+      <section className="trust-section shell" aria-labelledby="trust-title">
         <p className="eyebrow">One rule at every stage</p>
         <div className="trust-grid">
           <h2 id="trust-title">Where is my money right now?</h2>
@@ -117,7 +86,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      <footer className="site-footer shell" id="contacts">
+      <footer className="site-footer shell">
         <div>
           <strong>Telya</strong>
           <p>Built on Stellar Testnet and Base Sepolia.</p>

@@ -1,0 +1,349 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { rpc } from "@stellar/stellar-sdk";
+
+vi.mock("server-only", () => ({}));
+
+const mocks = vi.hoisted(() => ({
+  parse: vi.fn(),
+  validate: vi.fn(),
+  submit: vi.fn(),
+  reserve: vi.fn(),
+  recordBurnAuthorization: vi.fn(),
+  recordBurnSubmission: vi.fn(),
+  recordApprovalAuthorization: vi.fn(),
+  recordApprovalSubmission: vi.fn(),
+  assertApprovalLink: vi.fn(),
+  completeRequest: vi.fn(),
+  recordTransferAuthorization: vi.fn(),
+  recordTransferSubmission: vi.fn(),
+  completeTransfer: vi.fn(),
+  recordAgentPassAuthorization: vi.fn(),
+  completeAgentPassCreation: vi.fn(),
+  completeAgentPassRevocation: vi.fn(),
+  assertAgentPass: vi.fn(),
+  recordAgentSpend: vi.fn(),
+  identity: vi.fn(),
+  authenticate: vi.fn(),
+  validateCctpPayment: vi.fn(),
+  linkCctpPayment: vi.fn(),
+}));
+
+vi.mock("../../../../stellar/relayer", () => ({
+  agentPassRuleIdFromReturnValue: vi.fn(),
+  parseStellarRelayerRequest: mocks.parse,
+  StellarRelayerError: class StellarRelayerError extends Error {
+    constructor(
+      readonly code: string,
+      message: string,
+      readonly status: number,
+    ) {
+      super(message);
+    }
+  },
+  submitStellarRelayerTransaction: mocks.submit,
+  validateStellarRelayerSubmission: mocks.validate,
+}));
+
+vi.mock("../../../../stellar/usdc", () => ({
+  stellarUsdcAmountFromRawUnits: vi.fn(),
+  verifyStellarUsdcTransfer: vi.fn(),
+}));
+
+vi.mock("../../../../server/stellar-relayer-requests", () => ({
+  assertActiveAgentPassForTransfer: mocks.assertAgentPass,
+  assertStellarPaymentRequestLink: vi.fn(),
+  completeStellarAgentPassCreation: mocks.completeAgentPassCreation,
+  completeStellarAgentPassRevocation: mocks.completeAgentPassRevocation,
+  completeStellarUsdcTransferRequest: mocks.completeTransfer,
+  completeStellarRelayerRequest: mocks.completeRequest,
+  recordStellarCctpBurnAuthorization: mocks.recordBurnAuthorization,
+  recordStellarCctpBurnSubmission: mocks.recordBurnSubmission,
+  recordStellarCctpApprovalAuthorization: mocks.recordApprovalAuthorization,
+  recordStellarCctpApprovalSubmission: mocks.recordApprovalSubmission,
+  assertStellarCctpApprovalRequestLink: mocks.assertApprovalLink,
+  recordStellarAgentPassAuthorization: mocks.recordAgentPassAuthorization,
+  recordStellarUsdcTransferAuthorization: mocks.recordTransferAuthorization,
+  recordStellarUsdcTransferSubmission: mocks.recordTransferSubmission,
+  recordVerifiedAgentPassSpend: mocks.recordAgentSpend,
+  reserveStellarRelayerRequest: mocks.reserve,
+  stellarRelayerRequestIdentity: mocks.identity,
+  linkStellarPaymentAuthorization: vi.fn(),
+  linkStellarCctpPaymentAuthorization: mocks.linkCctpPayment,
+  validateStellarCctpPaymentAuthorization: mocks.validateCctpPayment,
+  validateStellarPaymentAuthorization: vi.fn(),
+}));
+
+vi.mock("../../../../../server/auth/privy", () => ({
+  AuthenticationError: class AuthenticationError extends Error {},
+  AuthenticationUnavailableError: class AuthenticationUnavailableError extends Error {},
+  authenticateRequest: mocks.authenticate,
+}));
+
+import { handleStellarRelayerRequest } from "./handler";
+
+const TRANSACTION_HASH = "a".repeat(64);
+
+describe("shared Stellar relayer CCTP integration", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv("CCTP_STELLAR_TOKEN_MESSENGER", "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM");
+    vi.stubEnv("CCTP_BASE_DOMAIN", "6");
+    vi.stubEnv("STELLAR_RPC_URL", "https://soroban-testnet.stellar.org");
+    mocks.parse.mockReturnValue({ func: "signed-cctp-burn", auth: ["passkey"] });
+    mocks.validate.mockReturnValue({ kind: "cctp_burn", smartAccount: "smart-account" });
+    mocks.identity.mockReturnValue({ requestHash: "request-hash", clientKeyHash: "client-key-hash" });
+    mocks.reserve.mockResolvedValue({ decision: "reserved" });
+    mocks.submit.mockResolvedValue({ hash: TRANSACTION_HASH, ledger: 123, returnValue: null });
+  });
+
+  it("persists source authorization before broadcast and the submitted burn before relayer success", async () => {
+    const paymentContext = {
+      userId: "11111111-1111-4111-8111-111111111111",
+      paymentId: "22222222-2222-4222-8222-222222222222",
+    };
+    const response = await handleStellarRelayerRequest(new Request(
+      "https://telya.test/api/stellar/relayer/payment",
+      { method: "POST", body: JSON.stringify({ func: "signed", auth: ["passkey"] }) },
+    ), paymentContext);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      success: true,
+      hash: TRANSACTION_HASH,
+      status: "SUCCESS",
+    });
+    expect(mocks.validate).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      cctpTokenMessenger: "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+      baseDomain: 6,
+    }));
+    expect(mocks.recordBurnAuthorization).toHaveBeenCalledWith(
+      "request-hash",
+      expect.objectContaining({ kind: "cctp_burn" }),
+    );
+    expect(mocks.recordBurnSubmission).toHaveBeenCalledWith("request-hash", {
+      transactionHash: TRANSACTION_HASH,
+      ledger: 123,
+    });
+    expect(mocks.completeRequest).toHaveBeenCalledWith("request-hash", {
+      status: "succeeded",
+      transactionHash: TRANSACTION_HASH,
+    });
+    expect(mocks.recordBurnAuthorization.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.submit.mock.invocationCallOrder[0]!,
+    );
+    expect(mocks.submit.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.recordBurnSubmission.mock.invocationCallOrder[0]!,
+    );
+    expect(mocks.recordBurnSubmission.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.completeRequest.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("rejects a signed CCTP burn on the generic relayer before reservation", async () => {
+    const response = await handleStellarRelayerRequest(new Request(
+      "https://telya.test/api/stellar/relayer",
+      { method: "POST", body: JSON.stringify({ func: "signed", auth: ["passkey"] }) },
+    ));
+    expect(response.status).toBe(401);
+    expect(mocks.reserve).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it("rejects a signed direct USDC transfer on the generic relayer before reservation", async () => {
+    mocks.validate.mockReturnValueOnce({
+      kind: "usdc_transfer",
+      smartAccount: "smart-account",
+    });
+    const response = await handleStellarRelayerRequest(new Request(
+      "https://telya.test/api/stellar/relayer",
+      { method: "POST", body: JSON.stringify({ func: "signed", auth: ["passkey"] }) },
+    ));
+    expect(response.status).toBe(401);
+    expect(mocks.reserve).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it("binds the reviewed CCTP payment before broadcasting the burn", async () => {
+    const paymentContext = {
+      userId: "11111111-1111-4111-8111-111111111111",
+      paymentId: "22222222-2222-4222-8222-222222222222",
+    };
+    const response = await handleStellarRelayerRequest(new Request(
+      "https://telya.test/api/stellar/relayer/payment",
+      { method: "POST", body: JSON.stringify({ func: "signed", auth: ["passkey"] }) },
+    ), paymentContext);
+
+    expect(response.status).toBe(200);
+    expect(mocks.validateCctpPayment).toHaveBeenCalledWith(
+      paymentContext.userId,
+      paymentContext.paymentId,
+      expect.objectContaining({ kind: "cctp_burn" }),
+    );
+    expect(mocks.linkCctpPayment).toHaveBeenCalledWith(
+      paymentContext.userId,
+      paymentContext.paymentId,
+      "request-hash",
+      expect.objectContaining({ kind: "cctp_burn" }),
+    );
+    expect(mocks.validateCctpPayment.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.submit.mock.invocationCallOrder[0]!,
+    );
+    expect(mocks.linkCctpPayment.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.submit.mock.invocationCallOrder[0]!,
+    );
+  });
+
+  it("binds a separate, short-lived approval before broadcast and rejects a burn handoff", async () => {
+    const ledger = vi.spyOn(rpc.Server.prototype, "getLatestLedger")
+      .mockResolvedValue({ sequence: 5_964_700 } as never);
+    mocks.validate.mockReturnValue({
+      kind: "cctp_approval", smartAccount: "smart-account",
+      expirationLedger: 5_965_420,
+    });
+    const context = {
+      userId: "11111111-1111-4111-8111-111111111111",
+      paymentId: "22222222-2222-4222-8222-222222222222",
+      purpose: "cctp_approval" as const,
+    };
+    const response = await handleStellarRelayerRequest(new Request(
+      "https://telya.test/api/stellar/relayer/payment",
+      { method: "POST", body: JSON.stringify({ func: "signed", auth: ["passkey"] }) },
+    ), context);
+    expect(response.status).toBe(200);
+    expect(mocks.recordApprovalAuthorization).toHaveBeenCalledWith(
+      context.userId, context.paymentId, "request-hash", expect.objectContaining({ kind: "cctp_approval" }),
+    );
+    expect(mocks.recordApprovalAuthorization.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.submit.mock.invocationCallOrder[0]!,
+    );
+    expect(mocks.recordApprovalSubmission).toHaveBeenCalledWith("request-hash", TRANSACTION_HASH);
+    mocks.reserve.mockClear();
+    mocks.submit.mockClear();
+    const wrongPurpose = await handleStellarRelayerRequest(new Request(
+      "https://telya.test/api/stellar/relayer/payment",
+      { method: "POST", body: JSON.stringify({ func: "signed", auth: ["passkey"] }) },
+    ), { ...context, purpose: "payment" });
+    expect(wrongPurpose.status).toBe(409);
+    expect(mocks.reserve).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+    ledger.mockRestore();
+  });
+
+  it("rejects expired approval and replays an already recorded approval without another submission", async () => {
+    const ledger = vi.spyOn(rpc.Server.prototype, "getLatestLedger")
+      .mockResolvedValue({ sequence: 5_964_700 } as never);
+    const context = {
+      userId: "11111111-1111-4111-8111-111111111111",
+      paymentId: "22222222-2222-4222-8222-222222222222",
+      purpose: "cctp_approval" as const,
+    };
+    mocks.validate.mockReturnValue({ kind: "cctp_approval", expirationLedger: 5_964_700 });
+    const expired = await handleStellarRelayerRequest(new Request("https://telya.test/api/stellar/relayer/payment", {
+      method: "POST", body: JSON.stringify({ func: "signed", auth: ["passkey"] }),
+    }), context);
+    expect(expired.status).toBe(409);
+    expect(mocks.reserve).not.toHaveBeenCalled();
+    mocks.validate.mockReturnValue({ kind: "cctp_approval", expirationLedger: 5_965_000 });
+    mocks.reserve.mockResolvedValueOnce({ decision: "succeeded", transactionHash: TRANSACTION_HASH });
+    const replay = await handleStellarRelayerRequest(new Request("https://telya.test/api/stellar/relayer/payment", {
+      method: "POST", body: JSON.stringify({ func: "signed", auth: ["passkey"] }),
+    }), context);
+    expect(replay.status).toBe(200);
+    expect(mocks.assertApprovalLink).toHaveBeenCalledWith(context.userId, context.paymentId, "request-hash");
+    expect(mocks.submit).not.toHaveBeenCalled();
+    ledger.mockRestore();
+  });
+});
+
+describe("authenticated smart-account deployment relayer boundary", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.parse.mockReturnValue({ func: "signed-deployment", auth: ["passkey"] });
+    mocks.validate.mockReturnValue({ kind: "deployment" });
+    mocks.identity.mockReturnValue({ requestHash: "request-hash", clientKeyHash: "client-key-hash" });
+    mocks.reserve.mockResolvedValue({ decision: "reserved" });
+    mocks.submit.mockResolvedValue({ hash: TRANSACTION_HASH, ledger: 123, returnValue: null });
+  });
+
+  it("rejects deployment without a consumed authenticated handoff", async () => {
+    const response = await handleStellarRelayerRequest(new Request(
+      "https://telya.test/api/stellar/relayer",
+      { method: "POST", body: JSON.stringify({ func: "signed", auth: ["passkey"] }) },
+    ));
+    expect(response.status).toBe(401);
+    expect(mocks.reserve).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it("submits deployment only with its authenticated one-use context", async () => {
+    const response = await handleStellarRelayerRequest(new Request(
+      "https://telya.test/api/stellar/relayer/deployment",
+      { method: "POST", body: JSON.stringify({ func: "signed", auth: ["passkey"] }) },
+    ), { deployment: { userId: "11111111-1111-4111-8111-111111111111" } });
+    expect(response.status).toBe(200);
+    expect(mocks.submit).toHaveBeenCalledOnce();
+    expect(mocks.completeRequest).toHaveBeenCalledWith("request-hash", {
+      status: "succeeded",
+      transactionHash: TRANSACTION_HASH,
+    });
+  });
+});
+
+describe("authenticated Agent Pass relayer boundary", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.parse.mockReturnValue({ func: "signed-agent-pass", auth: ["passkey"] });
+    mocks.validate.mockReturnValue({
+      kind: "agent_pass_revoke",
+      smartAccount: "smart-account",
+      contextRuleId: 7,
+    });
+    mocks.identity.mockReturnValue({ requestHash: "request-hash", clientKeyHash: "client-key-hash" });
+    mocks.reserve.mockResolvedValue({ decision: "reserved" });
+    mocks.submit.mockResolvedValue({ hash: TRANSACTION_HASH, ledger: 123, returnValue: null });
+  });
+
+  it("rejects an owner-signed Agent Pass request without authenticated owner context", async () => {
+    const response = await handleStellarRelayerRequest(new Request(
+      "https://telya.test/api/stellar/relayer",
+      { method: "POST", body: JSON.stringify({ func: "signed", auth: ["passkey"] }) },
+    ));
+    expect(response.status).toBe(401);
+    expect(mocks.reserve).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it("rejects a signed operation that differs from its one-use authorization", async () => {
+    const response = await handleStellarRelayerRequest(new Request(
+      "https://telya.test/api/stellar/relayer/agent-pass",
+      { method: "POST", body: JSON.stringify({ func: "signed", auth: ["passkey"] }) },
+    ), { agentPass: {
+      userId: "user",
+      kind: "revoke",
+      smartAccount: "smart-account",
+      contextRuleId: 8,
+    } });
+    expect(response.status).toBe(409);
+    expect(mocks.reserve).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  });
+
+  it("persists and submits only the exact authenticated Agent Pass operation", async () => {
+    const response = await handleStellarRelayerRequest(new Request(
+      "https://telya.test/api/stellar/relayer/agent-pass",
+      { method: "POST", body: JSON.stringify({ func: "signed", auth: ["passkey"] }) },
+    ), { agentPass: {
+      userId: "user",
+      kind: "revoke",
+      smartAccount: "smart-account",
+      contextRuleId: 7,
+    } });
+    expect(response.status).toBe(200);
+    expect(mocks.recordAgentPassAuthorization).toHaveBeenCalledBefore(mocks.submit);
+    expect(mocks.completeAgentPassRevocation).toHaveBeenCalledWith(
+      "request-hash",
+      expect.objectContaining({ contextRuleId: 7 }),
+      TRANSACTION_HASH,
+    );
+  });
+});

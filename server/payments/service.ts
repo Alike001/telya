@@ -1,7 +1,7 @@
-import type { AuthenticatedUser } from "../auth/privy.js";
-import type { Fee, Network } from "../../src/domain/contracts.js";
-import { getSqlClient } from "../db/client.js";
-import type { RouteResult, VerifiedSourceWallet } from "./routing.js";
+import type { AuthenticatedUser } from "../auth/privy.ts";
+import type { Fee, Network } from "../../src/domain/contracts.ts";
+import { getSqlClient } from "../db/client.ts";
+import type { RouteResult, VerifiedSourceWallet } from "./routing.ts";
 
 export type FeeQuoteProvider = (input: {
   readonly route: Extract<RouteResult, { status: "resolved" }>["route"];
@@ -76,9 +76,9 @@ function mapRail(rail: string): string {
   }
 }
 
-function validateFeeList(input: readonly Fee[] | null): readonly Fee[] | null {
+export function validateFeeList(input: readonly Fee[] | null): readonly Fee[] | null {
   if (input === null) return null;
-  if (!Array.isArray(input) || input.length > 12) throw new PaymentInputError("Invalid fee quote");
+  if (!Array.isArray(input) || input.length > 12) throw new PaymentProviderUnavailableError();
   for (const fee of input) {
     if (
       !fee ||
@@ -87,9 +87,80 @@ function validateFeeList(input: readonly Fee[] | null): readonly Fee[] | null {
       typeof fee.amount !== "string" || !/^(?:0|[1-9]\d{0,19})(?:\.\d{1,18})?$/.test(fee.amount) ||
       typeof fee.asset !== "string" || !/^[A-Z0-9]{2,12}$/.test(fee.asset) ||
       typeof fee.label !== "string" || !fee.label.trim() || fee.label.length > 80
-    ) throw new PaymentInputError("Invalid fee quote");
+    ) throw new PaymentProviderUnavailableError();
   }
   return input;
+}
+
+/** Recover an existing payment before consulting live providers on a retry. */
+export async function findPaymentReplay(
+  user: Pick<AuthenticatedUser, "id">,
+  input: CreatePaymentInput,
+): Promise<Record<string, unknown> | null> {
+  const sql = getSqlClient();
+  const rows = await sql`
+    SELECT p.id, p.status, p.route_id, p.source_network, p.destination_network,
+      p.rail, p.recipient_address, p.expected_recipient_amount,
+      p.verified_recipient_address, p.verified_recipient_amount,
+      p.source_transaction_hash, p.destination_transaction_hash,
+      p.failure_code, p.fees, p.route_reasons, p.created_at, p.updated_at,
+      p.conversation_id, p.intent_message_id, m.structured_intent
+    FROM payments p
+    JOIN messages m ON m.id = p.intent_message_id AND m.conversation_id = p.conversation_id
+    WHERE p.user_id = ${user.id}::uuid AND p.idempotency_key = ${input.idempotencyKey}
+    LIMIT 1
+  `;
+  const payment = rows[0] as Record<string, unknown> | undefined;
+  if (!payment) return null;
+  const saved = payment.structured_intent;
+  const intent = saved && typeof saved === "object" && !Array.isArray(saved)
+    ? saved as Record<string, unknown>
+    : null;
+  const selectedWallet = intent?.selectedSourceWallet;
+  const selectedWalletId = selectedWallet && typeof selectedWallet === "object" && !Array.isArray(selectedWallet)
+    ? (selectedWallet as Record<string, unknown>).id
+    : null;
+  const requestedWalletId = Object.hasOwn(intent ?? {}, "requestedSourceWalletId")
+    ? intent?.requestedSourceWalletId
+    : input.selectedSourceWalletId === null ? null : selectedWalletId;
+  if (
+    String(payment.conversation_id) !== input.conversationId ||
+    String(payment.intent_message_id) !== input.intentMessageId ||
+    intent?.action !== "send" ||
+    intent.amount !== input.intent.amount ||
+    intent.asset !== input.intent.asset ||
+    intent.recipientInput !== input.intent.recipientInput ||
+    intent.requestedSourceNetwork !== input.intent.requestedSourceNetwork ||
+    intent.requestedDestinationNetwork !== input.intent.requestedDestinationNetwork ||
+    intent.inputMode !== input.inputMode ||
+    requestedWalletId !== input.selectedSourceWalletId
+  ) throw new PaymentConflictError("The idempotency key was already used for different payment details");
+  return payment;
+}
+
+function decimal18(value: string): bigint | null {
+  const match = /^(0|[1-9]\d{0,19})(?:\.(\d{1,18}))?$/.exec(value);
+  if (!match) return null;
+  return BigInt(match[1]!) * 10n ** 18n + BigInt((match[2] ?? "").padEnd(18, "0") || "0");
+}
+
+/** Check the source's full USDC spend, including every sender-paid USDC fee. */
+export function paymentSpendFitsBalance(input: {
+  readonly balance: string | null | undefined;
+  readonly expectedRecipientAmount: string;
+  readonly fees: readonly Fee[];
+}): boolean | null {
+  const available = input.balance == null ? null : decimal18(input.balance);
+  const expected = decimal18(input.expectedRecipientAmount);
+  if (available === null || expected === null || expected <= 0n) return null;
+  let spend = expected;
+  for (const fee of input.fees) {
+    if (fee.payer !== "sender" || fee.asset !== "USDC") continue;
+    const amount = decimal18(fee.amount);
+    if (amount === null) return null;
+    spend += amount;
+  }
+  return available >= spend;
 }
 
 export async function getVerifiedSourceWallets(
@@ -138,7 +209,12 @@ function networkIsExplicit(message: string, network: Network, side: "source" | "
   const pair = message.match(/\b(stellar|base)\s*(?:to|->)\s*(stellar|base)\b/i) ??
     message.match(/\bfrom\s+(stellar|base)\b[\s\S]{0,100}?\bon\s+(stellar|base)\b/i);
   if (pair) return (side === "source" ? pair[1] : pair[2])?.toLowerCase() === network;
-  if (side === "source") return new RegExp(`\\bfrom\\s+${network}\\b`, "i").test(message);
+  // Keep this vocabulary aligned with the deterministic intent parser. It
+  // classifies "from", "on", and "via" as explicit source-network wording;
+  // rejecting two of those here would turn a valid saved intent into a 400.
+  if (side === "source") {
+    return new RegExp(`\\b(?:from|on|via)\\s+${network}\\b`, "i").test(message);
+  }
   return new RegExp(`\\b(?:to|on|receive(?:s|d)?\\s+on)\\s+${network}\\b`, "i").test(message);
 }
 
@@ -148,7 +224,6 @@ export async function validatePaymentIntentMessage(
 ): Promise<void> {
   const originalInput = await getOwnedIntentMessage(user.id, input.conversationId, input.intentMessageId);
   if (
-    input.inputMode !== "manual" &&
     (
       !intentAppearsInMessage(originalInput, input.intent.amount, input.intent.recipientInput) ||
       (input.intent.requestedSourceNetwork !== null &&
@@ -185,6 +260,7 @@ export async function createPaymentRecord(
     requestedSourceNetwork: input.intent.requestedSourceNetwork,
     requestedDestinationNetwork: input.intent.requestedDestinationNetwork,
     inputMode: input.inputMode,
+    requestedSourceWalletId: input.selectedSourceWalletId,
     selectedSourceWallet: {
       id: route.sourceWallet.id,
       network: route.sourceWallet.network,
@@ -299,14 +375,6 @@ export async function createPaymentRecord(
               AND m.role = 'user'
               AND (m.structured_intent IS NULL OR m.structured_intent = ${parsedIntent}::jsonb)
           )
-          AND (
-            p.intent_message_id IS NULL
-            OR EXISTS (
-              SELECT 1 FROM messages m
-              WHERE m.id = p.intent_message_id
-                AND m.structured_intent->'selectedSourceWallet'->>'id' = ${route.sourceWallet.id}
-            )
-          )
       ), saved_intent AS (
         UPDATE messages m
         SET structured_intent = ${parsedIntent}::jsonb
@@ -364,60 +432,6 @@ export async function createPaymentRecord(
   return { payment: row, reused: !inserted };
 }
 
-export async function confirmPayment(
-  user: Pick<AuthenticatedUser, "id">,
-  paymentId: string,
-): Promise<Record<string, unknown>> {
-  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(paymentId)) {
-    throw new PaymentInputError("Invalid payment ID");
-  }
-  const sql = getSqlClient();
-  const [, eventRows, recordRows] = await sql.transaction([
-    sql`
-      UPDATE payments
-      SET status = 'authorized', updated_at = now()
-      WHERE id = ${paymentId}::uuid AND user_id = ${user.id}::uuid
-        AND status = 'awaiting_confirmation'
-      RETURNING id
-    `,
-    sql`
-      WITH payment AS MATERIALIZED (
-        SELECT id, status, source_network, conversation_id
-        FROM payments
-        WHERE id = ${paymentId}::uuid AND user_id = ${user.id}::uuid
-        FOR UPDATE
-      ), event AS (
-        INSERT INTO payment_events (payment_id, event_key, stage, status, network, public_message)
-        SELECT id, 'user_authorized', 'authorization', 'authorized', source_network,
-          'You confirmed this payment. It has not been submitted yet.'
-        FROM payment
-        WHERE status = 'authorized'
-        ON CONFLICT (payment_id, event_key) DO NOTHING
-        RETURNING payment_id
-      )
-      INSERT INTO messages (conversation_id, role, content, structured_intent)
-      SELECT payment.conversation_id, 'assistant',
-        'You confirmed this payment. Wallet authorization and transaction submission are still pending.',
-        jsonb_build_object('paymentId', payment.id, 'status', 'authorized')
-      FROM payment
-      JOIN event ON event.payment_id = payment.id
-      RETURNING id
-    `,
-    sql`
-      SELECT id, status, route_id, source_network, destination_network, rail,
-        recipient_address, expected_recipient_amount, fees, route_reasons,
-        created_at, updated_at
-      FROM payments
-      WHERE id = ${paymentId}::uuid AND user_id = ${user.id}::uuid
-    `,
-  ]);
-  void eventRows;
-  const row = (recordRows as Record<string, unknown>[])[0];
-  if (!row) throw new PaymentNotFoundError();
-  if (row.status !== "authorized") throw new PaymentConflictError("Payment is not awaiting confirmation");
-  return row;
-}
-
 export async function getPaymentWithEvents(
   user: Pick<AuthenticatedUser, "id">,
   paymentId: string,
@@ -432,6 +446,18 @@ export async function getPaymentWithEvents(
       p.status,
       p.route_id,
       p.source_network,
+      (
+        SELECT w.address
+        FROM messages m
+        JOIN wallets w ON w.id::text =
+          m.structured_intent->'selectedSourceWallet'->>'id'
+        WHERE m.id = p.intent_message_id
+          AND m.conversation_id = p.conversation_id
+          AND w.user_id = p.user_id
+          AND w.network = p.source_network
+          AND w.verification_status = 'verified'
+        LIMIT 1
+      ) AS source_address,
       p.destination_network,
       p.rail,
       p.recipient_address,
@@ -468,4 +494,47 @@ export async function getPaymentWithEvents(
   const row = rows[0];
   if (!row) throw new PaymentNotFoundError();
   return row as Record<string, unknown>;
+}
+
+/** List the user's persisted payments in stable newest-first order for activity. */
+export async function listPayments(
+  user: Pick<AuthenticatedUser, "id">,
+  options: { beforeId?: string; limit: number },
+): Promise<{ items: Record<string, unknown>[]; nextCursor: string | null }> {
+  const beforeId = options.beforeId ?? "";
+  if (beforeId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(beforeId)) {
+    throw new PaymentInputError("Invalid payment cursor");
+  }
+  if (!Number.isSafeInteger(options.limit) || options.limit < 1 || options.limit > 50) {
+    throw new PaymentInputError("Invalid page size");
+  }
+
+  const sql = getSqlClient();
+  const rows = await sql`
+    WITH cursor_payment AS (
+      SELECT id, created_at
+      FROM payments
+      WHERE id = NULLIF(${beforeId}, '')::uuid AND user_id = ${user.id}::uuid
+    )
+    SELECT
+      p.id, p.status, p.route_id, p.source_network, p.destination_network,
+      p.rail, p.recipient_address, p.expected_recipient_amount,
+      p.verified_recipient_address, p.verified_recipient_amount,
+      p.source_transaction_hash, p.destination_transaction_hash,
+      p.failure_code, p.fees, p.created_at, p.updated_at
+    FROM payments p
+    LEFT JOIN cursor_payment c ON true
+    WHERE p.user_id = ${user.id}::uuid
+      AND (${beforeId} = '' OR (
+        c.id IS NOT NULL AND (p.created_at, p.id) < (c.created_at, c.id)
+      ))
+    ORDER BY p.created_at DESC, p.id DESC
+    LIMIT ${options.limit + 1}
+  `;
+  const items = rows.slice(0, options.limit) as Record<string, unknown>[];
+  const last = items.at(-1);
+  return {
+    items,
+    nextCursor: rows.length > options.limit && last ? String(last.id) : null,
+  };
 }

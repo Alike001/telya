@@ -15,6 +15,8 @@ import {
   parseStellarRelayerRequest,
   validateStellarDeploymentSubmission,
   validateStellarAgentPassSubmission,
+  validateStellarCctpBurnSubmission,
+  validateStellarCctpApprovalSubmission,
   validateStellarUsdcTransferSubmission,
 } from "./relayer";
 
@@ -24,6 +26,7 @@ const ed25519VerifierAddress = StrKey.encodeContract(Buffer.alloc(32, 2));
 const spendingLimitPolicyAddress = StrKey.encodeContract(Buffer.alloc(32, 3));
 const usdcContract = StrKey.encodeContract(Buffer.alloc(32, 5));
 const smartAccount = StrKey.encodeContract(Buffer.alloc(32, 6));
+const cctpTokenMessenger = StrKey.encodeContract(Buffer.alloc(32, 7));
 const recipient = Keypair.random().publicKey();
 
 function externalSigner(verifier: string, keyData: Buffer): xdr.ScVal {
@@ -189,6 +192,17 @@ describe("Stellar deployment relayer boundary", () => {
       "Invalid relayer request",
     );
   });
+
+  it("preserves a valid product payment ID without including it in the signed request identity", () => {
+    const paymentId = "11111111-1111-4111-8111-111111111111";
+    expect(parseStellarRelayerRequest({ ...deploymentSubmission(), paymentId })).toMatchObject({
+      paymentId,
+    });
+    expect(() => parseStellarRelayerRequest({
+      ...deploymentSubmission(),
+      paymentId: "not-a-payment",
+    })).toThrow("Invalid payment ID");
+  });
 });
 
 describe("Stellar USDC relayer boundary", () => {
@@ -265,6 +279,194 @@ describe("Stellar USDC relayer boundary", () => {
       contextRuleId: 2,
       signerAddress: StrKey.encodeEd25519PublicKey(Buffer.alloc(32, 6)),
     });
+  });
+});
+
+function cctpBurnSubmission(overrides: {
+  readonly destinationDomain?: number;
+  readonly finalityThreshold?: number;
+  readonly destinationCaller?: Buffer;
+  readonly mintRecipient?: Buffer;
+  readonly signature?: xdr.ScVal;
+  readonly functionName?: string;
+  readonly hookData?: Buffer;
+} = {}) {
+  const targetArgs = [
+    nativeToScVal(smartAccount, { type: "address" }),
+    nativeToScVal(50_000_000n, { type: "i128" }),
+    xdr.ScVal.scvU32(overrides.destinationDomain ?? 6),
+    xdr.ScVal.scvBytes(
+      overrides.mintRecipient ?? Buffer.concat([Buffer.alloc(12), Buffer.alloc(20, 9)]),
+    ),
+    nativeToScVal(usdcContract, { type: "address" }),
+    xdr.ScVal.scvBytes(overrides.destinationCaller ?? Buffer.alloc(32)),
+    nativeToScVal(100_000n, { type: "i128" }),
+    xdr.ScVal.scvU32(overrides.finalityThreshold ?? 2_000),
+    xdr.ScVal.scvBytes(overrides.hookData ?? Buffer.from(
+      "636374702d666f72776172640000000000000000000000000000000000000000",
+      "hex",
+    )),
+  ];
+  const invoke = new xdr.InvokeContractArgs({
+    contractAddress: Address.fromString(cctpTokenMessenger).toScAddress(),
+    functionName: overrides.functionName ?? "deposit_for_burn_with_hook",
+    args: targetArgs,
+  });
+  const credentials = xdr.SorobanCredentials.sorobanCredentialsAddress(
+    new xdr.SorobanAddressCredentials({
+      address: Address.fromString(smartAccount).toScAddress(),
+      nonce: xdr.Int64.fromString("3"),
+      signatureExpirationLedger: 500,
+      signature: overrides.signature ?? authPayload(),
+    }),
+  );
+  const auth = new xdr.SorobanAuthorizationEntry({
+    credentials,
+    rootInvocation: new xdr.SorobanAuthorizedInvocation({
+      function: xdr.SorobanAuthorizedFunction.sorobanAuthorizedFunctionTypeContractFn(invoke),
+      subInvocations: [],
+    }),
+  });
+  return {
+    func: xdr.HostFunction.hostFunctionTypeInvokeContract(invoke).toXDR("base64"),
+    auth: [auth.toXDR("base64")],
+  };
+}
+
+describe("Stellar CCTP relayer boundary", () => {
+  const options = {
+    usdcContract,
+    webauthnVerifierAddress,
+    cctpTokenMessenger,
+    baseDomain: 6,
+  };
+
+  it("accepts only the exact owner-authorized Standard burn shape", () => {
+    expect(validateStellarCctpBurnSubmission(cctpBurnSubmission(), options)).toMatchObject({
+      kind: "cctp_burn",
+      smartAccount,
+      tokenMessenger: cctpTokenMessenger,
+      burnToken: usdcContract,
+      recipient: `0x${Buffer.alloc(20, 9).toString("hex")}`,
+      amountRaw: 50_000_000n,
+      maxFeeRaw: 100_000n,
+    });
+  });
+
+  it("rejects Fast Transfer and any non-Base destination", () => {
+    expect(() =>
+      validateStellarCctpBurnSubmission(
+        cctpBurnSubmission({ finalityThreshold: 1_000 }),
+        options,
+      ),
+    ).toThrow("Standard Testnet policy");
+    expect(() =>
+      validateStellarCctpBurnSubmission(
+        cctpBurnSubmission({ destinationDomain: 3 }),
+        options,
+      ),
+    ).toThrow("Standard Testnet policy");
+  });
+
+  it("rejects a restricted destination caller or malformed Base recipient", () => {
+    expect(() =>
+      validateStellarCctpBurnSubmission(
+        cctpBurnSubmission({ destinationCaller: Buffer.alloc(32, 1) }),
+        options,
+      ),
+    ).toThrow("Standard Testnet policy");
+    expect(() =>
+      validateStellarCctpBurnSubmission(
+        cctpBurnSubmission({ mintRecipient: Buffer.alloc(32, 1) }),
+        options,
+      ),
+    ).toThrow("Standard Testnet policy");
+  });
+
+  it("rejects an unhooked burn or any non-Circle forwarding hook", () => {
+    expect(() => validateStellarCctpBurnSubmission(
+      cctpBurnSubmission({ functionName: "deposit_for_burn" }),
+      options,
+    )).toThrow("deposit_for_burn_with_hook");
+    expect(() => validateStellarCctpBurnSubmission(
+      cctpBurnSubmission({ hookData: Buffer.alloc(32, 1) }),
+      options,
+    )).toThrow("Standard Testnet policy");
+  });
+
+  it("rejects non-owner authorization", () => {
+    expect(() =>
+      validateStellarCctpBurnSubmission(
+        cctpBurnSubmission({
+          signature: authPayload({
+            verifier: ed25519VerifierAddress,
+            keyData: Buffer.alloc(32, 4),
+            contextRuleId: 2,
+          }),
+        }),
+        options,
+      ),
+    ).toThrow("requires the passkey owner");
+  });
+});
+
+function cctpApprovalSubmission(overrides: {
+  readonly amount?: bigint;
+  readonly spender?: string;
+  readonly expirationLedger?: number;
+  readonly signature?: xdr.ScVal;
+} = {}) {
+  const invoke = new xdr.InvokeContractArgs({
+    contractAddress: Address.fromString(usdcContract).toScAddress(),
+    functionName: "approve",
+    args: [
+      nativeToScVal(smartAccount, { type: "address" }),
+      nativeToScVal(overrides.spender ?? cctpTokenMessenger, { type: "address" }),
+      nativeToScVal(overrides.amount ?? 1_531_450n, { type: "i128" }),
+      xdr.ScVal.scvU32(overrides.expirationLedger ?? 5_970_000),
+    ],
+  });
+  const auth = new xdr.SorobanAuthorizationEntry({
+    credentials: xdr.SorobanCredentials.sorobanCredentialsAddress(
+      new xdr.SorobanAddressCredentials({
+        address: Address.fromString(smartAccount).toScAddress(),
+        nonce: xdr.Int64.fromString("4"), signatureExpirationLedger: 5_970_000,
+        signature: overrides.signature ?? authPayload(),
+      }),
+    ),
+    rootInvocation: new xdr.SorobanAuthorizedInvocation({
+      function: xdr.SorobanAuthorizedFunction.sorobanAuthorizedFunctionTypeContractFn(invoke),
+      subInvocations: [],
+    }),
+  });
+  return {
+    func: xdr.HostFunction.hostFunctionTypeInvokeContract(invoke).toXDR("base64"),
+    auth: [auth.toXDR("base64")],
+  };
+}
+
+describe("Stellar CCTP allowance approval boundary", () => {
+  const options = { usdcContract, cctpTokenMessenger, webauthnVerifierAddress };
+
+  it("accepts only an exact owner-passkey USDC approval for TokenMessenger", () => {
+    expect(validateStellarCctpApprovalSubmission(cctpApprovalSubmission(), options)).toMatchObject({
+      kind: "cctp_approval", smartAccount, spender: cctpTokenMessenger,
+      amountRaw: 1_531_450n, expirationLedger: 5_970_000,
+    });
+  });
+
+  it("rejects a wrong spender, zero amount, and failed owner authorization", () => {
+    expect(() => validateStellarCctpApprovalSubmission(
+      cctpApprovalSubmission({ spender: spendingLimitPolicyAddress }), options,
+    )).toThrow("Approval");
+    expect(() => validateStellarCctpApprovalSubmission(
+      cctpApprovalSubmission({ amount: 0n }), options,
+    )).toThrow("Approval");
+    expect(() => validateStellarCctpApprovalSubmission(
+      cctpApprovalSubmission({ signature: authPayload({
+        verifier: ed25519VerifierAddress, keyData: Buffer.alloc(32, 4), contextRuleId: 2,
+      }) }), options,
+    )).toThrow("passkey owner");
   });
 });
 

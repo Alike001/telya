@@ -18,7 +18,10 @@ export function smartAccountPublicConfigFromEnvironment(
     spendingLimitPolicyAddress:
       environment.STELLAR_SPENDING_LIMIT_POLICY ?? "",
     usdcContract: environment.STELLAR_USDC_SAC ?? "",
-    relayerUrl: environment.STELLAR_RELAYER_URL ?? "/api/stellar/relayer",
+    // Deployment sponsorship is deliberately fixed to the authenticated,
+    // one-use same-origin handoff. Environment configuration cannot redirect
+    // passkey deployment payloads to the generic or a third-party relayer.
+    relayerUrl: "/api/stellar/relayer/deployment",
     ...(environment.STELLAR_WEBAUTHN_RP_ID
       ? { rpId: environment.STELLAR_WEBAUTHN_RP_ID }
       : {}),

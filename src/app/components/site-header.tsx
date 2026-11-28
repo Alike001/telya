@@ -1,32 +1,26 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import {
-  ArrowLeftRight,
-  CheckCircle2,
   ChevronDown,
-  Clock,
-  KeyRound,
-  LayoutDashboard,
   Menu,
   ShieldCheck,
   Terminal,
-  Users,
   X,
 } from "lucide-react";
 
 type NavItem = {
   readonly label: string;
   readonly href: string;
-  readonly icon: React.ComponentType<{ className?: string }>;
 };
 
 const NAV_ITEMS: readonly NavItem[] = [
-  { label: "Overview", href: "#top", icon: LayoutDashboard },
-  { label: "Send & Receive", href: "#route-preview", icon: ArrowLeftRight },
-  { label: "Agent Pass", href: "#agent-pass", icon: KeyRound },
-  { label: "Activity", href: "#activity", icon: Clock },
-  { label: "Contacts", href: "#contacts", icon: Users },
+  { label: "Overview", href: "#top" },
+  { label: "Send & Receive", href: "#route-preview" },
+  { label: "Agent Pass", href: "#agent-pass" },
+  { label: "Activity", href: "#activity" },
+  { label: "Contacts", href: "#contacts" },
 ];
 
 export function SiteHeader() {
@@ -49,11 +43,10 @@ export function SiteHeader() {
               Telya<span className="wordmark-dot" aria-hidden="true">.</span>
             </a>
 
-            {/* Desktop Primary Navigation */}
+            {/* Desktop Primary Navigation (Clean Text, No Clutter) */}
             <nav className="desktop-nav" aria-label="Primary navigation">
               <ul className="nav-list">
                 {NAV_ITEMS.map((item) => {
-                  const Icon = item.icon;
                   const isActive = activeItem === item.label;
                   return (
                     <li key={item.label}>
@@ -63,8 +56,7 @@ export function SiteHeader() {
                         aria-current={isActive ? "page" : undefined}
                         onClick={() => setActiveItem(item.label)}
                       >
-                        <Icon className="nav-icon" />
-                        <span>{item.label}</span>
+                        {item.label}
                       </a>
                     </li>
                   );
@@ -98,9 +90,17 @@ export function SiteHeader() {
               href="/api/health"
               aria-label="View system health"
             >
-              <Terminal className="nav-icon" aria-hidden="true" />
-              <span>Health</span>
+              System health
             </a>
+
+            {/* Direct Onboarding CTA */}
+            <Link
+              href="/onboarding"
+              className="header-onboard-link"
+              aria-label="Create Telya account"
+            >
+              Get Started
+            </Link>
 
             {/* Mobile Hamburger Toggle */}
             <button
@@ -124,7 +124,6 @@ export function SiteHeader() {
           <div className="mobile-drawer" role="dialog" aria-modal="true" aria-label="Mobile navigation">
             <nav className="mobile-nav-list" aria-label="Mobile navigation list">
               {NAV_ITEMS.map((item) => {
-                const Icon = item.icon;
                 const isActive = activeItem === item.label;
                 return (
                   <a
@@ -136,7 +135,6 @@ export function SiteHeader() {
                       setMobileMenuOpen(false);
                     }}
                   >
-                    <Icon className="nav-icon" />
                     <span>{item.label}</span>
                   </a>
                 );
@@ -186,9 +184,7 @@ export function SiteHeader() {
               </div>
               <div>
                 <dt>Fee Policy</dt>
-                <dd className="proof-text">
-                  <CheckCircle2 className="inline-check" /> Sponsored / Free
-                </dd>
+                <dd>Stellar direct network fees are sponsored when the relayer is available. Other route fees require a live quote.</dd>
               </div>
               <div>
                 <dt>Completion Rule</dt>
