@@ -1,6 +1,6 @@
 # Telya Execution Tracker
 
-**Last refreshed:** November 27, 2026 (Base→Stellar source burn and pending finality)
+**Last refreshed:** November 28, 2026, 05:35 UTC (reverse CCTP preflight investigation)
 **Execution lead:** Codex  
 **Product owner:** Hammed (@Alike001)  
 **Submission date recorded:** November 30, 2026 (exact cutoff/timezone still unconfirmed in Issue #22).
@@ -9,7 +9,18 @@ This is the live continuation ledger. Codex must update it after every meaningfu
 
 ## 1. Overall state
 
-**Status: ACTIVE — implementation, security review and integration remain.**
+**Status: ACTIVE — one CCTP direction and submission gates remain.**
+
+### Current verified snapshot — November 28
+
+- `origin/main` remains `2531820`. The live draft heads are #44 `dff3dc7`, #46 `dd69a3d`, #48 `d867c07`, #49 `7355b95`, #53 `078603c`, #65 `801d2bf`, and integrated #66 `9747700`. GitGuardian passes on the latest heads. #44 Vercel passes; #46/#48/#49/#65/#66 require Git fork authorization, while #53 and docs #115 hit the Vercel build quota. These statuses do not prove a fresh deployed integrated build. Historical PR tables and queue entries below are chronological records and contain older snapshots.
+- Direct Stellar Testnet payment and browser receipt recovery are accepted. The integrated Agent Pass created a 1.00 USDC rule, spent a real 0.10 USDC within it, revoked it, and the owner completed a separate 0.01 USDC payment afterward. The current integrated UI has **not** proved a live cumulative-over-limit or post-revocation agent rejection; earlier merged Agent Pass acceptance did prove those contract-level outcomes.
+- Base→Stellar payment `b6a469b5-cb8f-4473-8145-fd676ab1d9b1` delivered **0.1000000 native Stellar USDC** to exact recipient `CB5KD4DQCBNQ7NEJESE5CUBNAZSNEAROEGKN6G4HGO5D265QNHWMSG3R`. Finalized Base burn [`0xe0c0780d…13c065e`](https://sepolia.basescan.org/tx/0xe0c0780dfeaa155eb083b67021bfd738c8cc409c0968c0fa5047b4d3613c065e), Circle attestation, successful Stellar destination [`521d913b…946a4`](https://stellar.expert/explorer/testnet/tx/521d913b98b63b1bcae1bf381050cec39670f4d85dc945b1141c61a09a9946a4), ledger 5,956,793, exact Horizon credit and nine completed Neon events were independently checked. The owner saw Activity `completed` after the parser fix; exact receipt fields after a second browser reload were not explicitly confirmed. The earlier malformed Base burn `e6829ba5…c5d2` remains failed with no destination credit and possible stranded 0.1 Testnet USDC.
+- Stellar→Base Payments `ca52fd37-7b3b-4871-9fc7-4a2ccde5700f` and `e46fc276-6f38-4aeb-a392-0f9ab270de11` both remain `awaiting_confirmation`, with `authorized` CCTP operation, **no source/destination hash and no linked relayer request**. At the 05:34 UTC read, the first handoff was consumed by the later authorization invalidation after it expired; the second was expired and unconsumed. A fresh read-only native USDC balance was 198,900,000 atomic units (19.89), unchanged from before both attempts. Neither attempt is evidence of a burn. The owner saw the same generic interrupted-response banner twice, so further financial retries are paused.
+- Read-only Stellar Testnet simulation of the second review's exact gross `0.1531450` USDC / max fee `0.0531450` USDC call through the smart-account `execute` wrapper returned `HostError: Error(WasmVm, InvalidAction)` before reaching Circle. A separate direct TokenMessenger simulation reached the native USDC `transfer_from` and returned contract `#9`, diagnostic **“not enough allowance to spend”**, requiring `1,531,450` atomic Stellar USDC units while allowance was `0`. An exact-amount USDC `approve` simulation returned one smart-account auth entry without an error; it was **simulation only**, not approval or spend. This establishes two pre-broadcast blockers in the current reverse path: the wrapper invocation fails and the TokenMessenger lacks allowance. Do not ask the owner to retry until the existing PR #44/#53/#66 path is corrected with protected exact approval, direct owner authorization, idempotency and live read-only simulation. No Stellar→Base burn, attestation, Base mint, receipt or sponsor use is accepted.
+- Local integrated build at `9747700` returned HTTP 200 Testnet/application/database ready at 05:34 UTC. The deployed Preview's hidden sponsor seed identity remains unverified; its random host is outside the canonical WebAuthn RP. Historical five Neon connection failures and later transient failures remain recorded below.
+
+**Next dependency order:** repair Stellar→Base approval/signing/relayer shape on the existing PR branches and validate without a wallet action; then one separately reviewed owner-authorized Testnet approval and burn, Circle/Base settlement and receipt. In parallel, prove Base→Base direct, finish current UI Agent Pass negative controls, browser receipt reload, deployed sponsor identity on a compatible protected origin, independent unfamiliar-user/recovery testing, PR review/CI/merge/deployment, demo video and organizer-confirmed final submission. MoneyGram remains external-access dependent and must stay unavailable unless legitimate sandbox access and C-address compatibility arrive.
 
 The project has real Stellar Testnet foundations: passkey smart accounts, sponsored direct USDC transfers with verified recipient/amount and durable receipts, and Agent Pass allowance/revoke enforcement. The integrated consumer journey and full cross-chain demo are not yet proven.
 

@@ -1,10 +1,10 @@
 # Telya Judging and Grant Readiness
 
-**Last refreshed:** November 27, 2026
+**Last refreshed:** November 28, 2026
 
 **Merged baseline:** `origin/main` at `2531820`
 
-**Integrated draft baseline:** PR #66 at `e2f731a`
+**Integrated draft baseline:** PR #66 at `9747700`
 
 **Assessment scope:** repository code, merged and open pull requests, open issues, automated checks, public Testnet deployment, and linked Testnet transaction evidence
 
@@ -20,7 +20,9 @@ This document is the factual readiness baseline for Telya. It does not replace t
 
 ## Executive verdict
 
-Telya is **not yet ready to declare the P0 product, the cross-chain demo, or a production launch complete**. It does, however, have substantive and verifiable Stellar depth:
+**Current evidence update (November 28):** Base→Stellar is now a real accepted Testnet settlement, not merely draft code. Payment `b6a469b5-cb8f-4473-8145-fd676ab1d9b1` has finalized [Base source](https://sepolia.basescan.org/tx/0xe0c0780dfeaa155eb083b67021bfd738c8cc409c0968c0fa5047b4d3613c065e), Circle attestation, successful [Stellar destination](https://stellar.expert/explorer/testnet/tx/521d913b98b63b1bcae1bf381050cec39670f4d85dc945b1141c61a09a9946a4) and exact 0.1000000 native USDC recipient credit; Neon holds nine durable events. The owner saw completed Activity. Stellar→Base still has no burn: two reviewed authorizations expired before the relayer; read-only simulation found a failing smart-account `execute` wrapper and zero USDC allowance for Circle TokenMessenger. Base→Base, deployed sponsor identity and final integrated deployment also remain unverified. The older Base→Stellar malformed source burn remains failed and possibly stranded. The detailed [execution tracker](EXECUTION-TRACKER.md) is authoritative for the latest heads and blockers; older capability rows below preserve the November 27 assessment and should not be read as current settlement state.
+
+Telya is **not yet ready to declare the P0 product, the bidirectional cross-chain demo, or a production launch complete**. It does, however, have substantive and verifiable Stellar depth:
 
 - passkey-controlled Stellar smart accounts with server-side sponsorship;
 - direct Stellar Testnet USDC settlement with recipient and amount verification;

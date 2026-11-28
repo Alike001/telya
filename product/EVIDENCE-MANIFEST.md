@@ -4,6 +4,8 @@
 
 **Network scope:** Stellar Testnet and Base Sepolia only. No entry represents Mainnet funds or production payout availability.
 
+**November 28 update:** The integrated draft has independently verified a 0.1-USDC Base→Stellar settlement; the route matrix below has been advanced accordingly. Stellar→Base remains blocked before the relayer with no source hash, and the deployed public `main` remains older than the integrated draft.
+
 This manifest separates evidence types so a unit test, source hash or UI screenshot cannot be mistaken for verified financial completion.
 
 ## Evidence levels
@@ -74,11 +76,11 @@ Merged acceptance evidence: [PR #43](https://github.com/Alike001/telya/pull/43).
 | Passkey smart-account lifecycle | Accepted deployment/reconnect evidence | Merged PR #40 plus draft Privy-bound regressions | **Verified foundation; new onboarding UI pending** |
 | Agent Pass direct Stellar USDC | Accepted create/spend/reject/revoke/owner-control evidence | Merged PR #43 plus PR #66 owner-bound one-use administration, exact Payment review, memory-only delegated execution, ledger-expiry and idempotent-spend tests | **Verified foundation; draft integrated UI not live-verified** |
 | Username/contact resolution | None for current authenticated browser UI | Neon owner/collision/contact tests in draft PRs #46/#66 | **Prepared, not live-verified** |
-| Conversational/manual payment journey | None on integrated deployment | Draft PR #49 and stacked regressions | **Prepared, not live-verified** |
-| Timeline/history/receipt UI | Earlier direct receipt restoration only; none for current integrated UI | Draft PR #65 persistence/refresh tests | **Prepared, not live-verified** |
+| Conversational/manual payment journey | Authenticated local direct Stellar and Base→Stellar Testnet executions; public integrated deployment pending | Draft PR #49 and stacked regressions | **Locally live-verified for two routes; deployed journey pending** |
+| Timeline/history/receipt UI | Owner-observed direct receipt refresh and completed Base→Stellar Activity; exact cross-chain receipt fields after a second reload not explicitly confirmed | Draft PR #65 persistence/refresh tests | **Partial live acceptance** |
 | Base → Base direct USDC | None | Draft backend/browser authorization and mismatch tests | **Not live-verified** |
-| Base Sepolia → Stellar Testnet CCTP | None | Draft guarded state, Circle evidence and recovery tests | **Not live-verified** |
-| Stellar Testnet → Base Sepolia CCTP | None | Draft guarded burn/attestation/mint/finality tests | **Not live-verified** |
+| Base Sepolia → Stellar Testnet CCTP | Payment `b6a469b5-cb8f-4473-8145-fd676ab1d9b1`: finalized [Base burn](https://sepolia.basescan.org/tx/0xe0c0780dfeaa155eb083b67021bfd738c8cc409c0968c0fa5047b4d3613c065e), Circle attestation and successful [Stellar mint/forward](https://stellar.expert/explorer/testnet/tx/521d913b98b63b1bcae1bf381050cec39670f4d85dc945b1141c61a09a9946a4); Horizon exact 0.1000000 native USDC credit to `CB5KD4DQCBNQ7NEJESE5CUBNAZSNEAROEGKN6G4HGO5D265QNHWMSG3R`; nine durable Neon events | Draft guarded state, Circle evidence and recovery tests | **Settlement verified; browser receipt reload and deployment pending** |
+| Stellar Testnet → Base Sepolia CCTP | No source hash, no burn, no destination mint. Two reviewed handoffs expired before relayer. Read-only simulation found smart-account wrapper failure and zero TokenMessenger USDC allowance | Draft guarded burn/attestation/mint/finality tests | **Blocked before broadcast; not live-verified** |
 | MoneyGram cash-in/out | None | Unavailable-state UI only | **External blocker; not implemented** |
 | Independent unfamiliar-user pass | None | Runbook prepared | **Not executed** |
 
