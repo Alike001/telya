@@ -1,6 +1,6 @@
 # Telya Buildathon Submission Package
 
-**Status:** Draft — verified Stellar evidence is ready; the integrated browser journey, CCTP routes, independent user test, video format and organizer cutoff are still open.
+**Status:** Draft — direct Stellar and Base→Stellar Testnet settlements are verified; Stellar→Base, Base→Base, integrated deployment, independent user test, video format and organizer cutoff remain open.
 
 **Environment:** Testnet only. No transaction or balance in this package represents Mainnet funds.
 
@@ -22,7 +22,7 @@ Agent Pass is the secondary differentiator: an agent receives a bounded, expirin
 
 The public URL currently proves the deployed `main` branch only. Features in draft pull requests are not part of the public acceptance claim until their tested commits are deployed.
 
-Live recheck on November 27, 2026 at 03:00 UTC: the health endpoint returned `ready` with application/database `ok`, and Stellar Testnet Horizon returned `successful: true` at the recorded ledger for the direct payment plus all four positive Agent Pass transactions below.
+Live recheck on November 28, 2026 at 05:40 UTC: the public health endpoint returned HTTP 200 with Testnet/application/database ready. This remains the older deployed `main`, not the integrated draft. Stellar Testnet Horizon had previously returned `successful: true` at the recorded ledger for the direct payment plus all four positive Agent Pass transactions below.
 
 ## How to verify without a wallet
 
@@ -34,8 +34,8 @@ Live recheck on November 27, 2026 at 03:00 UTC: the health endpoint returned `re
 
 ### Reproduce draft public-network readiness
 
-PR #66 head `42990e3` adds a secret-safe, read-only probe for the infrastructure
-used by the integrated draft. After checking out that exact head and configuring
+PR #66 includes a secret-safe, read-only probe for the infrastructure
+used by the integrated draft. After checking out current head `9747700` and configuring
 the public Testnet values, run:
 
 ```bash
@@ -61,7 +61,7 @@ pnpm dev
 
 Open `http://localhost:3000`. Do not paste credentials into an issue, PR, recording or browser-visible `NEXT_PUBLIC_*` variable unless `.env.example` explicitly marks the value public.
 
-The local secure environment passes Privy and localhost WebAuthn configuration checks. The dedicated sponsor's public Testnet identity, 10,000-XLM starting balance and one-stroop self-payment are independently verified, while Vercel lists the sponsor as a hidden Secret in Preview/Production without exposing its value. A later Vercel deployment proves environment-snapshot timing but not that the hidden deployed seed derives the same public key. Real authenticated onboarding, protected relayer and payment acceptance remain open, so use the public evidence register rather than claiming the draft conversational journey works end to end.
+The local secure environment passes Privy and localhost WebAuthn configuration checks. The dedicated sponsor's public Testnet identity, 10,000-XLM starting balance and one-stroop self-payment are independently verified, while Vercel lists the sponsor as a hidden Secret in Preview/Production without exposing its value. A later Vercel deployment proves environment-snapshot timing but not that the hidden deployed seed derives the same public key. The authenticated local browser has completed direct Stellar and Base→Stellar payments; the public deployed `main` has not yet accepted that integrated journey.
 
 ## Testnet funding
 
@@ -96,6 +96,14 @@ Smart account: [`CBV3RM6TUXSRPG2ZHVVXNKIGJZKOL2KQWPTOHRZFVHW7DIJGTG5U2QLP`](http
 | Revoke | Successful | [`82039abc17fbb334551fb218b6e050ba7abc9637f96e8605f4a66671409ea58c`](https://stellar.expert/explorer/testnet/tx/82039abc17fbb334551fb218b6e050ba7abc9637f96e8605f4a66671409ea58c), ledger `5917461` |
 | Agent spends after revoke | Rejected | No transaction and no balance movement; merged acceptance evidence in PR #43 |
 | Owner spends `0.1 USDC` after revoke | Successful | [`249d59b88bdc9ef57d7a99491dfbb78382abe46a087d9265cb9f0b3b23825e28`](https://stellar.expert/explorer/testnet/tx/249d59b88bdc9ef57d7a99491dfbb78382abe46a087d9265cb9f0b3b23825e28), ledger `5917500` |
+
+## Verified local Base→Stellar CCTP acceptance
+
+The corrected payment `b6a469b5-cb8f-4473-8145-fd676ab1d9b1` moved exactly **0.1000000 native Stellar Testnet USDC** to `CB5KD4DQCBNQ7NEJESE5CUBNAZSNEAROEGKN6G4HGO5D265QNHWMSG3R`. The [Base Sepolia source burn](https://sepolia.basescan.org/tx/0xe0c0780dfeaa155eb083b67021bfd738c8cc409c0968c0fa5047b4d3613c065e) finalized in block 64,421,268; Circle attested the exact domain 6→27 message; the [Stellar destination transaction](https://stellar.expert/explorer/testnet/tx/521d913b98b63b1bcae1bf381050cec39670f4d85dc945b1141c61a09a9946a4) succeeded in ledger 5,956,793. Horizon effects independently show the exact recipient credit. Neon records the intended/verified recipient and amount, both transactions and nine durable stages through completion. Circle's USDC fee was 0; actual Base gas was 0.000001725048287508 ETH; the Stellar sponsor paid 44,666 stroops. The owner saw completed Activity in the local integrated build, but exact receipt fields after a second browser reload were not explicitly confirmed. This is not yet public integrated-deployment acceptance.
+
+The earlier Base burn `0x45c965cb…fe5fe048` used malformed forwarder fields and is durably classified failed with no Stellar recipient credit. Its 0.1 Testnet USDC may be stranded. It is separate from the successful payment and must never be presented as delivered.
+
+The reverse Stellar→Base route has no accepted source burn. Two reviewed confirmations stopped before the relayer. Read-only simulation found that the current smart-account `execute` wrapper traps and that Circle TokenMessenger has zero Stellar USDC allowance; no approval or reverse payment was submitted. This route stays out of the demo until exact approval, signed burn, Circle attestation, Base destination finality and recipient/amount verification are complete.
 
 ## Architecture at a glance
 
@@ -153,10 +161,10 @@ Do not record this as a working journey until the integrated browser acceptance 
 ## Known limitations and blockers
 
 - The current public `main` deployment does not contain the unmerged integrated frontend stack.
-- Local Privy configuration and sponsor key control pass preflight/Testnet verification, and Vercel secret presence/scope is confirmed. The integrated fork preview is still blocked by teammate authorization plus the current 100-deployments/day Vercel limit, and a real browser wallet/passkey acceptance session remains required for onboarding, contacts, conversational payment, timeline and current Agent Pass UI proof.
+- Local Privy configuration and sponsor key control pass preflight/Testnet verification, and Vercel secret presence/scope is confirmed. The current integrated PR #66 head still needs a compatible protected Preview/Production deployment and exact deployed sponsor identity. Some fork-PR Vercel checks require Git authorization; PR #53 previously hit the deployment quota. Local browser evidence exists for direct Stellar, Base→Stellar and bounded Agent Pass spend, but not the full route matrix or unfamiliar-user walkthrough.
 - The integrated build's value-redacted client-secret scan passed across 215 emitted browser files; this guards packaging but does not validate the configured secrets.
-- Base direct and both CCTP directions have extensive automated/database safeguards but no accepted signed end-to-end Testnet settlement evidence. They must not appear as completed in the demo.
-- The public Base/Stellar endpoints and configured CCTP contracts pass the draft read-only probe, but this does not establish a funded or authenticated wallet, source burn, attestation, destination mint or finality.
+- Base direct and Stellar→Base CCTP have no accepted signed end-to-end Testnet settlement evidence. The completed Base→Stellar route may be shown with its exact hashes and qualification above; do not present the earlier malformed burn as delivered.
+- The public Base/Stellar endpoints and configured CCTP contracts pass the draft read-only probe. That probe is infrastructure readiness only; the route-specific evidence above is separate.
 - MoneyGram is unavailable pending partner sandbox access and written Smart Account Kit contract-wallet compatibility confirmation.
 - Independent unfamiliar-user testing has not yet been recorded.
 - The organizer has not yet confirmed the exact cutoff/timezone, artifacts or video format. No duration is inferred here.
