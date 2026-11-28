@@ -33,6 +33,8 @@ Telya has independently verified direct Stellar USDC and Base→Stellar CCTP del
 
 **Configured suite recheck:** Local health briefly recovered, but a full PR #66 rerun failed again with 423 passed and 7 PostgreSQL-backed failures while Neon connections intermittently failed. Both configured runs remain failures. The plain and build/security gates above passed; database integration must be rerun once connectivity is stable. The Activity fix did not submit a wallet transaction or change durable payment state.
 
+The corrected PR #66 production build was restarted locally at 05:58 UTC and returned HTTP 200 Testnet/application/database ready. This point-in-time result does not clear the configured suite failures or the Vercel Preview authorization gate.
+
 ### Historical November 27 progress (later states supersede these snapshots)
 
 At the first source check, the original authorized 0.1-USDC Payment `e6829ba5-616a-4696-96a4-6a252d1ac5d2` was **source submitted**, not settled. Its Base Sepolia hash [`0x45c965cb…e048`](https://sepolia.basescan.org/tx/0x45c965cb01ca68760f4557b0cbacb52b0b5f12bd4f9c3363d207474cfe5fe048) had a successful receipt in block `64,396,053` and one Circle message for 100,000 atomic USDC, domain 6→27, zero CCTP fee, the verified wallet as message sender, and the configured Stellar forwarder/messenger. At that time, Base finality and Circle attestation were pending and Neon had no destination hash or verified amount. This payment was later classified **failed**, as recorded above and below.

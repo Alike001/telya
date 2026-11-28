@@ -26,6 +26,8 @@ This is the live continuation ledger. Codex must update it after every meaningfu
 
 **Database gate recheck, 05:57 UTC:** Local `/api/health` briefly returned HTTP 200 after the first configured failure, so the required full PR #66 suite was rerun once. It **failed again: 423 passed / 7 failed**, all in PostgreSQL-backed username, payment, contact and wallet tests with Neon `fetch failed`/`AggregateError` connection errors; one username race assertion saw zero winners while the connection was unstable. This is not a passing full suite, and later transient health does not erase either failed run. No new financial transaction occurred. The PR #66 UI regressions and plain suite remain passed; re-run the configured gate only after Neon connectivity is stable and inspect any failed-test cleanup before merge.
 
+**Local corrected build ready, 05:58 UTC:** Restarted the PR #66 `e8240b2` production build on `http://localhost:3000`; `/api/health` returned HTTP 200 with Testnet/application/database ready. This is a point-in-time health result, not a passing configured suite or deployed Preview acceptance. The two prior configured suite failures remain open.
+
 The project has real Stellar Testnet foundations: passkey smart accounts, sponsored direct USDC transfers with verified recipient/amount and durable receipts, and Agent Pass allowance/revoke enforcement. The integrated consumer journey and full cross-chain demo are not yet proven.
 
 Hammed is taking primary implementation ownership. Teammate availability is not a blocker; preserve their contribution history and continue on existing PR branches where access permits.
