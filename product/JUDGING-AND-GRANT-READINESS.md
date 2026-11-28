@@ -29,7 +29,7 @@ Telya is **not yet ready to declare the P0 product, the bidirectional cross-chai
 - Agent Pass allowance, cumulative-spend, revocation, and owner-control enforcement; and
 - a Stellar-side CCTP implementation in draft PR #44 with crash-recovery and idempotency work.
 
-The critical path is now authenticated live acceptance rather than missing product code. PR #48 implements the Base/Circle boundary; PR #53 mounts deterministic orchestration; PRs #46/#49/#65/#66 carry the integrated onboarding, conversational, timeline and Agent Pass stack. Local Privy passes secret-safe preflight, and Vercel confirms Privy/sponsor key presence without exporting values. The local sponsor remains a placeholder, key validity is unverified, preview authorization is absent and real signed Testnet evidence is still missing. PRs #44/#48 must remain draft until both CCTP directions have exact destination recipient, amount, finality and retry/restart evidence.
+The critical path is the reverse CCTP approval/signing repair, authenticated live acceptance of the remaining routes, and integrated deployment. PR #48 implements the Base/Circle boundary; PR #53 mounts deterministic orchestration; PRs #46/#49/#65/#66 carry onboarding, conversational, timeline and Agent Pass surfaces. The dedicated local Testnet sponsor key and balance were verified, and it signed a finalized one-stroop smoke transaction; the completed Base→Stellar destination also used the expected public sponsor source. Vercel confirms a hidden sponsor variable is present, but the deployed seed's exact public identity remains unverified. PRs #44/#48 must remain draft until the reverse route, retry/restart and review/deployment gates are satisfied.
 
 ### Evidence register
 
