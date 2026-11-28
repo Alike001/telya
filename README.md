@@ -4,6 +4,8 @@
 
 Telya is building a conversational USDC experience across Stellar and Base. The current public Testnet app has verified passkey smart accounts, direct Stellar USDC payments with durable receipts, and limited, revocable Agent Pass spending. The conversational journey, Base routes, bidirectional Circle CCTP, usernames, and MoneyGram ramp are still being integrated or externally verified. [Current state](product/EXECUTION-TRACKER.md)
 
+Judge/tester entry point: [Buildathon submission package](product/SUBMISSION-PACKAGE.md). It separates reproducible evidence from unfinished or externally blocked work.
+
 > Team Bravo — Stellar Buildathon 2026
 
 ## How to Test
@@ -11,6 +13,16 @@ Telya is building a conversational USDC experience across Stellar and Base. The 
 Telya is in Build Week implementation. The public main deployment supports the
 direct Stellar and Agent Pass Testnet flows below. Draft PR features are not part
 of this walkthrough until their live acceptance gates pass.
+
+Fastest no-wallet verification:
+
+1. Open the [public health endpoint](https://telya.vercel.app/api/health) and
+   confirm it reports Testnet application/database readiness. Health alone is
+   not payment proof.
+2. Follow the exact direct-payment and Agent Pass explorer links in the
+   [submission package](product/SUBMISSION-PACKAGE.md#how-to-verify-without-a-wallet).
+3. Check the [evidence manifest](product/EVIDENCE-MANIFEST.md) before treating a
+   draft browser, Base, CCTP or MoneyGram path as verified.
 
 Local development:
 
@@ -152,6 +164,9 @@ Completion requires destination finality plus recipient and amount verification.
 If you are a developer or AI agent joining the project, start here:
 
 - [Current project status](product/STATUS.md)
+- [Buildathon submission package](product/SUBMISSION-PACKAGE.md)
+- [Buildathon evidence manifest](product/EVIDENCE-MANIFEST.md)
+- [Independent tester runbook](product/INDEPENDENT-TESTING.md)
 - [Codex master playbook](product/CODEX-MASTER-PLAYBOOK.md)
 - [Live execution tracker](product/EXECUTION-TRACKER.md)
 - [Buildathon execution plan](product/BUILDATHON-EXECUTION-PLAN.md)
