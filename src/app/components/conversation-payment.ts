@@ -206,6 +206,22 @@ export function parseResumableBaseCctpReview(value: unknown, requestedId: string
   return review ? { ...review, status: "authorized" } : null;
 }
 
+/** Restore only an owner-scoped Stellar CCTP review with no source burn. */
+export function parseResumableStellarCctpReview(value: unknown, requestedId: string): PaymentReview | null {
+  const payload = record(value);
+  const payment = record(payload?.payment);
+  if (!payment || payment.id !== requestedId || payment.status !== "awaiting_confirmation" ||
+      payment.routeId !== "stellar_to_base" ||
+      payment.sourceNetwork !== "stellar" || payment.destinationNetwork !== "base" ||
+      payment.sourceTransactionHash !== null || payment.destinationTransactionHash !== null ||
+      !Array.isArray(payment.events)) return null;
+  return parsePaymentReview({
+    status: "awaiting_confirmation",
+    explanation: "This exact Stellar to Base payment has no recorded burn. Review its amount and fees before a separate Circle allowance approval or payment authorization.",
+    payment,
+  });
+}
+
 export function parseAuthorizationReady(value: unknown): {
   readonly relayerUrl: "/api/stellar/relayer/payment";
   readonly expiresAt: string;

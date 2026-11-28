@@ -209,6 +209,12 @@ function AuthenticatedPaymentActivity() {
                 Resume this authorized Base payment
               </a>
             )}
+          {selected.status === "awaiting_confirmation" && selected.route.id === "stellar_to_base_cctp" &&
+            selected.sourceTransaction === null && selected.destinationTransaction === null && (
+              <a className="cta-button primary" href={`/?resumePayment=${encodeURIComponent(selected.id)}`}>
+                Resume this Stellar payment review
+              </a>
+            )}
         </>
       ) : (
         <>

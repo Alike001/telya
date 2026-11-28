@@ -28,6 +28,7 @@ import {
   mergeVerifiedBalanceSnapshots,
   parsePaymentReview,
   parseResumableBaseCctpReview,
+  parseResumableStellarCctpReview,
   parsePersistedPaymentHashes,
   parseVerifiedBalances,
 } from "./conversation-payment";
@@ -177,7 +178,9 @@ function AuthenticatedConversation() {
           const response = await request(`/api/payments?id=${encodeURIComponent(resumeId)}`, { cache: "no-store" });
           const payload: unknown = await response.json();
           if (!guard.isActive()) return;
-          const review = response.ok ? parseResumableBaseCctpReview(payload, resumeId) : null;
+          const review = response.ok
+            ? parseResumableBaseCctpReview(payload, resumeId) ?? parseResumableStellarCctpReview(payload, resumeId)
+            : null;
           if (review) {
             appendTelya(review.explanation, review, review.recipientAddress, guard);
           } else {

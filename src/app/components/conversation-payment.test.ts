@@ -6,6 +6,7 @@ import {
   mergeVerifiedBalanceSnapshots,
   parsePaymentReview,
   parseResumableBaseCctpReview,
+  parseResumableStellarCctpReview,
   parseReconciliation,
   parseVerifiedBalances,
 } from "./conversation-payment.ts";
@@ -31,6 +32,29 @@ describe("conversation financial response parsing", () => {
     expect(parseResumableBaseCctpReview({ payment: { ...persisted.payment, sourceTransactionHash: "a".repeat(64) } }, id)).toBeNull();
     expect(parseResumableBaseCctpReview({ payment: { ...persisted.payment, status: "completed" } }, id)).toBeNull();
     expect(parseResumableBaseCctpReview({ payment: { ...persisted.payment, events: [] } }, id)).toBeNull();
+  });
+
+  it("restores only the exact hashless Stellar CCTP review for separate approval", () => {
+    const id = "e46fc276-6f38-4aeb-a392-0f9ab270de11";
+    const payment = {
+      id, status: "awaiting_confirmation", routeId: "stellar_to_base",
+      sourceNetwork: "stellar", destinationNetwork: "base", rail: "circle_cctp_standard",
+      recipientAddress: "0x1234567890123456789012345678901234567890",
+      expectedRecipientAmount: "0.100000000000000000",
+      fees: [{ kind: "provider", amount: "0.0531450", asset: "USDC", payer: "sender", label: "Circle forward fee" }],
+      reasons: ["explicit_user_instruction"],
+      sourceTransactionHash: null, destinationTransactionHash: null,
+      events: [{ stage: "review", status: "awaiting_confirmation" }],
+    };
+    const persisted = { payment };
+    expect(parseResumableStellarCctpReview(persisted, id)).toMatchObject({
+      id, status: "awaiting_confirmation", routeId: "stellar_to_base",
+      expectedRecipientAmount: "0.100000000000000000",
+    });
+    expect(parseResumableStellarCctpReview(persisted, "another-id")).toBeNull();
+    expect(parseResumableStellarCctpReview({ payment: { ...payment, sourceTransactionHash: "a".repeat(64) } }, id)).toBeNull();
+    expect(parseResumableStellarCctpReview({ payment: { ...payment, status: "completed" } }, id)).toBeNull();
+    expect(parseResumableStellarCctpReview({ payment: { ...payment, routeId: "base_to_stellar" } }, id)).toBeNull();
   });
 
   it("accepts only server-verified balances and preserves unavailable networks", () => {
