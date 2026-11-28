@@ -7,6 +7,7 @@ import type {
   ValidatedStellarAgentPassCreate,
   ValidatedStellarAgentPassRevoke,
   ValidatedStellarCctpBurn,
+  ValidatedStellarCctpApproval,
   ValidatedStellarUsdcTransfer,
 } from "../stellar/relayer.ts";
 import { StellarRelayerError } from "../stellar/relayer.ts";
@@ -418,6 +419,98 @@ export async function recordStellarCctpBurnAuthorization(
   if (!(rows as Record<string, unknown>[])[0]) {
     throw new Error("Stellar CCTP burn authorization was not persisted");
   }
+}
+
+/** Bind a separate allowance approval to the exact owned, hashless CCTP review. */
+export async function recordStellarCctpApprovalAuthorization(
+  userId: string,
+  paymentId: string,
+  requestHash: string,
+  approval: ValidatedStellarCctpApproval,
+): Promise<void> {
+  const sql = getSqlClient();
+  const rows = await sql`
+    WITH eligible AS MATERIALIZED (
+      SELECT p.id
+      FROM payments p
+      JOIN messages m ON m.id = p.intent_message_id
+        AND m.conversation_id = p.conversation_id
+      JOIN wallets w ON w.id::text = (m.structured_intent->'selectedSourceWallet'->>'id')
+      JOIN base_cctp_operations o ON o.payment_id = p.id
+      JOIN stellar_relayer_requests r ON r.request_hash = ${requestHash}
+      WHERE p.id = ${paymentId}::uuid AND p.user_id = ${userId}::uuid
+        AND p.route_id = 'stellar_to_base' AND p.status = 'awaiting_confirmation'
+        AND p.source_transaction_hash IS NULL
+        AND w.user_id = p.user_id AND w.network = 'stellar'
+        AND w.address = ${approval.smartAccount} AND w.verification_status = 'verified'
+        AND o.route_id = 'stellar_to_base' AND o.status = 'authorized'
+        AND o.source_transaction_hash IS NULL
+        AND o.burn_amount_atomic = ${approval.amountRaw.toString()}::numeric
+        AND r.status = 'pending' AND r.payment_id IS NULL
+      FOR UPDATE OF p, o, r
+    )
+    UPDATE stellar_relayer_requests r SET
+      operation_kind = 'cctp_approval',
+      approval_payment_id = eligible.id,
+      token_contract = ${approval.tokenContract},
+      sender_address = ${approval.smartAccount},
+      recipient_address = ${approval.spender},
+      expected_amount_atomic = ${approval.amountRaw.toString()}::numeric,
+      approval_expiration_ledger = ${approval.expirationLedger},
+      authorization_kind = 'owner', context_rule_id = 0,
+      signer_address = ${approval.smartAccount}, updated_at = now()
+    FROM eligible WHERE r.request_hash = ${requestHash}
+    RETURNING r.request_hash
+  `;
+  if (!rows[0]) {
+    throw new StellarRelayerError("PAYMENT_MISMATCH", "Approval no longer matches the owned CCTP review", 409);
+  }
+}
+
+export async function recordStellarCctpApprovalSubmission(
+  requestHash: string,
+  transactionHash: string,
+): Promise<void> {
+  const sql = getSqlClient();
+  const eventKey = `stellar_cctp_allowance_${requestHash.slice(0, 16)}`;
+  const rows = await sql`
+    WITH request AS (
+      UPDATE stellar_relayer_requests r SET
+        submitted_transaction_hash = ${transactionHash}, updated_at = now()
+      WHERE r.request_hash = ${requestHash} AND r.operation_kind = 'cctp_approval'
+        AND r.status = 'pending'
+      RETURNING r.approval_payment_id
+    )
+    INSERT INTO payment_events (
+      payment_id, event_key, stage, status, network, transaction_hash,
+      public_message, completed_at
+    ) SELECT approval_payment_id, ${eventKey},
+      'authorization', 'awaiting_confirmation', 'stellar', ${transactionHash},
+      'The exact, expiring Circle allowance was approved. The cross-chain burn still requires separate passkey authorization.', now()
+    FROM request WHERE true
+    ON CONFLICT (payment_id, event_key) DO NOTHING
+    RETURNING id
+  `;
+  if (!rows[0]) throw new Error("Stellar CCTP approval was not persisted");
+}
+
+export async function assertStellarCctpApprovalRequestLink(
+  userId: string,
+  paymentId: string,
+  requestHash: string,
+): Promise<void> {
+  const sql = getSqlClient();
+  const rows = await sql`
+    SELECT r.request_hash
+    FROM stellar_relayer_requests r
+    JOIN payments p ON p.id = r.approval_payment_id
+    WHERE r.request_hash = ${requestHash}
+      AND r.operation_kind = 'cctp_approval'
+      AND r.approval_payment_id = ${paymentId}::uuid
+      AND p.user_id = ${userId}::uuid
+    LIMIT 1
+  `;
+  if (!rows[0]) throw new StellarRelayerError("PAYMENT_MISMATCH", "Approval belongs to another payment", 409);
 }
 
 export async function recordStellarCctpBurnSubmission(

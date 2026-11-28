@@ -16,6 +16,7 @@ import {
   validateStellarDeploymentSubmission,
   validateStellarAgentPassSubmission,
   validateStellarCctpBurnSubmission,
+  validateStellarCctpApprovalSubmission,
   validateStellarUsdcTransferSubmission,
 } from "./relayer";
 
@@ -307,13 +308,9 @@ function cctpBurnSubmission(overrides: {
     )),
   ];
   const invoke = new xdr.InvokeContractArgs({
-    contractAddress: Address.fromString(smartAccount).toScAddress(),
-    functionName: "execute",
-    args: [
-      nativeToScVal(cctpTokenMessenger, { type: "address" }),
-      xdr.ScVal.scvString(overrides.functionName ?? "deposit_for_burn_with_hook"),
-      xdr.ScVal.scvVec(targetArgs),
-    ],
+    contractAddress: Address.fromString(cctpTokenMessenger).toScAddress(),
+    functionName: overrides.functionName ?? "deposit_for_burn_with_hook",
+    args: targetArgs,
   });
   const credentials = xdr.SorobanCredentials.sorobanCredentialsAddress(
     new xdr.SorobanAddressCredentials({
@@ -410,6 +407,66 @@ describe("Stellar CCTP relayer boundary", () => {
         options,
       ),
     ).toThrow("requires the passkey owner");
+  });
+});
+
+function cctpApprovalSubmission(overrides: {
+  readonly amount?: bigint;
+  readonly spender?: string;
+  readonly expirationLedger?: number;
+  readonly signature?: xdr.ScVal;
+} = {}) {
+  const invoke = new xdr.InvokeContractArgs({
+    contractAddress: Address.fromString(usdcContract).toScAddress(),
+    functionName: "approve",
+    args: [
+      nativeToScVal(smartAccount, { type: "address" }),
+      nativeToScVal(overrides.spender ?? cctpTokenMessenger, { type: "address" }),
+      nativeToScVal(overrides.amount ?? 1_531_450n, { type: "i128" }),
+      xdr.ScVal.scvU32(overrides.expirationLedger ?? 5_970_000),
+    ],
+  });
+  const auth = new xdr.SorobanAuthorizationEntry({
+    credentials: xdr.SorobanCredentials.sorobanCredentialsAddress(
+      new xdr.SorobanAddressCredentials({
+        address: Address.fromString(smartAccount).toScAddress(),
+        nonce: xdr.Int64.fromString("4"), signatureExpirationLedger: 5_970_000,
+        signature: overrides.signature ?? authPayload(),
+      }),
+    ),
+    rootInvocation: new xdr.SorobanAuthorizedInvocation({
+      function: xdr.SorobanAuthorizedFunction.sorobanAuthorizedFunctionTypeContractFn(invoke),
+      subInvocations: [],
+    }),
+  });
+  return {
+    func: xdr.HostFunction.hostFunctionTypeInvokeContract(invoke).toXDR("base64"),
+    auth: [auth.toXDR("base64")],
+  };
+}
+
+describe("Stellar CCTP allowance approval boundary", () => {
+  const options = { usdcContract, cctpTokenMessenger, webauthnVerifierAddress };
+
+  it("accepts only an exact owner-passkey USDC approval for TokenMessenger", () => {
+    expect(validateStellarCctpApprovalSubmission(cctpApprovalSubmission(), options)).toMatchObject({
+      kind: "cctp_approval", smartAccount, spender: cctpTokenMessenger,
+      amountRaw: 1_531_450n, expirationLedger: 5_970_000,
+    });
+  });
+
+  it("rejects a wrong spender, zero amount, and failed owner authorization", () => {
+    expect(() => validateStellarCctpApprovalSubmission(
+      cctpApprovalSubmission({ spender: spendingLimitPolicyAddress }), options,
+    )).toThrow("Approval");
+    expect(() => validateStellarCctpApprovalSubmission(
+      cctpApprovalSubmission({ amount: 0n }), options,
+    )).toThrow("Approval");
+    expect(() => validateStellarCctpApprovalSubmission(
+      cctpApprovalSubmission({ signature: authPayload({
+        verifier: ed25519VerifierAddress, keyData: Buffer.alloc(32, 4), contextRuleId: 2,
+      }) }), options,
+    )).toThrow("passkey owner");
   });
 });
 

@@ -12,6 +12,8 @@ import {
   linkStellarCctpPaymentAuthorization,
   linkStellarPaymentAuthorization,
   recordStellarCctpBurnSubmission,
+  recordStellarCctpApprovalAuthorization,
+  recordStellarCctpApprovalSubmission,
   recordStellarUsdcTransferSubmission,
   recordVerifiedAgentPassSpend,
   validateStellarCctpPaymentAuthorization,
@@ -19,6 +21,7 @@ import {
 } from "../../src/server/stellar-relayer-requests.ts";
 import type {
   ValidatedStellarCctpBurn,
+  ValidatedStellarCctpApproval,
   ValidatedStellarUsdcTransfer,
 } from "../../src/stellar/relayer.ts";
 import { reserveBaseCctpOperation } from "../../src/server/base-cctp.ts";
@@ -27,6 +30,7 @@ import {
   createStellarPaymentExecutionSession,
 } from "./stellar-execution-session.ts";
 import { reconcileStellarDirectPayment } from "./stellar-reconciliation.ts";
+import { getPaymentWithEvents } from "./service.ts";
 
 function useNeonHttpsTransport(): void {
   neonConfig.fetchFunction = (url: string, options?: RequestInit) => new Promise<Response>((resolve, reject) => {
@@ -152,6 +156,7 @@ describe("linked Stellar direct payment execution on PostgreSQL", () => {
         await expect(consumeStellarPaymentExecutionSession(handoff.token)).resolves.toEqual({
           userId,
           paymentId,
+          purpose: "payment",
         });
         await expect(consumeStellarPaymentExecutionSession(handoff.token)).resolves.toBeNull();
         const revokedHandoff = await createStellarPaymentExecutionSession({
@@ -418,6 +423,7 @@ describe("linked Stellar direct payment execution on PostgreSQL", () => {
       const messageId = randomUUID();
       const paymentId = randomUUID();
       const requestHash = randomBytes(32).toString("hex");
+      const approvalRequestHash = randomBytes(32).toString("hex");
       const clientHash = randomBytes(32).toString("hex");
       const sender = StrKey.encodeContract(randomBytes(32));
       const recipient = `0x${randomBytes(20).toString("hex")}`;
@@ -433,6 +439,12 @@ describe("linked Stellar direct payment execution on PostgreSQL", () => {
         amountRaw: 50_526_830n,
         maxFeeRaw: 526_830n,
       } satisfies ValidatedStellarCctpBurn;
+      const approval = {
+        kind: "cctp_approval", func: null as never, auth: [],
+        smartAccount: sender, tokenContract,
+        spender: burn.tokenMessenger, amountRaw: burn.amountRaw,
+        expirationLedger: 5_970_000,
+      } satisfies ValidatedStellarCctpApproval;
 
       try {
         await sql.transaction([
@@ -477,6 +489,8 @@ describe("linked Stellar direct payment execution on PostgreSQL", () => {
           burnAmount: "5.052683",
           maxFee: "0.052683",
         });
+        const ownedReview = await getPaymentWithEvents({ id: userId }, paymentId);
+        expect(ownedReview.source_address).toBe(sender);
         await sql`INSERT INTO stellar_relayer_requests (
             request_hash, client_key_hash, status, operation_kind,
             authorization_kind, context_rule_id, signer_address,
@@ -487,6 +501,37 @@ describe("linked Stellar direct payment execution on PostgreSQL", () => {
             'owner', 0, ${sender}, ${tokenContract}, ${sender}, ${recipient},
             ${burn.amountRaw.toString()}::numeric, 6, ${burn.maxFeeRaw.toString()}::numeric
           )`;
+        await sql`INSERT INTO stellar_relayer_requests (request_hash, client_key_hash, status)
+          VALUES (${approvalRequestHash}, ${clientHash}, 'pending')`;
+        await expect(recordStellarCctpApprovalAuthorization(
+          otherUserId, paymentId, approvalRequestHash, approval,
+        )).rejects.toThrow("owned CCTP review");
+        await expect(recordStellarCctpApprovalAuthorization(
+          userId, paymentId, approvalRequestHash, { ...approval, amountRaw: approval.amountRaw + 1n },
+        )).rejects.toThrow("owned CCTP review");
+        const approvalHandoff = await createStellarPaymentExecutionSession({
+          id: userId, privyUserId: `did:privy:telya_cctp_payment_${userId}`,
+          sessionId: authSessionId, expiresAt: new Date(Date.now() + 60 * 60 * 1_000),
+        }, paymentId, "cctp_approval");
+        await expect(consumeStellarPaymentExecutionSession(approvalHandoff.token)).resolves.toEqual({
+          userId, paymentId, purpose: "cctp_approval",
+        });
+        await expect(consumeStellarPaymentExecutionSession(approvalHandoff.token)).resolves.toBeNull();
+        await recordStellarCctpApprovalAuthorization(userId, paymentId, approvalRequestHash, approval);
+        const approvalHash = randomBytes(32).toString("hex");
+        await recordStellarCctpApprovalSubmission(approvalRequestHash, approvalHash);
+        const approvalRows = await sql`
+          SELECT r.operation_kind, r.approval_payment_id, r.payment_id,
+            r.expected_amount_atomic::text AS amount, r.approval_expiration_ledger,
+            p.status, p.source_transaction_hash
+          FROM stellar_relayer_requests r JOIN payments p ON p.id = r.approval_payment_id
+          WHERE r.request_hash = ${approvalRequestHash}
+        `;
+        expect(approvalRows[0]).toMatchObject({
+          operation_kind: "cctp_approval", approval_payment_id: paymentId,
+          payment_id: null, amount: "50526830", approval_expiration_ledger: 5_970_000,
+          status: "awaiting_confirmation", source_transaction_hash: null,
+        });
 
         await expect(validateStellarCctpPaymentAuthorization(
           otherUserId,
@@ -507,6 +552,7 @@ describe("linked Stellar direct payment execution on PostgreSQL", () => {
         await expect(consumeStellarPaymentExecutionSession(handoff.token)).resolves.toEqual({
           userId,
           paymentId,
+          purpose: "payment",
         });
         await validateStellarCctpPaymentAuthorization(userId, paymentId, burn);
         await linkStellarCctpPaymentAuthorization(userId, paymentId, requestHash, burn);
@@ -530,13 +576,14 @@ describe("linked Stellar direct payment execution on PostgreSQL", () => {
           SELECT event_key FROM payment_events WHERE payment_id = ${paymentId}::uuid
         `;
         expect(events.map((event) => event.event_key)).toEqual([
+          `stellar_cctp_allowance_${approvalRequestHash.slice(0, 16)}`,
           "stellar_cctp_owner_authorized",
           "stellar_cctp_submitted",
         ]);
       } finally {
         await sql.transaction([
           sql`DELETE FROM payment_events WHERE payment_id = ${paymentId}::uuid`,
-          sql`DELETE FROM stellar_relayer_requests WHERE request_hash = ${requestHash}`,
+          sql`DELETE FROM stellar_relayer_requests WHERE request_hash IN (${requestHash}, ${approvalRequestHash})`,
           sql`DELETE FROM stellar_payment_execution_sessions WHERE payment_id = ${paymentId}::uuid`,
           sql`DELETE FROM base_cctp_operations WHERE payment_id = ${paymentId}::uuid`,
           sql`DELETE FROM payments WHERE id = ${paymentId}::uuid`,

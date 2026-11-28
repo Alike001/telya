@@ -446,6 +446,18 @@ export async function getPaymentWithEvents(
       p.status,
       p.route_id,
       p.source_network,
+      (
+        SELECT w.address
+        FROM messages m
+        JOIN wallets w ON w.id::text =
+          m.structured_intent->'selectedSourceWallet'->>'id'
+        WHERE m.id = p.intent_message_id
+          AND m.conversation_id = p.conversation_id
+          AND w.user_id = p.user_id
+          AND w.network = p.source_network
+          AND w.verification_status = 'verified'
+        LIMIT 1
+      ) AS source_address,
       p.destination_network,
       p.rail,
       p.recipient_address,

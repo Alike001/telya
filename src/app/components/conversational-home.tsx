@@ -17,7 +17,7 @@ import {
   type SmartAccountPublicConfig,
 } from "../../stellar/smart-account";
 import { submitStellarUsdcTransfer } from "../../stellar/usdc";
-import { submitStellarCctpBurn } from "../../stellar/cctp";
+import { submitStellarCctpApproval, submitStellarCctpBurn } from "../../stellar/cctp";
 import {
   submitBaseCctpBurn,
   submitBaseUsdcTransfer,
@@ -38,6 +38,7 @@ import type {
 } from "./conversation-payment";
 import {
   executeConversationPayment,
+  approveConversationCctpAllowance,
   reconcileConversationBaseDirectPayment,
   reconcileConversationBaseToStellarPayment,
   reconcileConversationCctpPayment,
@@ -329,6 +330,21 @@ function AuthenticatedConversation() {
     });
   }
 
+  async function approveCctpAllowance(review: PaymentReview) {
+    const guard = sessionGuardRef.current;
+    if (!guard?.isActive()) throw new Error("Authenticated session changed.");
+    const request = await captureOperationRequest(guard);
+    return approveConversationCctpAllowance(review, {
+      config: configRef.current,
+      smartAccount,
+      request,
+      createKit: createBrowserSmartAccountKit,
+      restoreAccount: restoreSmartAccount,
+      submitApproval: submitStellarCctpApproval,
+      confirmReview: (details) => window.confirm(details),
+    });
+  }
+
   async function handleSendMessage(text: string, inputMode: "text" | "voice") {
     setMessages((previous) => [...previous, {
       id: crypto.randomUUID(), sender: "user", text, timestamp: "Just now",
@@ -473,6 +489,9 @@ function AuthenticatedConversation() {
                   message.review.sourceNetwork === "base" ? wallets.length > 0 : smartAccount
                 ))}
                 onConfirm={() => confirmPayment(message.review!)}
+                {...(message.review.routeId === "stellar_to_base"
+                  ? { onApprove: () => approveCctpAllowance(message.review!) }
+                  : {})}
                 onRefresh={(transactionHash) => reconcilePayment(message.review!, transactionHash)}
                 onCancel={() => setMessages((previous) => previous.filter((item) => item.id !== message.id))}
               />

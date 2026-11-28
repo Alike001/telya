@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 
 import type { PaymentExecutionResult, PaymentReview } from "./conversation-payment";
+import type { CctpApprovalResult } from "./conversation-payment-execution";
 import { runPaymentActionOnce } from "./payment-action-guard";
 
 export function PaymentReviewCard({
@@ -19,6 +20,7 @@ export function PaymentReviewCard({
   recipientLabel,
   canAuthorize,
   onConfirm,
+  onApprove,
   onRefresh,
   onCancel,
 }: {
@@ -26,13 +28,17 @@ export function PaymentReviewCard({
   readonly recipientLabel: string;
   readonly canAuthorize: boolean;
   readonly onConfirm: () => Promise<PaymentExecutionResult>;
+  readonly onApprove?: () => Promise<CctpApprovalResult>;
   readonly onRefresh: (transactionHash?: string) => Promise<PaymentExecutionResult>;
   readonly onCancel: () => void;
 }) {
   const [phase, setPhase] = useState<"idle" | "authorizing" | "refreshing" | "error">("idle");
   const [execution, setExecution] = useState<PaymentExecutionResult | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [approvalMessage, setApprovalMessage] = useState<string | null>(null);
   const actionGuard = useRef<Promise<PaymentExecutionResult> | null>(null);
+  const approvalGuard = useRef<Promise<CctpApprovalResult> | null>(null);
+  const operationInFlight = useRef(false);
   const routeLabel = review.routeId === "stellar_to_stellar"
     ? "Stellar Direct USDC"
     : review.routeId === "stellar_to_base"
@@ -48,6 +54,8 @@ export function PaymentReviewCard({
     : `https://stellar.expert/explorer/testnet/tx/${execution?.transactionHash ?? ""}`;
 
   async function confirm() {
+    if (operationInFlight.current) return;
+    operationInFlight.current = true;
     setPhase("authorizing");
     setErrorMessage(null);
     try {
@@ -58,11 +66,14 @@ export function PaymentReviewCard({
       setErrorMessage(error instanceof Error
         ? error.message
         : "Passkey authorization could not be verified. Check payment status before retrying.");
+    } finally {
+      operationInFlight.current = false;
     }
   }
 
   async function refresh() {
-    if (!execution) return;
+    if (!execution || operationInFlight.current) return;
+    operationInFlight.current = true;
     const transactionHash = execution.transactionHash ?? undefined;
     setPhase("refreshing");
     setErrorMessage(null);
@@ -77,6 +88,28 @@ export function PaymentReviewCard({
       setErrorMessage(error instanceof Error
         ? error.message
         : "The persisted payment status is temporarily unavailable.");
+    } finally {
+      operationInFlight.current = false;
+    }
+  }
+
+  async function approve() {
+    if (!onApprove || operationInFlight.current || approvalGuard.current) return;
+    operationInFlight.current = true;
+    setPhase("authorizing");
+    setErrorMessage(null);
+    const action = onApprove();
+    approvalGuard.current = action;
+    try {
+      const result = await action;
+      setApprovalMessage(result.message);
+      setPhase("idle");
+    } catch (error) {
+      setPhase("error");
+      setErrorMessage(error instanceof Error ? error.message : "Circle approval could not be verified.");
+    } finally {
+      approvalGuard.current = null;
+      operationInFlight.current = false;
     }
   }
 
@@ -146,6 +179,7 @@ export function PaymentReviewCard({
         </div>
       )}
       {errorMessage && <div className="review-error-banner" role="alert">{errorMessage}</div>}
+      {approvalMessage && <div className="review-error-banner" role="status">{approvalMessage}</div>}
       {execution?.status === "completed" && (
         <div className="review-success-banner" role="status">
           <CheckCircle2 className="success-icon" />
@@ -165,6 +199,12 @@ export function PaymentReviewCard({
       )}
 
       <div className="review-card-actions">
+        {!execution && canAuthorize && onApprove && (
+          <button type="button" className="cta-button review-submit-btn"
+            onClick={() => { void approve(); }} disabled={phase === "authorizing"}>
+            {phase === "authorizing" ? "Checking Circle approval…" : "Review exact Circle allowance"}
+          </button>
+        )}
         {!execution && canAuthorize && (
           <button
             type="button"

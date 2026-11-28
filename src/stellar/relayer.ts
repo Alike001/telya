@@ -101,12 +101,24 @@ export interface ValidatedStellarCctpBurn {
   readonly maxFeeRaw: bigint;
 }
 
+export interface ValidatedStellarCctpApproval {
+  readonly kind: "cctp_approval";
+  readonly func: xdr.HostFunction;
+  readonly auth: readonly xdr.SorobanAuthorizationEntry[];
+  readonly smartAccount: string;
+  readonly tokenContract: string;
+  readonly spender: string;
+  readonly amountRaw: bigint;
+  readonly expirationLedger: number;
+}
+
 export type ValidatedStellarRelayerSubmission =
   | ValidatedStellarDeployment
   | ValidatedStellarUsdcTransfer
   | ValidatedStellarAgentPassCreate
   | ValidatedStellarAgentPassRevoke
-  | ValidatedStellarCctpBurn;
+  | ValidatedStellarCctpBurn
+  | ValidatedStellarCctpApproval;
 
 interface SmartAccountAuthorization {
   readonly contextRuleId: number;
@@ -758,6 +770,43 @@ function requireBytes(value: xdr.ScVal, length: number, label: string): Buffer {
 }
 
 /** Allow only an exact owner-authorized Standard CCTP forwarding burn to configured Base. */
+export function validateStellarCctpApprovalSubmission(
+  submission: StellarDeploymentSubmission,
+  options: { usdcContract: string; cctpTokenMessenger: string; webauthnVerifierAddress: string },
+): ValidatedStellarCctpApproval {
+  let func: xdr.HostFunction;
+  let auth: xdr.SorobanAuthorizationEntry[];
+  try {
+    func = xdr.HostFunction.fromXDR(submission.func, "base64");
+    auth = submission.auth.map((entry) => xdr.SorobanAuthorizationEntry.fromXDR(entry, "base64"));
+  } catch {
+    throw new StellarRelayerError("INVALID_REQUEST", "func/auth contains invalid XDR", 400);
+  }
+  if (func.switch().name !== "hostFunctionTypeInvokeContract" || auth.length !== 1) {
+    throw new StellarRelayerError("FORBIDDEN_DEPLOYMENT", "Approval requires one owner authorization", 403);
+  }
+  const invoke = func.invokeContract();
+  const tokenContract = contractIdOf(invoke.contractAddress(), "Approval token must be a contract");
+  const args = invoke.args();
+  if (tokenContract !== options.usdcContract || invoke.functionName().toString() !== "approve" || args.length !== 4) {
+    throw new StellarRelayerError("FORBIDDEN_DEPLOYMENT", "Only configured USDC approval is accepted", 403);
+  }
+  const smartAccount = requireTransferAddress(args[0]!, "Approval owner");
+  const spender = requireTransferAddress(args[1]!, "Approval spender");
+  const amountRaw = scValToNative(args[2]!) as unknown;
+  if (!StrKey.isValidContract(smartAccount) || spender !== options.cctpTokenMessenger ||
+      typeof amountRaw !== "bigint" || amountRaw <= 0n ||
+      args[3]?.switch().name !== "scvU32" || args[3].u32() <= 0) {
+    throw new StellarRelayerError("FORBIDDEN_DEPLOYMENT", "Approval does not match CCTP Testnet policy", 403);
+  }
+  requireOwnerAuthorization(auth[0]!, invoke, smartAccount, options.webauthnVerifierAddress);
+  return {
+    kind: "cctp_approval", func, auth, smartAccount, tokenContract,
+    spender, amountRaw, expirationLedger: args[3].u32(),
+  };
+}
+
+/** Allow only an exact owner-authorized Standard CCTP forwarding burn to configured Base. */
 export function validateStellarCctpBurnSubmission(
   submission: StellarDeploymentSubmission,
   options: {
@@ -789,20 +838,12 @@ export function validateStellarCctpBurnSubmission(
     );
   }
   const invoke = func.invokeContract();
-  const smartAccount = contractIdOf(
-    invoke.contractAddress(),
-    "CCTP source must be a smart-account contract",
-  );
+  const tokenMessenger = contractIdOf(invoke.contractAddress(), "CCTP target must be a contract");
   const args = invoke.args();
-  const targetArgs = args[2]?.switch().name === "scvVec" ? args[2].vec() ?? [] : [];
   if (
-    invoke.functionName().toString() !== "execute" ||
-    args.length !== 3 ||
-    args[0]?.switch().name !== "scvAddress" ||
-    contractIdOf(args[0].address(), "CCTP target must be a contract") !==
-      options.cctpTokenMessenger ||
-    scValToNative(args[1]!) !== "deposit_for_burn_with_hook" ||
-    targetArgs.length !== 9
+    tokenMessenger !== options.cctpTokenMessenger ||
+    invoke.functionName().toString() !== "deposit_for_burn_with_hook" ||
+    args.length !== 9
   ) {
     throw new StellarRelayerError(
       "FORBIDDEN_DEPLOYMENT",
@@ -810,37 +851,39 @@ export function validateStellarCctpBurnSubmission(
       403,
     );
   }
+  const smartAccount = requireTransferAddress(args[0]!, "CCTP caller");
+  if (!StrKey.isValidContract(smartAccount)) {
+    throw new StellarRelayerError("FORBIDDEN_DEPLOYMENT", "CCTP caller must be a smart account", 403);
+  }
   requireOwnerAuthorization(
     auth[0]!,
     invoke,
     smartAccount,
     options.webauthnVerifierAddress,
   );
-  const caller = requireTransferAddress(targetArgs[0]!, "CCTP caller");
-  const amountRaw = scValToNative(targetArgs[1]!) as unknown;
-  const mintRecipient = requireBytes(targetArgs[3]!, 32, "CCTP mint recipient");
-  const burnToken = requireTransferAddress(targetArgs[4]!, "CCTP burn token");
+  const amountRaw = scValToNative(args[1]!) as unknown;
+  const mintRecipient = requireBytes(args[3]!, 32, "CCTP mint recipient");
+  const burnToken = requireTransferAddress(args[4]!, "CCTP burn token");
   const destinationCaller = requireBytes(
-    targetArgs[5]!,
+    args[5]!,
     32,
     "CCTP destination caller",
   );
-  const maxFeeRaw = scValToNative(targetArgs[6]!) as unknown;
-  const hookData = requireBytes(targetArgs[8]!, 32, "CCTP forwarding hook");
+  const maxFeeRaw = scValToNative(args[6]!) as unknown;
+  const hookData = requireBytes(args[8]!, 32, "CCTP forwarding hook");
   if (
-    caller !== smartAccount ||
     typeof amountRaw !== "bigint" ||
     amountRaw <= 0n ||
-    targetArgs[2]?.switch().name !== "scvU32" ||
-    targetArgs[2].u32() !== options.baseDomain ||
+    args[2]?.switch().name !== "scvU32" ||
+    args[2].u32() !== options.baseDomain ||
     mintRecipient.subarray(0, 12).some((byte) => byte !== 0) ||
     burnToken !== options.usdcContract ||
     destinationCaller.some((byte) => byte !== 0) ||
     typeof maxFeeRaw !== "bigint" ||
     maxFeeRaw < 0n ||
     maxFeeRaw >= amountRaw ||
-    targetArgs[7]?.switch().name !== "scvU32" ||
-    targetArgs[7].u32() !== 2_000 ||
+    args[7]?.switch().name !== "scvU32" ||
+    args[7].u32() !== 2_000 ||
     !hookData.equals(CCTP_FORWARDING_SERVICE_HOOK)
   ) {
     throw new StellarRelayerError(
@@ -896,7 +939,17 @@ export function validateStellarRelayerSubmission(
   }
   const invoke = func.invokeContract();
   const functionName = invoke.functionName().toString();
-  if (functionName === "execute") {
+  if (functionName === "approve") {
+    if (!options.cctpTokenMessenger) {
+      throw new StellarRelayerError("RELAYER_UNAVAILABLE", "The Stellar CCTP relayer is not configured", 503);
+    }
+    return validateStellarCctpApprovalSubmission(submission, {
+      usdcContract: options.usdcContract,
+      cctpTokenMessenger: options.cctpTokenMessenger,
+      webauthnVerifierAddress: options.webauthnVerifierAddress,
+    });
+  }
+  if (functionName === "deposit_for_burn_with_hook") {
     if (!options.cctpTokenMessenger || options.baseDomain !== 6) {
       throw new StellarRelayerError(
         "RELAYER_UNAVAILABLE",

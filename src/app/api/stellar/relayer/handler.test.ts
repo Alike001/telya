@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { rpc } from "@stellar/stellar-sdk";
 
 vi.mock("server-only", () => ({}));
 
@@ -9,6 +10,9 @@ const mocks = vi.hoisted(() => ({
   reserve: vi.fn(),
   recordBurnAuthorization: vi.fn(),
   recordBurnSubmission: vi.fn(),
+  recordApprovalAuthorization: vi.fn(),
+  recordApprovalSubmission: vi.fn(),
+  assertApprovalLink: vi.fn(),
   completeRequest: vi.fn(),
   recordTransferAuthorization: vi.fn(),
   recordTransferSubmission: vi.fn(),
@@ -54,6 +58,9 @@ vi.mock("../../../../server/stellar-relayer-requests", () => ({
   completeStellarRelayerRequest: mocks.completeRequest,
   recordStellarCctpBurnAuthorization: mocks.recordBurnAuthorization,
   recordStellarCctpBurnSubmission: mocks.recordBurnSubmission,
+  recordStellarCctpApprovalAuthorization: mocks.recordApprovalAuthorization,
+  recordStellarCctpApprovalSubmission: mocks.recordApprovalSubmission,
+  assertStellarCctpApprovalRequestLink: mocks.assertApprovalLink,
   recordStellarAgentPassAuthorization: mocks.recordAgentPassAuthorization,
   recordStellarUsdcTransferAuthorization: mocks.recordTransferAuthorization,
   recordStellarUsdcTransferSubmission: mocks.recordTransferSubmission,
@@ -81,6 +88,7 @@ describe("shared Stellar relayer CCTP integration", () => {
     vi.clearAllMocks();
     vi.stubEnv("CCTP_STELLAR_TOKEN_MESSENGER", "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM");
     vi.stubEnv("CCTP_BASE_DOMAIN", "6");
+    vi.stubEnv("STELLAR_RPC_URL", "https://soroban-testnet.stellar.org");
     mocks.parse.mockReturnValue({ func: "signed-cctp-burn", auth: ["passkey"] });
     mocks.validate.mockReturnValue({ kind: "cctp_burn", smartAccount: "smart-account" });
     mocks.identity.mockReturnValue({ requestHash: "request-hash", clientKeyHash: "client-key-hash" });
@@ -183,6 +191,67 @@ describe("shared Stellar relayer CCTP integration", () => {
     expect(mocks.linkCctpPayment.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.submit.mock.invocationCallOrder[0]!,
     );
+  });
+
+  it("binds a separate, short-lived approval before broadcast and rejects a burn handoff", async () => {
+    const ledger = vi.spyOn(rpc.Server.prototype, "getLatestLedger")
+      .mockResolvedValue({ sequence: 5_964_700 } as never);
+    mocks.validate.mockReturnValue({
+      kind: "cctp_approval", smartAccount: "smart-account",
+      expirationLedger: 5_965_420,
+    });
+    const context = {
+      userId: "11111111-1111-4111-8111-111111111111",
+      paymentId: "22222222-2222-4222-8222-222222222222",
+      purpose: "cctp_approval" as const,
+    };
+    const response = await handleStellarRelayerRequest(new Request(
+      "https://telya.test/api/stellar/relayer/payment",
+      { method: "POST", body: JSON.stringify({ func: "signed", auth: ["passkey"] }) },
+    ), context);
+    expect(response.status).toBe(200);
+    expect(mocks.recordApprovalAuthorization).toHaveBeenCalledWith(
+      context.userId, context.paymentId, "request-hash", expect.objectContaining({ kind: "cctp_approval" }),
+    );
+    expect(mocks.recordApprovalAuthorization.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.submit.mock.invocationCallOrder[0]!,
+    );
+    expect(mocks.recordApprovalSubmission).toHaveBeenCalledWith("request-hash", TRANSACTION_HASH);
+    mocks.reserve.mockClear();
+    mocks.submit.mockClear();
+    const wrongPurpose = await handleStellarRelayerRequest(new Request(
+      "https://telya.test/api/stellar/relayer/payment",
+      { method: "POST", body: JSON.stringify({ func: "signed", auth: ["passkey"] }) },
+    ), { ...context, purpose: "payment" });
+    expect(wrongPurpose.status).toBe(409);
+    expect(mocks.reserve).not.toHaveBeenCalled();
+    expect(mocks.submit).not.toHaveBeenCalled();
+    ledger.mockRestore();
+  });
+
+  it("rejects expired approval and replays an already recorded approval without another submission", async () => {
+    const ledger = vi.spyOn(rpc.Server.prototype, "getLatestLedger")
+      .mockResolvedValue({ sequence: 5_964_700 } as never);
+    const context = {
+      userId: "11111111-1111-4111-8111-111111111111",
+      paymentId: "22222222-2222-4222-8222-222222222222",
+      purpose: "cctp_approval" as const,
+    };
+    mocks.validate.mockReturnValue({ kind: "cctp_approval", expirationLedger: 5_964_700 });
+    const expired = await handleStellarRelayerRequest(new Request("https://telya.test/api/stellar/relayer/payment", {
+      method: "POST", body: JSON.stringify({ func: "signed", auth: ["passkey"] }),
+    }), context);
+    expect(expired.status).toBe(409);
+    expect(mocks.reserve).not.toHaveBeenCalled();
+    mocks.validate.mockReturnValue({ kind: "cctp_approval", expirationLedger: 5_965_000 });
+    mocks.reserve.mockResolvedValueOnce({ decision: "succeeded", transactionHash: TRANSACTION_HASH });
+    const replay = await handleStellarRelayerRequest(new Request("https://telya.test/api/stellar/relayer/payment", {
+      method: "POST", body: JSON.stringify({ func: "signed", auth: ["passkey"] }),
+    }), context);
+    expect(replay.status).toBe(200);
+    expect(mocks.assertApprovalLink).toHaveBeenCalledWith(context.userId, context.paymentId, "request-hash");
+    expect(mocks.submit).not.toHaveBeenCalled();
+    ledger.mockRestore();
   });
 });
 

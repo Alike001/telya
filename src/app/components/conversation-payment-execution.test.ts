@@ -10,7 +10,7 @@ import {
 } from "../../base/evm.ts";
 import type { SmartAccountPublicConfig } from "../../stellar/smart-account.ts";
 import type { PaymentReview } from "./conversation-payment.ts";
-import { executeConversationPayment } from "./conversation-payment-execution.ts";
+import { approveConversationCctpAllowance, executeConversationPayment } from "./conversation-payment-execution.ts";
 
 const txHash = "a".repeat(64);
 const review: PaymentReview = {
@@ -92,6 +92,53 @@ function json(body: unknown, status = 200): Response {
 }
 
 describe("conversation payment execution", () => {
+  it("shows exact approval terms and verifies allowance without submitting a burn", async () => {
+    const request = vi.fn()
+      .mockResolvedValueOnce(json({
+        status: "approval_authorization_ready",
+        approval: {
+          owner: smartAccount.contractId, spender: cctpConfig.tokenMessenger,
+          amount: "5.052683", expirationLedger: 5_970_000, paymentId: cctpReview.id,
+        },
+      }, 201))
+      .mockResolvedValueOnce(json({ config: cctpConfig }))
+      .mockResolvedValueOnce(json({ status: "ready", amount: "5.052683" }));
+    const confirmReview = vi.fn().mockReturnValue(true);
+    const submitApproval = vi.fn().mockResolvedValue({ txHash });
+    const result = await approveConversationCctpAllowance(cctpReview, {
+      config, smartAccount, request,
+      createKit: vi.fn().mockReturnValue({ contractId: smartAccount.contractId }),
+      restoreAccount: vi.fn().mockResolvedValue(smartAccount),
+      submitApproval, confirmReview,
+    });
+    expect(result.status).toBe("approved");
+    expect(confirmReview.mock.calls[0]?.[0]).toContain("5.052683");
+    expect(confirmReview.mock.calls[0]?.[0]).toContain(cctpConfig.tokenMessenger);
+    expect(submitApproval).toHaveBeenCalledWith(expect.objectContaining({
+      amount: "5.052683", expirationLedger: 5_970_000,
+    }));
+    expect(request).toHaveBeenCalledTimes(3);
+  });
+
+  it("rejects wrong approval amount before passkey access", async () => {
+    const confirmReview = vi.fn();
+    const submitApproval = vi.fn();
+    const request = vi.fn()
+      .mockResolvedValueOnce(json({
+        status: "approval_authorization_ready",
+        approval: {
+          owner: smartAccount.contractId, spender: cctpConfig.tokenMessenger,
+          amount: "5.052684", expirationLedger: 5_970_000, paymentId: cctpReview.id,
+        },
+      }, 201))
+      .mockResolvedValueOnce(json({ config: cctpConfig }));
+    await expect(approveConversationCctpAllowance(cctpReview, {
+      config, smartAccount, request, createKit: vi.fn(), restoreAccount: vi.fn(),
+      submitApproval, confirmReview,
+    })).rejects.toThrow("do not match");
+    expect(confirmReview).not.toHaveBeenCalled();
+    expect(submitApproval).not.toHaveBeenCalled();
+  });
   it("submits only the exact server-authorized Base direct transfer and keeps pending truthful", async () => {
     const request = vi.fn()
       .mockResolvedValueOnce(json({

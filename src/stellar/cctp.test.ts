@@ -7,6 +7,7 @@ import {
   Networks,
   StrKey,
   TransactionBuilder,
+  contract,
   xdr,
 } from "@stellar/stellar-sdk";
 import { describe, expect, it, vi } from "vitest";
@@ -21,6 +22,8 @@ import {
   bytes32ToEvmAddress,
   evmAddressToBytes32,
   prepareStellarCctpBurn,
+  prepareStellarCctpApproval,
+  submitStellarCctpApproval,
   submitStellarCctpBurn,
   stellarContractToBytes32,
   validateStellarCctpConfig,
@@ -52,11 +55,8 @@ function finalizedBurnEnvelope(): xdr.TransactionEnvelope {
     burnAmount: "5.12",
     maxFee: "0.01",
   });
-  const invoke = new Contract(SMART_ACCOUNT).call(
-    "execute",
-    new Address(config.tokenMessenger).toScVal(),
-    xdr.ScVal.scvString("deposit_for_burn_with_hook"),
-    xdr.ScVal.scvVec([...prepared.targetArgs]),
+  const invoke = new Contract(config.tokenMessenger).call(
+    "deposit_for_burn_with_hook", ...prepared.targetArgs,
   );
   return new TransactionBuilder(new Account(SPONSOR, "1"), {
     fee: "100",
@@ -109,6 +109,35 @@ describe("CCTP address encoding", () => {
 });
 
 describe("Stellar to Base source burn", () => {
+  it("builds an exact, expiring TokenMessenger approval without a burn", () => {
+    const approval = prepareStellarCctpApproval(config, {
+      smartAccount: SMART_ACCOUNT, amount: "0.1531450", expirationLedger: 5_970_000,
+    });
+    expect(approval.amountRaw).toBe(1_531_450n);
+    expect(approval.spender).toBe(config.tokenMessenger);
+    expect(approval.args[2]).toEqual(expect.anything());
+    expect(approval.args[3]?.u32()).toBe(5_970_000);
+    expect(() => prepareStellarCctpApproval(config, {
+      smartAccount: SMART_ACCOUNT, amount: "0.1531450", expirationLedger: 0,
+    })).toThrow("expiration ledger");
+  });
+
+  it("requires a separate passkey signature for approval", async () => {
+    const build = vi.spyOn(contract.AssembledTransaction, "buildWithOp").mockResolvedValue({} as never);
+    const signAndSubmit = vi.fn().mockResolvedValue({ success: true, hash: "d".repeat(64) });
+    const result = await submitStellarCctpApproval({
+      kit: { contractId: SMART_ACCOUNT, signAndSubmit }, config,
+      amount: "0.1531450", expirationLedger: 5_970_000,
+    });
+    const invoke = build.mock.calls[0]?.[0].body().invokeHostFunctionOp().hostFunction().invokeContract();
+    expect(Address.fromScAddress(invoke!.contractAddress()).toString()).toBe(config.usdcContract);
+    expect(invoke!.functionName().toString()).toBe("approve");
+    expect(invoke!.args()).toHaveLength(4);
+    expect(signAndSubmit.mock.calls[0]?.[1].resolveContextRuleIds()).toEqual([0]);
+    expect(result).toEqual({ txHash: "d".repeat(64), expirationLedger: 5_970_000 });
+    build.mockRestore();
+  });
+
   it("builds the exact Standard CCTP invocation arguments", () => {
     const burn = prepareStellarCctpBurn(config, {
       smartAccount: SMART_ACCOUNT,
@@ -136,26 +165,29 @@ describe("Stellar to Base source burn", () => {
   });
 
   it("requires explicit owner authorization through the relayer", async () => {
-    const executeAndSubmit = vi.fn().mockResolvedValue({
+    const build = vi.spyOn(contract.AssembledTransaction, "buildWithOp")
+      .mockResolvedValue({} as never);
+    const signAndSubmit = vi.fn().mockResolvedValue({
       success: true,
       hash: "a".repeat(64),
       ledger: 123,
     });
     const result = await submitStellarCctpBurn({
-      kit: { contractId: SMART_ACCOUNT, executeAndSubmit },
+      kit: { contractId: SMART_ACCOUNT, signAndSubmit },
       config,
       recipient: RECIPIENT,
       burnAmount: "5.12",
       maxFee: "0.01",
     });
     expect(result.txHash).toBe("a".repeat(64));
-    expect(executeAndSubmit).toHaveBeenCalledWith(
-      config.tokenMessenger,
-      "deposit_for_burn_with_hook",
-      expect.any(Array),
-      expect.objectContaining({ forceMethod: "relayer" }),
+    const invoke = build.mock.calls[0]?.[0].body().invokeHostFunctionOp().hostFunction().invokeContract();
+    expect(Address.fromScAddress(invoke!.contractAddress()).toString()).toBe(config.tokenMessenger);
+    expect(invoke!.functionName().toString()).toBe("deposit_for_burn_with_hook");
+    expect(signAndSubmit).toHaveBeenCalledWith(
+      expect.anything(), expect.objectContaining({ forceMethod: "relayer" }),
     );
-    expect(executeAndSubmit.mock.calls[0]?.[3].resolveContextRuleIds()).toEqual([0]);
+    expect(signAndSubmit.mock.calls[0]?.[1].resolveContextRuleIds()).toEqual([0]);
+    build.mockRestore();
   });
 
   it("verifies finalized source evidence without treating it as completion", async () => {

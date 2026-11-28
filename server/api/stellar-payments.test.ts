@@ -9,6 +9,8 @@ import {
 import {
   createStellarPaymentAuthorizationHandler,
   createStellarCctpPaymentAuthorizationHandler,
+  createStellarCctpApprovalAuthorizationHandler,
+  createStellarCctpApprovalStatusHandler,
   createStellarPaymentReconciliationHandler,
 } from "./stellar-payments.ts";
 
@@ -128,6 +130,7 @@ describe("Stellar payment authorization handoff API", () => {
       getPayment: vi.fn().mockResolvedValue({
         route_id: "stellar_to_base",
         source_network: "stellar",
+        source_address: "CB5KD4DQCBNQ7NEJESE5CUBNAZSNEAROEGKN6G4HGO5D265QNHWMSG3R",
         expected_recipient_amount: "5.000000000000000000",
         fees: [{
           kind: "provider",
@@ -138,6 +141,7 @@ describe("Stellar payment authorization handoff API", () => {
       }),
       reserveCctp,
       createSession,
+      readAllowance: vi.fn().mockResolvedValue({ allowanceRaw: 50_526_830n, latestLedger: 5_964_700 }),
     });
 
     const response = await handler(new Request(
@@ -165,5 +169,86 @@ describe("Stellar payment authorization handoff API", () => {
       createSession.mock.invocationCallOrder[0]!,
     );
     expect(response.headers.get("set-cookie")).toContain("HttpOnly");
+  });
+
+  it("blocks burn authorization on insufficient TokenMessenger allowance", async () => {
+    const createSession = vi.fn();
+    const handler = createStellarCctpPaymentAuthorizationHandler({
+      authenticate: vi.fn().mockResolvedValue(user),
+      getPayment: vi.fn().mockResolvedValue({
+        route_id: "stellar_to_base", source_network: "stellar",
+        source_address: "CB5KD4DQCBNQ7NEJESE5CUBNAZSNEAROEGKN6G4HGO5D265QNHWMSG3R",
+        expected_recipient_amount: "0.1", fees: [{
+          kind: "provider", payer: "sender", asset: "USDC", amount: "0.0531450",
+        }],
+      }),
+      reserveCctp: vi.fn(), createSession,
+      readAllowance: vi.fn().mockResolvedValue({ allowanceRaw: 0n, latestLedger: 5_964_700 }),
+    });
+    const response = await handler(new Request("https://telya.test/api/payments/stellar/cctp/authorize", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ paymentId: "22222222-2222-4222-8222-222222222222" }),
+    }));
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({ error: "stellar_cctp_approval_required" });
+    expect(createSession).not.toHaveBeenCalled();
+  });
+
+  it("issues a separate exact, expiring approval handoff and recovers by live allowance", async () => {
+    const paymentId = "22222222-2222-4222-8222-222222222222";
+    const sourceAddress = "CB5KD4DQCBNQ7NEJESE5CUBNAZSNEAROEGKN6G4HGO5D265QNHWMSG3R";
+    const payment = {
+      id: paymentId, route_id: "stellar_to_base", status: "awaiting_confirmation",
+      source_network: "stellar", source_address: sourceAddress,
+      expected_recipient_amount: "0.1", fees: [{
+        kind: "provider", payer: "sender", asset: "USDC", amount: "0.0531450",
+      }],
+    };
+    const createSession = vi.fn().mockResolvedValue({ token: "C".repeat(43), expiresAt: "2030-01-01T00:05:00.000Z" });
+    const readAllowance = vi.fn().mockResolvedValueOnce({ allowanceRaw: 0n, latestLedger: 5_964_700 })
+      .mockResolvedValueOnce({ allowanceRaw: 1_531_450n, latestLedger: 5_964_705 });
+    const handler = createStellarCctpApprovalAuthorizationHandler({
+      authenticate: vi.fn().mockResolvedValue(user), getPayment: vi.fn().mockResolvedValue(payment),
+      reserveCctp: vi.fn(), createSession, readAllowance,
+      existingApproval: vi.fn().mockResolvedValue(null),
+      getConfig: vi.fn().mockReturnValue({ tokenMessenger: "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM" }),
+    });
+    const response = await handler(new Request("https://telya.test/api/payments/stellar/cctp/approval/authorize", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ paymentId }),
+    }));
+    expect(response.status).toBe(201);
+    await expect(response.json()).resolves.toMatchObject({
+      status: "approval_authorization_ready",
+      approval: { paymentId, owner: sourceAddress, amount: "0.153145", expirationLedger: 5_965_420 },
+    });
+    expect(createSession).toHaveBeenCalledWith(user, paymentId, "cctp_approval");
+    const status = createStellarCctpApprovalStatusHandler({
+      authenticate: vi.fn().mockResolvedValue(user), getPayment: vi.fn().mockResolvedValue(payment), readAllowance,
+    });
+    const recovered = await status(new Request(`https://telya.test/api/payments/stellar/cctp/approval/authorize?id=${paymentId}`));
+    expect(recovered.status).toBe(200);
+    await expect(recovered.json()).resolves.toMatchObject({ status: "ready", amount: "0.153145" });
+  });
+
+  it("refuses a second approval while an earlier attempt is unresolved", async () => {
+    const createSession = vi.fn();
+    const handler = createStellarCctpApprovalAuthorizationHandler({
+      authenticate: vi.fn().mockResolvedValue(user),
+      getPayment: vi.fn().mockResolvedValue({
+        route_id: "stellar_to_base", status: "awaiting_confirmation",
+        source_network: "stellar",
+        source_address: "CB5KD4DQCBNQ7NEJESE5CUBNAZSNEAROEGKN6G4HGO5D265QNHWMSG3R",
+        expected_recipient_amount: "0.1", fees: [],
+      }),
+      reserveCctp: vi.fn(), readAllowance: vi.fn().mockResolvedValue({ allowanceRaw: 0n, latestLedger: 5_964_700 }),
+      existingApproval: vi.fn().mockResolvedValue("pending"), createSession,
+    });
+    const response = await handler(new Request("https://telya.test/api/payments/stellar/cctp/approval/authorize", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ paymentId: "22222222-2222-4222-8222-222222222222" }),
+    }));
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toMatchObject({ error: "stellar_cctp_approval_pending" });
+    expect(createSession).not.toHaveBeenCalled();
   });
 });

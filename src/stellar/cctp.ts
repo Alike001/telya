@@ -7,6 +7,7 @@ import {
   Operation,
   StrKey,
   TransactionBuilder,
+  contract,
   nativeToScVal,
   type rpc,
   scValToNative,
@@ -43,12 +44,74 @@ export interface StellarCctpConfig {
 
 export interface StellarCctpSourceKit {
   readonly contractId: string | undefined;
-  executeAndSubmit(
-    target: string,
-    targetFn: string,
-    targetArgs: Array<unknown>,
+  signAndSubmit(
+    transaction: Awaited<ReturnType<typeof contract.AssembledTransaction.buildWithOp>>,
     options: { forceMethod: "relayer"; resolveContextRuleIds: () => number[] },
   ): Promise<TransactionResult>;
+}
+
+export interface StellarCctpApprovalIntent {
+  readonly smartAccount: string;
+  readonly amount: DecimalAmount;
+  readonly expirationLedger: number;
+}
+
+export function prepareStellarCctpApproval(config: StellarCctpConfig, intent: StellarCctpApprovalIntent) {
+  const checked = validateStellarCctpConfig(config);
+  const smartAccount = requireContract(intent.smartAccount, "smartAccount");
+  const amountRaw = normalizeStellarUsdcAmount(intent.amount).raw;
+  if (!Number.isSafeInteger(intent.expirationLedger) || intent.expirationLedger <= 0 ||
+      intent.expirationLedger > 0xffff_ffff) {
+    throw new StellarCctpError("INVALID_TRANSACTION", "CCTP approval expiration ledger is invalid");
+  }
+  return {
+    smartAccount,
+    spender: checked.tokenMessenger,
+    amountRaw,
+    expirationLedger: intent.expirationLedger,
+    args: [
+      new Address(smartAccount).toScVal(),
+      new Address(checked.tokenMessenger).toScVal(),
+      nativeToScVal(amountRaw, { type: "i128" }),
+      xdr.ScVal.scvU32(intent.expirationLedger),
+    ],
+  };
+}
+
+/** A separate owner-passkey authorization; approval never submits a burn. */
+export async function submitStellarCctpApproval(input: {
+  readonly kit: StellarCctpSourceKit;
+  readonly config: StellarCctpConfig;
+  readonly amount: DecimalAmount;
+  readonly expirationLedger: number;
+}): Promise<{ readonly txHash: string; readonly expirationLedger: number }> {
+  if (!input.kit.contractId) {
+    throw new StellarCctpError("INVALID_TRANSACTION", "Connect the verified Stellar passkey account before approval");
+  }
+  const checked = validateStellarCctpConfig(input.config);
+  const approval = prepareStellarCctpApproval(checked, {
+    smartAccount: input.kit.contractId,
+    amount: input.amount,
+    expirationLedger: input.expirationLedger,
+  });
+  const transaction = await contract.AssembledTransaction.buildWithOp(
+    new Contract(checked.usdcContract).call("approve", ...approval.args),
+    {
+      contractId: checked.usdcContract,
+      networkPassphrase: checked.networkPassphrase,
+      rpcUrl: checked.rpcUrl,
+      method: "approve",
+      parseResultXdr: (value) => value,
+    },
+  );
+  const result = await input.kit.signAndSubmit(transaction, {
+    forceMethod: "relayer",
+    resolveContextRuleIds: () => [0],
+  });
+  if (!result.success) {
+    throw new StellarCctpError("SOURCE_BURN_FAILED", result.error.message || "Stellar rejected the CCTP approval", { cause: result.error });
+  }
+  return { txHash: result.hash, expirationLedger: approval.expirationLedger };
 }
 
 export class StellarCctpError extends Error {
@@ -265,10 +328,18 @@ export async function submitStellarCctpBurn(input: {
     burnAmount: input.burnAmount,
     maxFee: input.maxFee,
   });
-  const result = await input.kit.executeAndSubmit(
-    checked.tokenMessenger,
-    "deposit_for_burn_with_hook",
-    [...burn.targetArgs],
+  const operation = new Contract(checked.tokenMessenger).call(
+    "deposit_for_burn_with_hook", ...burn.targetArgs,
+  );
+  const transaction = await contract.AssembledTransaction.buildWithOp(operation, {
+    contractId: checked.tokenMessenger,
+    networkPassphrase: checked.networkPassphrase,
+    rpcUrl: checked.rpcUrl,
+    method: "deposit_for_burn_with_hook",
+    parseResultXdr: (value) => value,
+  });
+  const result = await input.kit.signAndSubmit(
+    transaction,
     { forceMethod: "relayer", resolveContextRuleIds: () => [0] },
   );
   if (!result.success) {
@@ -383,19 +454,16 @@ export async function verifyStellarCctpBurn(input: {
   }
   const invoke = invokeFromEnvelope(transaction.envelopeXdr);
   const args = invoke?.args() ?? [];
-  const targetArgs = args[2]?.switch().name === "scvVec" ? args[2].vec() ?? [] : [];
   const matches =
     invoke !== null &&
-    Address.fromScAddress(invoke.contractAddress()).toString() === expected.smartAccount &&
-    invoke.functionName().toString() === "execute" &&
-    args.length === 3 &&
-    scAddress(args[0]!) === checked.tokenMessenger &&
-    scValToNative(args[1]!) === "deposit_for_burn_with_hook" &&
-    targetArgs.length === expected.targetArgs.length &&
-    targetArgs.every((value, index) =>
+    Address.fromScAddress(invoke.contractAddress()).toString() === checked.tokenMessenger &&
+    invoke.functionName().toString() === "deposit_for_burn_with_hook" &&
+    args.length === expected.targetArgs.length &&
+    args.every((value, index) =>
       Buffer.from(value.toXDR()).equals(Buffer.from(expected.targetArgs[index]!.toXDR())),
     ) &&
-    nativeBigint(targetArgs[1]!) === expected.amountRaw;
+    scAddress(args[0]!) === expected.smartAccount &&
+    nativeBigint(args[1]!) === expected.amountRaw;
   if (!matches) {
     return { status: "mismatch", txHash, ledger: transaction.ledger };
   }

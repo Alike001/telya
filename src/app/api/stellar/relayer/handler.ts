@@ -20,6 +20,9 @@ import {
   completeStellarRelayerRequest,
   recordStellarCctpBurnAuthorization,
   recordStellarCctpBurnSubmission,
+  recordStellarCctpApprovalAuthorization,
+  recordStellarCctpApprovalSubmission,
+  assertStellarCctpApprovalRequestLink,
   recordStellarAgentPassAuthorization,
   recordStellarUsdcTransferAuthorization,
   recordStellarUsdcTransferSubmission,
@@ -80,7 +83,7 @@ function errorResponse(error: unknown): Response {
 export async function handleStellarRelayerRequest(
   request: Request,
   context?:
-    | { readonly userId: string; readonly paymentId: string }
+    | { readonly userId: string; readonly paymentId: string; readonly purpose?: "payment" | "cctp_approval" }
     | { readonly deployment: { readonly userId: string } }
     | { readonly agentPass: {
         readonly userId: string;
@@ -138,13 +141,17 @@ export async function handleStellarRelayerRequest(
       cctpTokenMessenger: process.env.CCTP_STELLAR_TOKEN_MESSENGER ?? "",
       baseDomain: Number(process.env.CCTP_BASE_DOMAIN),
     });
+    const paymentPurpose = paymentContext?.purpose ?? "payment";
     const isAgentPassOperation = validated.kind === "agent_pass_create" ||
       validated.kind === "agent_pass_revoke";
     if (validated.kind === "deployment" && !deploymentContext) {
       throw new AuthenticationError("Authenticated deployment authorization is required");
     }
-    if ((validated.kind === "usdc_transfer" || validated.kind === "cctp_burn") && !paymentContext) {
+    if ((validated.kind === "usdc_transfer" || validated.kind === "cctp_burn" || validated.kind === "cctp_approval") && !paymentContext) {
       throw new AuthenticationError("Authenticated payment authorization is required");
+    }
+    if (paymentContext && (validated.kind === "cctp_approval") !== (paymentPurpose === "cctp_approval")) {
+      throw new StellarRelayerError("PAYMENT_MISMATCH", "Approval and payment authorizations cannot be interchanged", 409);
     }
     if (isAgentPassOperation && !agentPassContext) {
       throw new AuthenticationError("Authenticated Agent Pass authorization is required");
@@ -166,16 +173,23 @@ export async function handleStellarRelayerRequest(
         );
       }
     }
-    if (paymentId && validated.kind !== "usdc_transfer" && validated.kind !== "cctp_burn") {
+    if (paymentId && validated.kind !== "usdc_transfer" && validated.kind !== "cctp_burn" && validated.kind !== "cctp_approval") {
       throw new StellarRelayerError(
         "INVALID_REQUEST",
         "A payment ID is accepted only for a USDC transfer",
         400,
       );
     }
-    const paymentUserId = (validated.kind === "usdc_transfer" || validated.kind === "cctp_burn") && paymentId
+    const paymentUserId = (validated.kind === "usdc_transfer" || validated.kind === "cctp_burn" || validated.kind === "cctp_approval") && paymentId
       ? paymentContext?.userId ?? (await authenticateRequest(request)).id
       : null;
+    if (validated.kind === "cctp_approval") {
+      const latest = await new rpc.Server(process.env.STELLAR_RPC_URL ?? "").getLatestLedger();
+      if (validated.expirationLedger <= latest.sequence ||
+          validated.expirationLedger > latest.sequence + 720) {
+        throw new StellarRelayerError("PAYMENT_MISMATCH", "CCTP allowance approval has expired or exceeds its short validity", 409);
+      }
+    }
     if (paymentUserId && paymentId && validated.kind === "usdc_transfer") {
       await validateStellarPaymentAuthorization(
         paymentUserId,
@@ -207,11 +221,11 @@ export async function handleStellarRelayerRequest(
     );
     if (reservation.decision === "succeeded") {
       if (paymentUserId && paymentId) {
-        await assertStellarPaymentRequestLink(
-          paymentUserId,
-          paymentId,
-          identity.requestHash,
-        );
+        if (validated.kind === "cctp_approval") {
+          await assertStellarCctpApprovalRequestLink(paymentUserId, paymentId, identity.requestHash);
+        } else {
+          await assertStellarPaymentRequestLink(paymentUserId, paymentId, identity.requestHash);
+        }
       }
       return Response.json(
         { success: true, hash: reservation.transactionHash, status: "SUCCESS" },
@@ -233,6 +247,10 @@ export async function handleStellarRelayerRequest(
       );
     }
     reservedRequestHash = identity.requestHash;
+    if (validated.kind === "cctp_approval") {
+      if (!paymentUserId || !paymentId) throw new AuthenticationError("Approval requires an owned payment");
+      await recordStellarCctpApprovalAuthorization(paymentUserId, paymentId, identity.requestHash, validated);
+    }
     if (validated.kind === "usdc_transfer") {
       await assertActiveAgentPassForTransfer(validated);
       await recordStellarUsdcTransferAuthorization(identity.requestHash, validated);
@@ -305,6 +323,12 @@ export async function handleStellarRelayerRequest(
         transactionHash: result.hash,
         ledger: result.ledger,
       });
+      await completeStellarRelayerRequest(identity.requestHash, {
+        status: "succeeded",
+        transactionHash: result.hash,
+      });
+    } else if (validated.kind === "cctp_approval") {
+      await recordStellarCctpApprovalSubmission(identity.requestHash, result.hash);
       await completeStellarRelayerRequest(identity.requestHash, {
         status: "succeeded",
         transactionHash: result.hash,

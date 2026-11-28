@@ -11,6 +11,7 @@ import type {
   StellarCctpConfig,
   StellarCctpSourceKit,
 } from "../../stellar/cctp";
+import { normalizeStellarUsdcAmount } from "../../stellar/usdc";
 import type { Eip1193Provider } from "../../base/evm";
 import {
   apiMessage,
@@ -32,6 +33,127 @@ import type {
 export type AuthenticatedRequest = (input: string, init: RequestInit) => Promise<Response>;
 type ConversationPaymentKit = StellarUsdcTransferKit & SmartAccountLifecycleKit;
 type ConversationCctpKit = ConversationPaymentKit & StellarCctpSourceKit;
+
+export type CctpApprovalResult = {
+  readonly status: "approved" | "already_approved" | "status_unknown";
+  readonly message: string;
+};
+
+function stellarReviewGrossRaw(review: PaymentReview): bigint {
+  let total = normalizeStellarUsdcAmount(review.expectedRecipientAmount).raw;
+  for (const fee of review.fees) {
+    if (fee.kind === "provider" && fee.asset === "USDC" && fee.payer === "sender" &&
+        !/^0+(?:\.0+)?$/.test(fee.amount)) {
+      total += normalizeStellarUsdcAmount(fee.amount).raw;
+    }
+  }
+  return total;
+}
+
+/** Separate passkey action. The browser presents exact approval terms before signing. */
+export async function approveConversationCctpAllowance(
+  review: PaymentReview,
+  input: {
+    readonly config: SmartAccountPublicConfig | null;
+    readonly smartAccount: ConnectedSmartAccount | null;
+    readonly request: AuthenticatedRequest;
+    readonly createKit: (config: SmartAccountPublicConfig) => ConversationCctpKit;
+    readonly restoreAccount: (kit: ConversationCctpKit) => Promise<ConnectedSmartAccount | null>;
+    readonly submitApproval: (input: {
+      readonly kit: ConversationCctpKit;
+      readonly config: StellarCctpConfig;
+      readonly amount: string;
+      readonly expirationLedger: number;
+    }) => Promise<{ readonly txHash: string }>;
+    readonly confirmReview: (details: string) => boolean;
+  },
+): Promise<CctpApprovalResult> {
+  if (review.routeId !== "stellar_to_base" || review.status !== "awaiting_confirmation" ||
+      !input.config || !input.smartAccount) {
+    throw new Error("Only an exact, unsubmitted Stellar-to-Base payment can request Circle approval.");
+  }
+  const response = await input.request("/api/payments/stellar/cctp/approval/authorize", {
+    method: "POST", credentials: "same-origin",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ paymentId: review.id }),
+  });
+  const payload: unknown = await response.json();
+  if (response.ok && typeof payload === "object" && payload !== null &&
+      "status" in payload && payload.status === "already_approved") {
+    return { status: "already_approved", message: "The exact Circle allowance is already sufficient. Confirm this payment separately when ready." };
+  }
+  const data = payload && typeof payload === "object" && !Array.isArray(payload)
+    ? payload as Record<string, unknown> : null;
+  const approval = data?.approval && typeof data.approval === "object" && !Array.isArray(data.approval)
+    ? data.approval as Record<string, unknown> : null;
+  if (!response.ok || data?.status !== "approval_authorization_ready" || !approval ||
+      approval.paymentId !== review.id || typeof approval.owner !== "string" ||
+      typeof approval.spender !== "string" || typeof approval.amount !== "string" ||
+      typeof approval.expirationLedger !== "number" ||
+      !Number.isSafeInteger(approval.expirationLedger)) {
+    throw new Error(apiMessage(payload, "The exact Circle approval could not be prepared."));
+  }
+  const configResponse = await input.request("/api/stellar/cctp/config", {
+    cache: "no-store", credentials: "same-origin",
+  });
+  const configPayload: unknown = await configResponse.json();
+  const cctpConfig = configResponse.ok ? parseStellarCctpConfig(configPayload) : null;
+  if (!cctpConfig || approval.spender !== cctpConfig.tokenMessenger ||
+      approval.owner !== input.smartAccount.contractId ||
+      normalizeStellarUsdcAmount(approval.amount).raw !== stellarReviewGrossRaw(review)) {
+    throw new Error("Circle approval terms do not match this verified wallet and payment review.");
+  }
+  const approved = input.confirmReview(
+    `Approve exactly ${approval.amount} Stellar Testnet USDC for Circle TokenMessenger ${approval.spender}?\n\n` +
+    `Owner: ${approval.owner}\nPayment: ${review.id}\nAllowance expires at Stellar ledger ${approval.expirationLedger} (about one hour).\n\n` +
+    "This approval does not burn or send USDC. The payment requires a separate passkey confirmation after on-chain allowance is verified.",
+  );
+  if (!approved) throw new Error("Circle approval cancelled. No transaction was submitted.");
+  const kit = input.createKit({ ...input.config, relayerUrl: "/api/stellar/relayer/payment" });
+  const restored = await input.restoreAccount(kit);
+  if (!restored || restored.contractId !== approval.owner) {
+    throw new Error("The active passkey does not match the verified Stellar source wallet.");
+  }
+  let transactionHash: string;
+  try {
+    const submitted = await input.submitApproval({
+      kit, config: cctpConfig, amount: approval.amount,
+      expirationLedger: approval.expirationLedger,
+    });
+    transactionHash = submitted.txHash;
+  } catch {
+    return {
+      status: "status_unknown",
+      message: "Approval submission returned no verifiable result. Check the on-chain allowance before trying again; no burn was requested.",
+    };
+  }
+  let allowanceVerified = false;
+  try {
+    const statusResponse = await input.request(
+      `/api/payments/stellar/cctp/approval/authorize?id=${encodeURIComponent(review.id)}`,
+      { cache: "no-store", credentials: "same-origin" },
+    );
+    const statusPayload: unknown = await statusResponse.json();
+    allowanceVerified = statusResponse.ok && Boolean(
+      statusPayload && typeof statusPayload === "object" && "status" in statusPayload &&
+      statusPayload.status === "ready" && "amount" in statusPayload &&
+      typeof statusPayload.amount === "string" &&
+      normalizeStellarUsdcAmount(statusPayload.amount).raw === stellarReviewGrossRaw(review),
+    );
+  } catch {
+    allowanceVerified = false;
+  }
+  if (!allowanceVerified) {
+    return {
+      status: "status_unknown",
+      message: `Approval transaction ${transactionHash} finalized, but the exact on-chain allowance could not be verified. Check it before confirming payment.`,
+    };
+  }
+  return {
+    status: "approved",
+    message: `The exact Circle allowance is verified on Stellar transaction ${transactionHash}. The USDC burn has not been submitted; confirm this payment separately.`,
+  };
+}
 
 function equalAmount(left: string, right: string): boolean {
   const normalize = (value: string) => {
