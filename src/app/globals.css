@@ -2721,6 +2721,12 @@ h2 {
   color: #035fe6;
 }
 
+.timeline-status-banner.awaiting-confirmation {
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  color: #475569;
+}
+
 .timeline-status-banner.success {
   background: #eafaf7;
   border: 1px solid var(--proof-border);
@@ -3616,6 +3622,11 @@ h2 {
 .status-badge.in-progress {
   background: #f0f7ff;
   color: #035fe6;
+}
+
+.status-badge.awaiting-confirmation {
+  background: #f1f5f9;
+  color: #475569;
 }
 
 .status-mini-icon {

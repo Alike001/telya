@@ -165,6 +165,15 @@ export function PaymentProgressTimeline({
             </p>
           </div>
         </div>
+      ) : payment.status === "awaiting_confirmation" &&
+          !payment.sourceTransaction && !payment.destinationTransaction ? (
+        <div className="timeline-status-banner awaiting-confirmation">
+          <Clock className="status-banner-icon" />
+          <div className="banner-text">
+            <strong>Awaiting Your Confirmation</strong>
+            <p>No source transaction is recorded. Refreshing this timeline cannot submit a payment.</p>
+          </div>
+        </div>
       ) : timeline.isStalled ? (
         <div className="timeline-status-banner stalled">
           <AlertTriangle className="status-banner-icon" />
